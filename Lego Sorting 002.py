@@ -230,6 +230,31 @@ def send_to_brickognize_api(file_name):
     except Exception as e:
         return {"error": f"Unexpected error: {str(e)}"}
 
+def attribute_piece(piece_identity, confidence_threshold=0.7):
+    """
+    Assigns a piece to its category based on the Brickognize API results.
+
+    Args:
+    piece_identity (dict): The dictionary containing 'id', 'name', and 'score'.
+    confidence_threshold (float): The minimum confidence score to proceed.
+
+    Returns:
+    str: The category the piece belongs to, or an error message if it cannot be classified.
+    """
+    if piece_identity.get("score", 0) < confidence_threshold:
+        return "Error: Confidence score too low."
+
+    piece_id = piece_identity.get("id")
+    if not piece_id:
+        return "Error: Piece ID is missing."
+
+    for category, subcategories in lego_piece_dict.items():
+        for subcategory, pieces in subcategories.items():
+            if piece_id in pieces:
+                return f"{category} -> {subcategory}"
+
+    return "Error: Piece not found in dictionary."
+
 def image_capture(directory="LegoPictures"):
     directory = os.path.abspath(directory)
     if not os.path.exists(directory):
@@ -246,9 +271,14 @@ def image_capture(directory="LegoPictures"):
                 cv2.imwrite(filename, frame)
                 print(f"Image saved to {filename}")
 
-                # Send to Brickognize API and print result
+                # Send to Brickognize API and process result
                 result = send_to_brickognize_api(filename)
-                print("Piece identification:", result)
+                if "error" in result:
+                    print(result["error"])
+                else:
+                    category = attribute_piece(result)
+                    print("Piece identification:", result)
+                    print("Assigned Category:", category)
                 count += 1
 
     cap = cv2.VideoCapture(0)
