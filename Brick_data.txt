@@ -1,0 +1,38 @@
+Lego Sorting Session Summary
+Sorting Map Used: technic
+
+Lego0:
+  id: 32072
+  name: technic knob cog / gear / wheel with axle hole (+ orientation)
+  category: technic
+  score: 0.9530380964279175
+  sort_category: Other Technics
+
+Lego1:
+  id: 32524
+  name: technic, liftarm thick 1 x 7
+  category: technic, liftarm
+  score: 0.9370512962341309
+  sort_category: Technic Liftarms
+
+Lego2:
+  id: 6558
+  name: technic, pin 3l with friction ridges
+  category: technic, pin
+  score: 0.9784271717071533
+  sort_category: Technic Axles and Pins
+
+Lego3:
+  id: 3706
+  name: technic, axle  6l
+  category: technic, axle
+  score: 0.8350897431373596
+  sort_category: Technic Axles and Pins
+
+Lego4:
+  id: 98577
+  name: technic, liftarm, modified ball joint middle 1 x 3
+  category: technic, liftarm
+  score: 0.952937126159668
+  sort_category: Technic Liftarms
+
