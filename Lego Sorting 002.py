@@ -239,21 +239,25 @@ def attribute_piece(piece_identity, confidence_threshold=0.7):
     confidence_threshold (float): The minimum confidence score to proceed.
 
     Returns:
-    str: The category the piece belongs to, or an error message if it cannot be classified.
+    dict: Updated piece_identity dictionary including the category.
     """
     if piece_identity.get("score", 0) < confidence_threshold:
-        return "Error: Confidence score too low."
+        piece_identity["category"] = "Error: Confidence score too low."
+        return piece_identity
 
     piece_id = piece_identity.get("id")
     if not piece_id:
-        return "Error: Piece ID is missing."
+        piece_identity["category"] = "Error: Piece ID is missing."
+        return piece_identity
 
     for category, subcategories in lego_piece_dict.items():
         for subcategory, pieces in subcategories.items():
             if piece_id in pieces:
-                return f"{category} -> {subcategory}"
+                piece_identity["category"] = f"{category} -> {subcategory}"
+                return piece_identity
 
-    return "Error: Piece not found in dictionary."
+    piece_identity["category"] = "Error: Piece not found in dictionary."
+    return piece_identity
 
 def image_capture(directory="LegoPictures"):
     directory = os.path.abspath(directory)
@@ -276,9 +280,8 @@ def image_capture(directory="LegoPictures"):
                 if "error" in result:
                     print(result["error"])
                 else:
-                    category = attribute_piece(result)
+                    result = attribute_piece(result)
                     print("Piece identification:", result)
-                    print("Assigned Category:", category)
                 count += 1
 
     cap = cv2.VideoCapture(0)
