@@ -1,181 +1,34 @@
 import requests
-import json
+import csv
 import cv2
 import os
 
-lego_piece_dict = {
-    "Basic": {
-        "BASIC-brick": {
-            "1x1": [],
-            "1x2": [],
-            "1x": [],
-            "Tall": []
-        },
-        "BASIC-plate": {
-            "1x1": [],
-            "1x2": [],
-            "1x": [],
-            "2x": [],
-            "3x": [],
-            "4x": [],
-            "6x": []
-        },
-        "BASIC-tile": []
-    },
-    "Wall": {
-        "WALL-panel": [],
-        "WALL-window_door": [],
-        "WALL-fence": [],
-        "WALL-decorative": [],
-        "WALL-groove_rail": [],
-        "WALL-stairs": []
-    },
-    "SNOT": {
-        "SNOT-brick": [],
-        "SNOT-jumper": [],
-        "SNOT-bracket": []
-    },
-    "Clip": {
-        "CLIP-bar": [],
-        "CLIP-handle": [],
-        "CLIP-flag": [],
-        "CLIP-clip": [],
-        "CLIP-door": [],
-        "CLIP-flexible": [],
-        "CLIP-other": []
-    },
-    "Hinge": {
-        "HINGE-click_brick": [],
-        "HINGE-hinge": [],
-        "HINGE-turntable": [],
-        "HINGE-click_plate": [],
-        "HINGE-click_other": []
-    },
-    "Socket": {
-        "SOCKET-towball": [],
-        "SOCKET-ball": [],
-        "SOCKET-click": []
-    },
-    "Angle": {
-        "ANGLE-slope_55_65_75": [],
-        "ANGLE-slope_45": [],
-        "ANGLE-slope_33": [],
-        "ANGLE-slope_10_18_30": [],
-        "ANGLE-slope_inverted": [],
-        "ANGLE-windscreen": [],
-        "ANGLE-wedge_plate": [],
-        "ANGLE-wedge_tile": [],
-        "ANGLE-wedge_brick": [],
-        "ANGLE-wedge_nose": [],
-        "ANGLE-wedge_inverted": []
-    },
-    "Curved": {
-        "CURVED-plate": [],
-        "CURVED-brick": [],
-        "CURVED-tile": [],
-        "CURVED-cylinder": [],
-        "CURVED-doubleplate": [],
-        "CURVED-curved": [],
-        "CURVED-arch_bow": [],
-        "CURVED-dish_dome": [],
-        "CURVED-cone": [],
-        "CURVED-ball": [],
-        "CURVED-heart_star": [],
-        "CURVED-mudguard": [],
-        "CURVED-wedge": [],
-        "CURVED-other": []
-    },
-    "Vehicle": {
-        "VEHICLE-wheel": [],
-        "VEHICLE-pin": [],
-        "VEHICLE-bracket": [],
-        "VEHICLE-body": [],
-        "VEHICLE-train": []
-    },
-    "Minifig": {
-        "MINIFIG-CATEGORY-animals": [],
-        "MINIFIG-minifig": [],
-        "MINIFIG-nanofig": [],
-        "MINIFIG-CATEGORY-accessories": [],
-        "MINIFIG-CATEGORY-clothing_hair": [],
-        "MINIFIG-minidoll": [],
-        "MINIFIG-CATEGORY-weapons": [],
-        "MINIFIG-hair-accessory": [],
-        "MINIFIG-food_drink": [],
-        "MINIFIG-footwear": [],
-        "MINIFIG-tools_other": [],
-        "MINIFIG-clothing": [],
-        "MINIFIG-container_seat": [],
-        "MINIFIG-weapon": [],
-        "MINIFIG-transportation": []
-    },
-    "Nature": {
-        "NATURE-elemental": [],
-        "NATURE-flower": [],
-        "NATURE-plant": [],
-        "NATURE-produce": [],
-        "NATURE-barb_horn_tail": [],
-        "NATURE-tooth": []
-    },
-    "Technic": {
-        "TECHNIC-brick": [],
-        "TECHNIC-plate": [],
-        "TECHNIC-liftarm": [],
-        "TECHNIC-brick-round": [],
-        "TECHNIC-frame": [],
-        "TECHNIC-panel": [],
-        "TECHNIC-axle": [],
-        "TECHNIC-pin": [],
-        "TECHNIC-connector": [],
-        "TECHNIC-hub": [],
-        "TECHNIC-gears": [],
-        "TECHNIC-rack": [],
-        "TECHNIC-other": [],
-        "TECHNIC-mechanical": [],
-        "TECHNIC-link": [],
-        "TECHNIC-steering": [],
-        "TECHNIC-engine": [],
-        "TECHNIC-ball_socket": [],
-        "TECHNIC-blade_propeller": []
-    },
-    "Electronics": {
-        "ELECTRONICS-hub": [],
-        "ELECTRONICS-motors": [],
-        "ELECTRONICS-sensors_accessories": [],
-        "ELECTRONICS-CATEGORIES": []
-    },
-    "Other": {
-        "OTHER-railing_ladder": [],
-        "OTHER-shooter": [],
-        "OTHER-structural": [],
-        "OTHER-miscellaneous": [],
-        "OTHER-chain_string": []
-    },
-    "Retired": {
-        "RETIRED-BASIC": [],
-        "RETIRED-WALL": [],
-        "RETIRED-SNOT": [],
-        "RETIRED-CLIP": [],
-        "RETIRED-SOCKET-ball": [],
-        "RETIRED-SOCKET-click": [],
-        "RETIRED-ANGLE": [],
-        "RETIRED-HINGE": [],
-        "RETIRED-TECHNIC": [],
-        "RETIRED-CURVE": [],
-        "RETIRED-MINIFIGURE": [],
-        "RETIRED-NATURE": [],
-        "RETIRED-VEHICLE": [],
-        "RETIRED-ELECTRONICS": []
-    },
-    "Duplo": {
-        "DUPLO-brick": [],
-        "DUPLO-plate": [],
-        "DUPLO-angle": [],
-        "DUPLO-other": [],
-        "DUPLO-curved": [],
-        "QUATRO": []
-    }
-}
+
+def create_lego_dictionary(filepath='Bricklink ID Name Category.csv'):
+    """
+    Creates a dictionary mapping Lego piece IDs to their categories and names.
+
+    Args:
+        filepath (str): Path to the CSV file containing Lego piece information
+
+    Returns:
+        dict: Dictionary with piece IDs as keys and tuples of (category, name) as values
+    """
+    lego_dict = {}
+
+    try:
+        with open(filepath, 'r', encoding='utf-8') as file:
+            csv_reader = csv.DictReader(file)
+            for row in csv_reader:
+                # Store both category and name for each piece ID
+                lego_dict[row['ID']] = (row['Category'], row['Name'])
+
+    except FileNotFoundError:
+        print(f"Error: Could not find file at {filepath}")
+    except Exception as e:
+        print(f"Error reading CSV file: {e}")
+
+    return lego_dict
 
 def send_to_brickognize_api(file_name):
     """
@@ -250,11 +103,11 @@ def attribute_piece(piece_identity, confidence_threshold=0.7):
         piece_identity["category"] = "Error: Piece ID is missing."
         return piece_identity
 
-    for category, subcategories in lego_piece_dict.items():
-        for subcategory, pieces in subcategories.items():
-            if piece_id in pieces:
-                piece_identity["category"] = f"{category} -> {subcategory}"
-                return piece_identity
+    if piece_id in lego_dict:
+        category, name = lego_dict[piece_id]
+        piece_identity["category"] = category
+        piece_identity["name"] = name
+        return piece_identity
 
     piece_identity["category"] = "Error: Piece not found in dictionary."
     return piece_identity
@@ -302,4 +155,5 @@ def image_capture(directory="LegoPictures"):
     cv2.destroyAllWindows()
 
 # Example usage
+lego_dict = create_lego_dictionary('Bricklink ID Name Category.csv')
 image_capture()
