@@ -1,146 +1,29 @@
-import requests
-import csv
 import cv2
+import csv
 import os
 import datetime
+import requests
 
-# Define the main category mappings as a constant dictionary
-CATEGORY_MAPPING = {
-    'BASIC_ELEMENTS': [
-        'Brick',
-        'Plate',
-        'Tile',
-        'Tile, Round',
-        'Cylinder',
-        'Brick, Modified',
-        'Plate, Round',
-    ],
-    'TECHNIC_COMPONENTS': [
-        'Technic',
-        'Technic, Connector',
-        'Technic, Gear',
-        'Technic, Panel',
-        'Technic, Liftarm',
-        'Technic, Link',
-        'Technic, Plate',
-        'Technic, Disk',
-        'Technic, Axle',
-        'Technic, Pin',
-        'Technic, Brick',
-    ],
-    'ANGLED_ELEMENTS': [
-        'Slope',
-        'Slope, Curved',
-        'Slope, Inverted',
-        'Wedge',
-        'Wedge, Plate',
-        'Roof',
-        'Arch',
-        'Cone',
-        'Dish',
-    ],
-    'STRUCTURAL_COMPONENTS': [
-        'Support',
-        'Panel',
-        'Bracket',
-        'Bar',
-        'Ladder',
-        'Stairs',
-        'Fence',
-        'Turntable',
-    ],
-    'VEHICLE_PARTS': [
-        'Vehicle',
-        'Vehicle, Base',
-        'Propeller',
-        'Boat',
-        'Crane',
-    ],
-    'WINDOWS_AND_DOORS': [
-        'Window',
-        'Door',
-        'Windscreen',
-    ],
-    'SPECIALTY_ITEMS': [
-        'Container',
-        'Plant',
-        'Rock',
-        'Hinge',
-        'Baseplate',
-    ]
+# Primary category to bin mapping
+PRIMARY_CATEGORIES = {
+    'Basic': 0,
+    'Wall': 1,
+    'SNOT': 2,
+    'Minifig': 3,
+    'Clip': 4,
+    'Hinge': 5,
+    'Angle': 6,
+    'Vehicle': 7,
+    'Curved': 8
 }
 
-# Define bin mapping as a constant dictionary
-BIN_MAPPING = {
-    'BASIC_ELEMENTS': 0,
-    'TECHNIC_COMPONENTS': 1,
-    'ANGLED_ELEMENTS': 2,
-    'STRUCTURAL_COMPONENTS': 3,
-    'VEHICLE_PARTS': 4,
-    'WINDOWS_AND_DOORS': 5,
-    'SPECIALTY_ITEMS': 6
-}
 
-# Create reverse lookup dictionary for finding main categories
-REVERSE_LOOKUP = {}
-for main_cat, subcats in CATEGORY_MAPPING.items():
-    for subcat in subcats:
-        REVERSE_LOOKUP[subcat] = main_cat
-
-
-def get_all_categories():
-    """
-    Returns list of all main categories.
-
-    Returns:
-        list: All main category names
-    """
-    return list(CATEGORY_MAPPING.keys())
-
-
-def get_subcategories(main_category):
-    """
-    Returns list of subcategories for a given main category.
-
-    Args:
-        main_category (str): Name of the main category
-
-    Returns:
-        list: Subcategories for the given main category, or empty list if not found
-    """
-    return CATEGORY_MAPPING.get(main_category, [])
-
-
-def get_bin_number(main_category):
-    """
-    Maps main category to bin number (0-7).
-    Bin 7 is reserved for errors and unrecognized categories.
-
-    Args:
-        main_category (str): Name of the main category
-
-    Returns:
-        int: Bin number (0-7)
-    """
-    return BIN_MAPPING.get(main_category, 7)
-
-
-def get_main_category(subcategory):
-    """
-    Finds the main category for a given subcategory.
-
-    Args:
-        subcategory (str): Name of the subcategory
-
-    Returns:
-        str: Main category name, or 'SPECIALTY_ITEMS' if not found
-    """
-    return REVERSE_LOOKUP.get(subcategory, 'SPECIALTY_ITEMS')
-
-
-def create_lego_dictionary(filepath='Bricklink ID Name Category.csv'):
+def create_lego_dictionary(filepath='Lego_Categories.csv'):
     """
     Creates a dictionary mapping Lego piece IDs to their categories and names.
+
+    Returns:
+        dict: Dictionary with Element_ID as key and piece information as value
     """
     lego_dict = {}
 
@@ -148,7 +31,11 @@ def create_lego_dictionary(filepath='Bricklink ID Name Category.csv'):
         with open(filepath, 'r', encoding='utf-8') as file:
             csv_reader = csv.DictReader(file)
             for row in csv_reader:
-                lego_dict[row['ID']] = (row['Category'], row['Name'])
+                lego_dict[row['element_id']] = {
+                    'name': row['name'],
+                    'primary_category': row['primary_category'],
+                    'secondary_category': row['secondary_category']
+                }
     except FileNotFoundError:
         print(f"Error: Could not find file at {filepath}")
     except Exception as e:
@@ -157,15 +44,60 @@ def create_lego_dictionary(filepath='Bricklink ID Name Category.csv'):
     return lego_dict
 
 
+def get_secondary_categories(primary_category):
+    """
+    Returns list of secondary categories for a given primary category.
+    """
+    secondary_categories = {
+        'Basic': ['Brick', 'Plate', 'Tile'],
+        'Wall': ['Decorative', 'Groove_Rail', 'Panel', 'Window', 'Door', 'Stairs', 'Fence'],
+        'SNOT': ['Bracket', 'Brick', 'Jumper'],
+        'Minifig': ['Clothing', 'Body'],
+        'Clip': ['Bar', 'Clip', 'Flag', 'Handle', 'Door', 'Flexible'],
+        'Hinge': ['Click_brick', 'Click_plate', 'Click-other', 'Hinge', 'Turntable',
+                  'Socket_ball', 'Socket-click', 'Socket-towball'],
+        'Angle': ['Wedge-brick', 'Wedge-plate', 'Wedge-tile', 'Wedge-nose',
+                  'Slope-10-18-30', 'Slope-33', 'Slope-45', 'Slope-55-65-75'],
+        'Vehicle': ['Windscreen', 'Mudguard'],
+        'Curved': ['plate', 'doubleplate', 'brick', 'tile', 'clyinder', 'Cone',
+                   'Arch_bow', 'Dish_done', 'Curved', 'Wedge', 'Ball', 'Heart_star', 'Other']
+    }
+    return secondary_categories.get(primary_category, [])
+
+
+def get_bin_number(piece_info, sort_type, target_category=None):
+    """
+    Determines bin number based on piece categories and sort type.
+
+    Args:
+        piece_info (dict): Piece information including categories
+        sort_type (str): 'primary' or 'secondary'
+        target_category (str): Target primary category for secondary sorting
+
+    Returns:
+        int: Bin number (0-8, or 9 for unknown/error)
+    """
+    if sort_type == 'primary':
+        return PRIMARY_CATEGORIES.get(piece_info['primary_category'], 9)
+
+    elif sort_type == 'secondary' and target_category:
+        if piece_info['primary_category'] != target_category:
+            return 9
+
+        valid_secondaries = get_secondary_categories(target_category)
+        if piece_info['secondary_category'] in valid_secondaries:
+            return valid_secondaries.index(piece_info['secondary_category']) % 9
+
+    return 9
+
+
 def send_to_brickognize_api(file_name):
     """
-    Sends an image to the Brickognize API for piece identification.
+    Sends image to Brickognize API for piece identification.
     """
     url = "https://api.brickognize.com/predict/"
     valid_extensions = ['.jpg', '.jpeg', '.png', '.gif']
 
-    # Validate file
-    file_name = os.path.abspath(file_name)
     if not os.path.isfile(file_name):
         return {"error": f"File not found: {file_name}"}
     if os.path.getsize(file_name) == 0:
@@ -173,7 +105,6 @@ def send_to_brickognize_api(file_name):
     if not any(file_name.lower().endswith(ext) for ext in valid_extensions):
         return {"error": f"Invalid file type. Allowed: {', '.join(valid_extensions)}"}
 
-    # Send request to API
     try:
         with open(file_name, "rb") as image_file:
             files = {"query_image": (file_name, image_file, "image/jpeg")}
@@ -197,46 +128,12 @@ def send_to_brickognize_api(file_name):
         return {"error": f"Request error: {str(e)}"}
 
 
-def get_sorting_mode():
-    """
-    Prompts user to select sorting mode and category if needed.
-    """
-    while True:
-        mode = input("\nSelect sorting mode:\n1: Rough Sort (8 categories)\n2: Detailed Sort\nEnter 1 or 2: ").strip()
-
-        if mode not in ['1', '2']:
-            print("Invalid input. Please enter 1 or 2.")
-            continue
-
-        if mode == '1':
-            return 'rough', None
-        else:
-            # Get rough category for detailed sort
-            categories = get_all_categories()
-
-            print("\nAvailable categories for detailed sort:")
-            for i, category in enumerate(categories, 1):
-                print(f"{i}: {category}")
-
-            while True:
-                try:
-                    cat_num = int(input("\nEnter category number: "))
-                    if 1 <= cat_num <= len(categories):
-                        return 'detailed', categories[cat_num - 1]
-                    print("Invalid category number.")
-                except ValueError:
-                    print("Please enter a valid number.")
-
-
 def log_missing_piece(piece_data):
     """
     Logs information about pieces not found in the dictionary.
-
-    Args:
-        piece_data (dict): Dictionary containing piece information
     """
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_file = "Missing_from_dictionary.txt"
+    log_file = "Missing_Pieces.txt"
 
     try:
         with open(log_file, 'a') as f:
@@ -249,80 +146,17 @@ def log_missing_piece(piece_data):
         print(f"Error logging missing piece: {str(e)}")
 
 
-def attribute_piece(piece_identity, confidence_threshold=0.7, sort_mode=None, target_category=None):
+def initialize_camera(directory="LegoPictures"):
     """
-    Determines the appropriate bin for a piece based on its identity and sorting mode.
-    Logs pieces not found in dictionary and assigns them to bin 7.
+    Initialize camera and required directories.
     """
-    # Initialize result with provided piece information
-    result = {
-        "id": piece_identity.get("id"),
-        "name": piece_identity.get("name"),
-        "bin_number": 8,  # Default to error/catchall bin
-        "confidence": piece_identity.get("score", 0)
-    }
-
-    # Check confidence threshold
-    if result["confidence"] < confidence_threshold:
-        result["error"] = "Low confidence score"
-        return result
-
-    # Get piece category from dictionary
-    piece_id = result["id"]
-    if not piece_id or piece_id not in lego_dict:
-        # Log the missing piece
-        log_missing_piece(result)
-
-        # Update result for missing piece
-        result["bin_number"] = 7  # Assign to bin 7 for missing pieces
-        result["error"] = "Piece not found in dictionary - logged for review"
-        result["category"] = "Unknown"
-        result["rough_category"] = "Unknown"
-        return result
-
-    # Rest of the function remains the same for known pieces
-    category, name = lego_dict[piece_id]
-    main_category = get_main_category(category)
-
-    if sort_mode == 'rough':
-        result["bin_number"] = get_bin_number(main_category)
-    elif sort_mode == 'detailed':
-        if main_category == target_category:
-            subcategories = get_subcategories(target_category)
-            try:
-                result["bin_number"] = subcategories.index(category) % 8
-            except ValueError:
-                result["bin_number"] = 8
-        else:
-            result["bin_number"] = 8
-
-    result["category"] = category
-    result["rough_category"] = main_category
-    result["name"] = name
-
-    return result
-
-
-def initialize_image_capture(directory="LegoPictures"):
-    """
-    Initialize camera and required directories for image capture.
-
-    Args:
-        directory (str): Directory path for storing captured images
-
-    Returns:
-        tuple: (VideoCapture object, directory path, initial image count)
-    """
-    # Create directory if it doesn't exist
     directory = os.path.abspath(directory)
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    # Get next image number
     count = len([name for name in os.listdir(directory)
                  if name.startswith("Lego") and name.endswith(".jpg")]) + 1
 
-    # Initialize camera
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         raise RuntimeError("Failed to initialize camera")
@@ -330,87 +164,135 @@ def initialize_image_capture(directory="LegoPictures"):
     return cap, directory, count
 
 
-def capture_image(cap, directory, count):
+def capture_and_process_image(cap, directory, count, sort_type, target_category=None):
     """
-    Capture and save an image from the camera.
-
-    Args:
-        cap: OpenCV VideoCapture object
-        directory (str): Directory to save the image
-        count (int): Current image number
-
-    Returns:
-        tuple: (filename, success boolean, error message if any)
+    Capture image and process it through the sorting system.
     """
     ret, frame = cap.read()
     if not ret:
-        return None, False, "Failed to capture image"
+        return None, "Failed to capture image"
 
     filename = os.path.join(directory, f"Lego{count:03}.jpg")
     try:
         cv2.imwrite(filename, frame)
-        return filename, True, None
     except Exception as e:
-        return None, False, f"Failed to save image: {str(e)}"
+        return None, f"Failed to save image: {str(e)}"
 
-
-def process_image(filename, sort_mode=None, target_category=None):
-    """
-    Process captured image through Brickognize API and determine sorting.
-
-    Args:
-        filename (str): Path to the captured image
-        sort_mode (str): Sorting mode ('rough' or 'detailed')
-        target_category (str): Target category for detailed sorting
-
-    Returns:
-        dict: Processing results including bin number and piece information
-    """
     # Get piece identification from API
     api_result = send_to_brickognize_api(filename)
     if "error" in api_result:
-        return {"error": api_result["error"]}
+        return None, api_result["error"]
 
-    # Attribute piece to correct bin
-    result = attribute_piece(api_result, sort_mode=sort_mode,
-                             target_category=target_category)
+    # Process piece information
+    result = attribute_piece(api_result, sort_type, target_category)
+    return result, None
+
+
+def attribute_piece(piece_identity, sort_type, target_category=None):
+    """
+    Determines the appropriate bin for a piece.
+    """
+    result = {
+        "id": piece_identity.get("id"),
+        "bin_number": 9,
+        "confidence": piece_identity.get("score", 0)
+    }
+
+    # Check confidence threshold
+    if result["confidence"] < 0.7:  # Confidence threshold
+        result["error"] = "Low confidence score"
+        return result
+
+    # Get piece information from dictionary
+    piece_id = result["id"]
+    if not piece_id or piece_id not in lego_dict:
+        log_missing_piece(result)
+        result["error"] = "Piece not found in dictionary - logged for review"
+        return result
+
+    # Get piece information and determine bin
+    piece_info = lego_dict[piece_id]
+    result.update({
+        "element_id": piece_id,
+        "name": piece_info['name'],  # Add name from dictionary
+        "primary_category": piece_info['primary_category'],
+        "secondary_category": piece_info['secondary_category']
+    })
+
+    result["bin_number"] = get_bin_number(piece_info, sort_type, target_category)
     return result
 
 
-def run_image_capture(sort_mode=None, target_category=None):
+def get_sort_configuration():
     """
-    Main function to run the image capture and processing system.
+    Get sorting configuration from user.
+    """
+    while True:
+        print("\nSelect sorting type:")
+        print("1: Primary Sort (Sort by main categories)")
+        print("2: Secondary Sort (Sort specific category by subcategories)")
 
-    Args:
-        sort_mode (str): Sorting mode ('rough' or 'detailed')
-        target_category (str): Target category for detailed sorting
+        mode = input("Enter 1 or 2: ").strip()
+
+        if mode == '1':
+            return 'primary', None
+
+        elif mode == '2':
+            print("\nAvailable primary categories for secondary sorting:")
+            categories = list(PRIMARY_CATEGORIES.keys())
+            for i, category in enumerate(categories, 1):
+                print(f"{i}: {category}")
+                secondaries = get_secondary_categories(category)
+                print(f"   Secondary categories: {', '.join(secondaries)}")
+
+            while True:
+                try:
+                    cat_num = int(input("\nEnter primary category number: "))
+                    if 1 <= cat_num <= len(categories):
+                        return 'secondary', categories[cat_num - 1]
+                    print("Invalid category number.")
+                except ValueError:
+                    print("Please enter a valid number.")
+        else:
+            print("Invalid input. Please enter 1 or 2.")
+
+
+def main():
     """
+    Main program entry point.
+    """
+    global lego_dict
+    lego_dict = create_lego_dictionary()
+
+    # Get sort configuration
+    sort_type, target_category = get_sort_configuration()
+
+    print(f"\nInitializing {sort_type} sort", end="")
+    if target_category:
+        print(f" for {target_category}")
+    print("\nPress ESC to exit, click in window to capture image")
+
     try:
-        # Initialize capture system
-        cap, directory, count = initialize_image_capture()
+        # Initialize camera
+        cap, directory, count = initialize_camera()
         cv2.namedWindow("Capture")
 
         def capture_callback(event, x, y, flags, param):
-            """Callback function for mouse click event"""
             nonlocal count
             if event == cv2.EVENT_LBUTTONDOWN:
-                # Capture and save image
-                filename, success, error = capture_image(cap, directory, count)
-                if not success:
+                result, error = capture_and_process_image(
+                    cap, directory, count, sort_type, target_category)
+
+                if error:
                     print(f"Error: {error}")
-                    return
-
-                print(f"\nImage saved to {filename}")
-
-                # Process image
-                result = process_image(filename, sort_mode, target_category)
-                if "error" in result:
-                    print(f"Error: {result['error']}")
                 else:
-                    print("Piece identification:", result)
+                    print("\nPiece identified:")
+                    print(f"Element ID: {result['element_id']}")
+                    print(f"Name: {result['name']}")
+                    print(f"Primary Category: {result['primary_category']}")
+                    print(f"Secondary Category: {result['secondary_category']}")
                     print(f"Sort to bin: {result['bin_number']}")
-
-                count += 1
+                    count += 1
 
         cv2.setMouseCallback("Capture", capture_callback)
 
@@ -429,27 +311,9 @@ def run_image_capture(sort_mode=None, target_category=None):
         print(f"An error occurred: {str(e)}")
 
     finally:
-        # Cleanup
         if 'cap' in locals():
             cap.release()
         cv2.destroyAllWindows()
-
-
-def main():
-    """Main program entry point"""
-    global lego_dict
-    lego_dict = create_lego_dictionary()
-
-    # Get sorting mode and category
-    sort_mode, target_category = get_sorting_mode()
-
-    print(f"\nInitializing {sort_mode} sort", end="")
-    if target_category:
-        print(f" for {target_category}")
-    print("\nPress ESC to exit, click in window to capture image")
-
-    # Start image capture with new function
-    run_image_capture(sort_mode=sort_mode, target_category=target_category)
 
 
 if __name__ == "__main__":
