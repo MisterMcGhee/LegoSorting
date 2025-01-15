@@ -1,0 +1,12 @@
+{
+    "confidence_threshold": 0.7,
+    "api_url": "https://api.brickognize.com/predict/",
+    "image_directory": "LegoPictures",
+    "valid_extensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif"
+    ],
+    "csv_filepath": "Bricklink ID Name Category.csv"
+}
