@@ -4,6 +4,8 @@ import os
 import datetime
 import requests
 import numpy as np
+from dataclasses import dataclass
+from typing import Tuple, List, Dict
 from time import time
 
 
@@ -22,18 +24,19 @@ class CameraManager:
             raise RuntimeError("Failed to initialize camera")
 
     def capture_image(self):
-        """Captures and saves an image."""
+        """Captures and saves an image. Returns filename, current count, and any error."""
         ret, frame = self.cap.read()
         if not ret:
-            return None, "Failed to capture image"
+            return None, None, "Failed to capture image"
 
         filename = os.path.join(self.directory, f"Lego{self.count:03}.jpg")
         try:
             cv2.imwrite(filename, frame)
+            current_count = self.count  # Store current count before incrementing
             self.count += 1
-            return filename, None
+            return filename, current_count, None
         except Exception as e:
-            return None, f"Failed to save image: {str(e)}"
+            return None, None, f"Failed to save image: {str(e)}"
 
     def get_preview_frame(self):
         """Gets a frame for preview/detection without saving."""
@@ -43,91 +46,6 @@ class CameraManager:
     def cleanup(self):
         """Releases camera resources."""
         self.cap.release()
-
-
-class ConveyorLegoDetector:
-    def __init__(self, detection_zone_y=(200, 280), min_piece_area=1000, color_threshold=30):
-        """Initialize detector for conveyor belt setup."""
-        self.detection_zone = detection_zone_y
-        self.min_piece_area = min_piece_area
-        self.color_threshold = color_threshold
-        self.last_detection_time = time()
-        self.cooldown = 0.5  # Seconds between detections
-        self.belt_color = None
-
-    def calibrate(self, cap):
-        """Calibrate belt color using camera feed."""
-        print("Calibrating belt color... Please ensure no pieces are on the belt.")
-        samples = []
-        for _ in range(30):
-            ret, frame = cap.read()
-            if ret:
-                center_y = frame.shape[0] // 2
-                center_x = frame.shape[1] // 2
-                sample_region = frame[center_y - 10:center_y + 10, center_x - 10:center_x + 10]
-                samples.append(np.mean(sample_region, axis=(0, 1)))
-            cv2.waitKey(33)
-
-        self.belt_color = np.mean(samples, axis=0).astype(int)
-        print(f"Calibrated belt color (BGR): {self.belt_color}")
-
-    def detect_piece(self, frame):
-        """Detects if a Lego piece is in the detection zone."""
-        if self.belt_color is None:
-            return False
-
-        current_time = time()
-        if current_time - self.last_detection_time < self.cooldown:
-            return False
-
-        # Create mask for non-belt objects
-        detection_area = frame[self.detection_zone[0]:self.detection_zone[1], :]
-        color_diff = cv2.absdiff(detection_area, self.belt_color.reshape(1, 1, 3))
-        color_diff_sum = np.sum(color_diff, axis=2)
-        mask = (color_diff_sum > self.color_threshold).astype(np.uint8) * 255
-
-        # Clean up mask
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-        # Find contours
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        # Check for pieces in middle third
-        zone_height = self.detection_zone[1] - self.detection_zone[0]
-        middle_third = (zone_height // 3, 2 * zone_height // 3)
-
-        for contour in contours:
-            if cv2.contourArea(contour) > self.min_piece_area:
-                M = cv2.moments(contour)
-                if M["m00"] != 0:
-                    cy = int(M["m01"] / M["m00"])
-                    if middle_third[0] < cy < middle_third[1]:
-                        self.last_detection_time = current_time
-                        return True
-        return False
-
-    def draw_debug(self, frame):
-        """Draws debug visualization on the frame."""
-        debug_frame = frame.copy()
-        zone_height = self.detection_zone[1] - self.detection_zone[0]
-
-        # Draw full detection zone
-        cv2.rectangle(debug_frame,
-                      (0, self.detection_zone[0]),
-                      (frame.shape[1], self.detection_zone[1]),
-                      (0, 255, 0), 2)
-
-        # Draw middle third
-        middle_top = self.detection_zone[0] + zone_height // 3
-        middle_bottom = self.detection_zone[0] + 2 * zone_height // 3
-        cv2.rectangle(debug_frame,
-                      (0, middle_top),
-                      (frame.shape[1], middle_bottom),
-                      (255, 0, 0), 2)
-
-        return debug_frame
 
 
 class PieceIdentifier:
@@ -272,15 +190,309 @@ class PieceIdentifier:
             f.write("-" * 50)
 
 
+@dataclass
+class BeltColorProfile:
+    """Data class to store belt color calibration results"""
+    mean_color: np.ndarray
+    std_dev: np.ndarray
+    min_color: np.ndarray
+    max_color: np.ndarray
+    histograms: List
+    roi: Tuple[slice, slice]  # Stores the ROI coordinates for future reference
+
+
+class EnhancedConveyorCalibrator:
+    def __init__(self, grid_size=(5, 5), sample_size=10):
+        self.grid_size = grid_size
+        self.sample_size = sample_size
+        self.profile = None
+        self._selection_points = []
+
+    def calibrate(self, cap) -> BeltColorProfile:
+        """Main calibration routine"""
+        # Get user ROI selection
+        roi_frame = self._capture_clean_frame(cap)
+        roi = self._get_user_roi(roi_frame)
+
+        # Sample grid within ROI
+        samples = self._collect_grid_samples(roi_frame, roi)
+
+        # Create color profile
+        self.profile = self._create_color_profile(samples, roi)
+        return self.profile
+
+    def _capture_clean_frame(self, cap) -> np.ndarray:
+        """Capture a clear frame for calibration"""
+        for _ in range(5):  # Capture several frames to ensure clear image
+            ret, frame = cap.read()
+            if not ret:
+                raise RuntimeError("Failed to capture calibration frame")
+        return frame
+
+    def _mouse_callback(self, event, x, y, flags, param):
+        """Handle mouse events for ROI selection"""
+        if event == cv2.EVENT_LBUTTONDOWN:
+            if len(self._selection_points) < 2:
+                self._selection_points.append((x, y))
+
+    def _get_user_roi(self, frame) -> Tuple[slice, slice]:
+        """Get user-selected ROI through mouse clicks"""
+        window_name = "Select Belt Region - Click Upper Left and Lower Right Corners"
+        cv2.namedWindow(window_name)
+        cv2.setMouseCallback(window_name, self._mouse_callback)
+
+        instruction_frame = frame.copy()
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(instruction_frame,
+                    "Click Upper Left and Lower Right corners of belt region",
+                    (10, 30), font, 0.7, (0, 255, 0), 2)
+
+        while len(self._selection_points) < 2:
+            display = instruction_frame.copy()
+
+            # Draw first point if it exists
+            if len(self._selection_points) == 1:
+                cv2.circle(display, self._selection_points[0], 5, (0, 255, 0), -1)
+
+            cv2.imshow(window_name, display)
+            if cv2.waitKey(1) & 0xFF == 27:  # ESC to cancel
+                cv2.destroyWindow(window_name)
+                raise RuntimeError("ROI selection cancelled")
+
+        # Get final points and clean up
+        (x1, y1), (x2, y2) = self._selection_points
+        cv2.destroyWindow(window_name)
+
+        # Create slice objects for ROI
+        row_slice = slice(min(y1, y2), max(y1, y2))
+        col_slice = slice(min(x1, x2), max(x1, x2))
+
+        return (row_slice, col_slice)
+
+    def _collect_grid_samples(self, frame: np.ndarray, roi: Tuple[slice, slice]) -> List[np.ndarray]:
+        """Collect color samples in a grid pattern within the ROI"""
+        samples = []
+        roi_height = roi[0].stop - roi[0].start
+        roi_width = roi[1].stop - roi[1].start
+
+        # Calculate grid spacing
+        h_step = roi_height // (self.grid_size[0] + 1)
+        w_step = roi_width // (self.grid_size[1] + 1)
+
+        # Create debugging visualization
+        debug_frame = frame.copy()
+
+        # Sample points in grid pattern
+        for i in range(1, self.grid_size[0] + 1):
+            for j in range(1, self.grid_size[1] + 1):
+                # Calculate sample point center
+                y = roi[0].start + (i * h_step)
+                x = roi[1].start + (j * w_step)
+
+                # Get sample region
+                sample_region = frame[
+                                y - self.sample_size // 2:y + self.sample_size // 2,
+                                x - self.sample_size // 2:x + self.sample_size // 2
+                                ]
+
+                # Store sample
+                samples.append(np.mean(sample_region, axis=(0, 1)))
+
+                # Visualize sampling points
+                cv2.rectangle(debug_frame,
+                              (x - self.sample_size // 2, y - self.sample_size // 2),
+                              (x + self.sample_size // 2, y + self.sample_size // 2),
+                              (0, 255, 0), 1)
+
+        # Show sampling visualization
+        cv2.imshow("Sampling Grid", debug_frame)
+        cv2.waitKey(2000)  # Show for 2 seconds
+        cv2.destroyWindow("Sampling Grid")
+
+        return samples
+
+    def _create_color_profile(self, samples: List[np.ndarray], roi: Tuple[slice, slice]) -> BeltColorProfile:
+        """Create a color profile from collected samples"""
+        samples_array = np.array(samples)
+
+        # Compute histograms for each channel
+        histograms = []
+        for channel in range(3):  # BGR channels
+            hist = np.histogram(samples_array[:, channel], bins=32, range=(0, 256))
+            histograms.append(hist)
+
+        return BeltColorProfile(
+            mean_color=np.mean(samples_array, axis=0),
+            std_dev=np.std(samples_array, axis=0),
+            min_color=np.min(samples_array, axis=0),
+            max_color=np.max(samples_array, axis=0),
+            histograms=histograms,
+            roi=roi
+        )
+
+    def is_belt_color(self, pixel: np.ndarray) -> bool:
+        """Check if a pixel matches the belt color profile"""
+        if self.profile is None:
+            raise RuntimeError("Calibration profile not created")
+
+        # Check if pixel is within acceptable range
+        within_range = all(
+            self.profile.min_color[i] <= pixel[i] <= self.profile.max_color[i]
+            for i in range(3)
+        )
+
+        # Check if pixel is within standard deviation
+        within_std = all(
+            abs(pixel[i] - self.profile.mean_color[i]) <= 2 * self.profile.std_dev[i]
+            for i in range(3)
+        )
+
+        return within_range and within_std
+
+
+class ConveyorLegoDetector:
+    def __init__(self, min_piece_area=1000, color_threshold=30):
+        """Initialize detector with enhanced calibration."""
+        self.min_piece_area = min_piece_area
+        self.color_threshold = color_threshold
+        self.last_detection_time = time()
+        self.cooldown = 0.5  # Seconds between detections
+        self.calibrator = EnhancedConveyorCalibrator()
+        self.color_profile = None
+        self.last_mask = None
+        self.last_contours = None
+
+    def calibrate(self, cap):
+        """Calibrate using enhanced calibration system."""
+        print("Calibrating belt color... Please select the belt region.")
+        try:
+            self.color_profile = self.calibrator.calibrate(cap)
+            print(f"Calibrated belt color (BGR): {self.color_profile.mean_color}")
+        except Exception as e:
+            print(f"Calibration failed: {str(e)}")
+            raise
+
+    def detect_piece(self, roi_frame):
+        """Detects if a Lego piece is in the ROI frame."""
+        if self.color_profile is None:
+            print("Error: Belt not calibrated")
+            return False
+
+        try:
+            current_time = time()
+            if current_time - self.last_detection_time < self.cooldown:
+                return False
+
+            # Create mask for non-belt objects
+            height, width = roi_frame.shape[:2]
+            mask = np.zeros((height, width), dtype=np.uint8)
+
+            # Check each pixel in ROI
+            for y in range(height):
+                for x in range(width):
+                    pixel = roi_frame[y, x]
+                    if not self.calibrator.is_belt_color(pixel):
+                        mask[y, x] = 255
+
+            # Clean up mask
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+            self.last_mask = mask
+
+            # Find contours
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            self.last_contours = contours
+
+            # Check for pieces in middle third
+            middle_third = (height // 3, 2 * height // 3)
+
+            for contour in contours:
+                if cv2.contourArea(contour) > self.min_piece_area:
+                    M = cv2.moments(contour)
+                    if M["m00"] != 0:
+                        cy = int(M["m01"] / M["m00"])
+                        if middle_third[0] < cy < middle_third[1]:
+                            self.last_detection_time = current_time
+                            return True
+            return False
+
+        except Exception as e:
+            print(f"Error in detect_piece: {str(e)}")
+            return False
+    def draw_debug(self, frame):
+        """Draws debug visualization on the frame."""
+        try:
+            debug_frame = frame.copy()
+
+            if self.color_profile is None:
+                return debug_frame
+
+            roi = self.color_profile.roi
+            height, width = frame.shape[:2]
+
+            # Draw ROI
+            cv2.rectangle(debug_frame,
+                          (roi[1].start, roi[0].start),
+                          (roi[1].stop, roi[0].stop),
+                          (0, 255, 0), 2)  # Green
+
+            # Draw middle third of ROI
+            roi_height = roi[0].stop - roi[0].start
+            middle_top = roi[0].start + roi_height // 3
+            middle_bottom = roi[0].start + 2 * roi_height // 3
+            cv2.rectangle(debug_frame,
+                          (roi[1].start, middle_top),
+                          (roi[1].stop, middle_bottom),
+                          (255, 0, 0), 2)  # Blue
+
+            # Draw detected contours if available
+            if self.last_contours is not None:
+                for contour in self.last_contours:
+                    # Shift contour to match ROI position
+                    shifted_contour = contour + [roi[1].start, roi[0].start]
+                    cv2.drawContours(debug_frame, [shifted_contour], -1, (0, 0, 255), 2)
+
+            # Add text showing detector status
+            status_text = f"Threshold: {self.color_threshold}"
+            cv2.putText(debug_frame, status_text, (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            color_text = f"Belt BGR: {self.color_profile.mean_color}"
+            cv2.putText(debug_frame, color_text, (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            return debug_frame
+
+        except Exception as e:
+            print(f"Error in draw_debug: {str(e)}")
+            return frame
+
+
 class SortingManager:
     def __init__(self):
         self.camera = CameraManager()
         self.identifier = PieceIdentifier()
-        self.detector = ConveyorLegoDetector()  # Your piece detection class
+        self.detector = ConveyorLegoDetector()
 
     def run(self):
         """Main sorting loop."""
         try:
+            print("\nInitializing sorting system...")
+
+            # Show preview frame for belt region selection
+            print("Opening camera preview for belt region selection.")
+            print("Position the camera to view the belt clearly.")
+            print("Then select the region of the belt to monitor by clicking:")
+            print("1. Upper-left corner of belt region")
+            print("2. Lower-right corner of belt region")
+            print("\nPress ESC to exit")
+
+            # Initialize calibration
+            self.detector.calibrate(self.camera.cap)
+
+            print("\nCalibration complete!")
             print("\nSorting system ready. Press ESC to exit.")
 
             while True:
@@ -289,9 +501,13 @@ class SortingManager:
                     print("Failed to get preview frame")
                     break
 
-                if self.detector.detect_piece(frame):
+                # Only process the ROI for detection
+                roi = self.detector.color_profile.roi
+                roi_frame = frame[roi[0], roi[1]]
+
+                if self.detector.detect_piece(roi_frame):
                     # Capture and process piece
-                    image_path, error = self.camera.capture_image()
+                    image_path, image_count, error = self.camera.capture_image()
                     if error:
                         print(f"Capture error: {error}")
                         continue
@@ -301,11 +517,13 @@ class SortingManager:
                         print(f"Identification error: {error}")
                         continue
 
-                    print("\nPiece identified:")
-                    print(f"Element ID: {result['element_id']}")
-                    print(f"Name: {result['name']}")
-                    print(f"Primary Category: {result['primary_category']}")
-                    print(f"Secondary Category: {result['secondary_category']}")
+                    print(f"\nPiece #{image_count:03} identified:")
+                    print(f"Image: Lego{image_count:03}.jpg")
+                    print(f"Element ID: {result.get('element_id', 'Unknown')}")
+                    print(f"Name: {result.get('name', 'Unknown')}")
+                    print(f"Primary Category: {result.get('primary_category', 'Unknown')}")
+                    print(f"Secondary Category: {result.get('secondary_category', 'Unknown')}")
+                    print(f"Bin Number: {result.get('bin_number', 9)}")
 
                 # Show debug view
                 debug_frame = self.detector.draw_debug(frame)
@@ -319,10 +537,11 @@ class SortingManager:
 
     def cleanup(self):
         """Cleanup resources."""
-        self.camera.cleanup()
-        cv2.destroyAllWindows()
-
-
+        try:
+            self.camera.cleanup()
+            cv2.destroyAllWindows()
+        except Exception as e:
+            print(f"Error during cleanup: {str(e)}")
 # Main program
 if __name__ == "__main__":
     sorter = SortingManager()
