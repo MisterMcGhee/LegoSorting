@@ -20,7 +20,7 @@ class CameraManager:
         self.count = 1  # Start at 1 by default
         if os.path.exists(self.directory):
             existing_files = [f for f in os.listdir(self.directory)
-                            if f.startswith("Lego") and f.endswith(".jpg")]
+                              if f.startswith("Lego") and f.endswith(".jpg")]
             if existing_files:
                 # Extract numbers from filenames and find the highest
                 numbers = [int(f[4:7]) for f in existing_files]  # Lego001.jpg -> 1
@@ -209,13 +209,25 @@ class TrackedPiece:
 
 
 class TrackedLegoDetector:
-    def __init__(self, min_piece_area=1000):
+    def __init__(self, min_piece_area=300, max_piece_area=20000):
         self.min_piece_area = min_piece_area
+        self.max_piece_area = max_piece_area
         self.last_detection_time = time()
         self.tracked_pieces: List[TrackedPiece] = []
         self.next_piece_id = 1
-        self.buffer_percent = 0.01  # 5% buffer zones
-        self.crop_padding = 20  # Pixels of padding around cropped pieces
+        self.buffer_percent = 0.01
+        self.crop_padding = 20
+        self.detection_history = []
+        self.history_length = 3
+
+        # Initialize ROI-related attributes
+        self.roi = None
+        self.entry_zone = None
+        self.exit_zone = None
+        self.valid_zone = None
+
+        # Create debug windows
+        cv2.namedWindow('Debug View', cv2.WINDOW_NORMAL)
 
     def calibrate(self, frame):
         """Get user-selected ROI and calculate buffer zones"""
@@ -237,92 +249,130 @@ class TrackedLegoDetector:
         print(f"Valid zone: {self.valid_zone}")
         print(f"Exit buffer: {self.exit_zone}")
 
+    def _check_initialized(self):
+        """Check if the detector has been properly initialized"""
+        if self.roi is None:
+            raise RuntimeError("TrackedLegoDetector must be calibrated before use. Call calibrate() first.")
+
     def _preprocess_frame(self, frame):
-        """Extract and preprocess the ROI"""
-        # Extract ROI
+        """Preprocess frame optimized for magenta belt"""
+        self._check_initialized()
+
         x, y, w, h = self.roi
         roi = frame[y:y + h, x:x + w]
 
-        # Convert to grayscale
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        # Convert to HSV for better color separation
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-        # Apply Gaussian blur
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Create mask for magenta belt (to remove it)
+        # Magenta is around 150 in HSV
+        lower_magenta = np.array([140, 50, 50])
+        upper_magenta = np.array([170, 255, 255])
+        magenta_mask = cv2.inRange(hsv, lower_magenta, upper_magenta)
 
-        # Adaptive thresholding
-        thresh = cv2.adaptiveThreshold(
-            blurred, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV, 11, 2
-        )
+        # Invert mask to get pieces
+        piece_mask = cv2.bitwise_not(magenta_mask)
 
-        # Morphological operations to clean up
+        # Clean up noise
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+        cleaned = cv2.morphologyEx(piece_mask, cv2.MORPH_OPEN, kernel)
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel)
 
         return cleaned
 
     def _find_new_contours(self, mask):
-        """Find contours in the current frame"""
+        """Find contours with filtering for Lego pieces"""
         contours, _ = cv2.findContours(
             mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
         valid_contours = []
         for contour in contours:
+            area = cv2.contourArea(contour)
+
             # Filter by area
-            if cv2.contourArea(contour) < self.min_piece_area:
+            if area < self.min_piece_area or area > self.max_piece_area:
                 continue
 
             # Get bounding box
             x, y, w, h = cv2.boundingRect(contour)
 
-            if self.roi[0] <= x < self.roi[0] + self.roi[2]:  # Entire ROI
+            # Calculate aspect ratio
+            aspect_ratio = float(w) / h
+
+            # Less strict aspect ratio for Lego pieces
+            if aspect_ratio > 4 or aspect_ratio < 0.25:
+                continue
+
+            # Verify position relative to ROI
+            if self.roi[0] <= x < self.roi[0] + self.roi[2]:
                 valid_contours.append((contour, (x, y, w, h)))
 
         return valid_contours
 
     def _match_and_update_tracks(self, new_contours):
-        """Match new contours to existing tracks or create new tracks"""
-        # Update existing tracks
-        for piece in self.tracked_pieces[:]:
-            # Remove pieces that have left the ROI
-            old_x = piece.bounding_box[0]
-            if old_x >= self.exit_zone[0]:
-                self.tracked_pieces.remove(piece)
-                continue
+        """Match new contours to existing tracks and update"""
+        current_time = time()
+
+        # Remove old tracks
+        self.tracked_pieces = [piece for piece in self.tracked_pieces
+                               if current_time - piece.entry_time < 5.0
+                               and piece.bounding_box[0] < self.exit_zone[0]]
 
         # Match new contours to existing tracks or create new ones
         for contour, bbox in new_contours:
-            x = bbox[0]
+            x, y, w, h = bbox
             matched = False
 
-            # Don't track new pieces if they're already past entry zone
-            if x > self.entry_zone[1]:
-                continue
+            # Try to match with existing tracks
+            for piece in self.tracked_pieces:
+                old_x, old_y, old_w, old_h = piece.bounding_box
 
-            # Create new track
-            new_piece = TrackedPiece(
-                id=self.next_piece_id,
-                contour=contour,
-                bounding_box=bbox,
-                entry_time=time()
-            )
-            self.tracked_pieces.append(new_piece)
-            self.next_piece_id += 1
+                # Calculate center points
+                new_center = (x + w / 2, y + h / 2)
+                old_center = (old_x + old_w / 2, old_y + old_h / 2)
+
+                # Check if centers are close enough
+                distance = np.sqrt((new_center[0] - old_center[0]) ** 2 +
+                                   (new_center[1] - old_center[1]) ** 2)
+
+                if distance < max(w, h) * 0.7:  # Increased movement threshold
+                    piece.contour = contour
+                    piece.bounding_box = bbox
+                    matched = True
+                    break
+
+            if not matched and x <= self.entry_zone[1]:
+                # Create new track
+                new_piece = TrackedPiece(
+                    id=self.next_piece_id,
+                    contour=contour,
+                    bounding_box=bbox,
+                    entry_time=current_time
+                )
+                self.tracked_pieces.append(new_piece)
+                self.next_piece_id += 1
 
     def _should_capture(self, piece: TrackedPiece) -> bool:
-        """Determine if the piece should be captured."""
+        """Determine if piece should be captured"""
         if piece.captured:
-            return False  # Already captured
+            return False
 
         x, y, w, h = piece.bounding_box
-        piece_left = x
-        piece_right = x + w
+        piece_center_x = x + w / 2
 
-        # Capture if the piece is entirely within the ROI
-        return (self.roi[0] <= piece_left and piece_right <= self.roi[0] + self.roi[2])
+        # Check if piece is in the valid capture zone
+        in_capture_zone = (self.valid_zone[0] <= piece_center_x <= self.valid_zone[1])
+
+        # Add to detection history
+        self.detection_history.append(in_capture_zone)
+        if len(self.detection_history) > self.history_length:
+            self.detection_history.pop(0)
+
+        # Only capture if piece has been consistently detected
+        return (in_capture_zone and
+                len(self.detection_history) == self.history_length and
+                all(self.detection_history))
 
     def _crop_piece_image(self, frame, piece: TrackedPiece) -> np.ndarray:
         """Crop the frame to just the piece with padding"""
@@ -340,11 +390,25 @@ class TrackedLegoDetector:
 
     def process_frame(self, frame, current_count) -> Tuple[List[TrackedPiece], Optional[np.ndarray]]:
         """Process a frame and return any pieces to capture."""
+        self._check_initialized()
+
+        # Create debug frame
+        debug_frame = frame.copy()
+
+        # Preprocess frame and find contours
         mask = self._preprocess_frame(frame)
         new_contours = self._find_new_contours(mask)
 
         # Update tracking
         self._match_and_update_tracks(new_contours)
+
+        # Draw debug visualization
+        x, y, w, h = self.roi
+        cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+        # Show mask in debug window
+        debug_mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        cv2.imshow('Debug View', debug_mask)
 
         # Check for pieces to capture
         for piece in self.tracked_pieces:
@@ -357,37 +421,40 @@ class TrackedLegoDetector:
         return self.tracked_pieces, None
 
     def draw_debug(self, frame):
-        """Draw debug visualization with piece tracking and capture status."""
+        """Draw debug visualization"""
         debug_frame = frame.copy()
 
-        # Draw ROI - Green boundary
+        # Draw ROI
         x, y, w, h = self.roi
         cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
+        # Draw pieces
         for piece in self.tracked_pieces:
             x, y, w, h = piece.bounding_box
             roi_x, roi_y = self.roi[0], self.roi[1]
 
-            # Adjust coordinates to the full frame
+            # Adjust coordinates to full frame
             x += roi_x
             y += roi_y
 
-            # Determine box color
-            box_color = (0, 255, 0) if piece.captured else (0, 0, 255)
-
             # Draw bounding box
-            cv2.rectangle(debug_frame, (x, y), (x + w, y + h), box_color, 2)
+            color = (0, 255, 0) if piece.captured else (0, 0, 255)
+            cv2.rectangle(debug_frame, (x, y), (x + w, y + h), color, 2)
 
             # Add label
-            label_text = f"#{piece.image_number}" if piece.captured else "Tracking"
+            label = f"#{piece.image_number}" if piece.captured else "Tracking"
             label_color = (0, 255, 0) if piece.captured else (0, 0, 255)
-            label_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-            cv2.rectangle(debug_frame, (x, y - label_size[1] - 10), (x + label_size[0], y), (0, 0, 0), -1)
-            cv2.putText(debug_frame, label_text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, label_color, 2)
+
+            # Draw label background
+            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+            cv2.rectangle(debug_frame, (x, y - label_size[1] - 10),
+                          (x + label_size[0], y), (0, 0, 0), -1)
+
+            # Draw label text
+            cv2.putText(debug_frame, label, (x, y - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, label_color, 2)
 
         return debug_frame
-
-
 class SortingManager:
     def __init__(self):
         """Initialize sorting manager and ensure camera count is set."""
@@ -501,6 +568,7 @@ class SortingManager:
 
         finally:
             self.cleanup()
+
 
 # Main program
 if __name__ == "__main__":
