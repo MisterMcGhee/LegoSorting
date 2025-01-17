@@ -209,16 +209,16 @@ class TrackedPiece:
 
 
 class TrackedLegoDetector:
-    def __init__(self, min_piece_area=300, max_piece_area=20000):
+    def __init__(self, min_piece_area=300, max_piece_area=100000):
         self.min_piece_area = min_piece_area
         self.max_piece_area = max_piece_area
         self.last_detection_time = time()
         self.tracked_pieces: List[TrackedPiece] = []
         self.next_piece_id = 1
-        self.buffer_percent = 0.01
-        self.crop_padding = 20
+        self.buffer_percent = 0.1  # Increased buffer zone
+        self.crop_padding = 50
         self.detection_history = []
-        self.history_length = 3
+        self.history_length = 2  # Reduced for more responsive capture
 
         # Initialize ROI-related attributes
         self.roi = None
@@ -226,28 +226,11 @@ class TrackedLegoDetector:
         self.exit_zone = None
         self.valid_zone = None
 
-        # Create debug windows
-        cv2.namedWindow('Debug View', cv2.WINDOW_NORMAL)
-
-    def calibrate(self, frame):
-        """Get user-selected ROI and calculate buffer zones"""
-        # Get ROI selection from user
-        roi = cv2.selectROI("Select Belt Region", frame, False)
-        cv2.destroyWindow("Select Belt Region")
-
-        self.roi = roi
-        roi_width = roi[2]
-
-        # Calculate buffer zones
-        buffer_width = int(roi_width * self.buffer_percent)
-        self.entry_zone = (roi[0], roi[0] + buffer_width)
-        self.exit_zone = (roi[0] + roi[2] - buffer_width, roi[0] + roi[2])
-        self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
-
-        print(f"ROI: {roi}")
-        print(f"Entry buffer: {self.entry_zone}")
-        print(f"Valid zone: {self.valid_zone}")
-        print(f"Exit buffer: {self.exit_zone}")
+        # Initialize color calibration attributes
+        self.lower_belt_color = None
+        self.upper_belt_color = None
+        self.grid_size = (10, 10)
+        self.color_margin = 40  # Increased color margin
 
     def _check_initialized(self):
         """Check if the detector has been properly initialized"""
@@ -255,7 +238,7 @@ class TrackedLegoDetector:
             raise RuntimeError("TrackedLegoDetector must be calibrated before use. Call calibrate() first.")
 
     def _preprocess_frame(self, frame):
-        """Preprocess frame optimized for magenta belt"""
+        """Preprocess frame using dynamically calculated belt color"""
         self._check_initialized()
 
         x, y, w, h = self.roi
@@ -264,21 +247,80 @@ class TrackedLegoDetector:
         # Convert to HSV for better color separation
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-        # Create mask for magenta belt (to remove it)
-        # Magenta is around 150 in HSV
-        lower_magenta = np.array([140, 50, 50])
-        upper_magenta = np.array([170, 255, 255])
-        magenta_mask = cv2.inRange(hsv, lower_magenta, upper_magenta)
+        # Create mask for belt using calibrated colors
+        belt_mask = cv2.inRange(hsv, self.lower_belt_color, self.upper_belt_color)
 
         # Invert mask to get pieces
-        piece_mask = cv2.bitwise_not(magenta_mask)
+        piece_mask = cv2.bitwise_not(belt_mask)
 
-        # Clean up noise
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        # More aggressive noise removal
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))  # Increased kernel size
         cleaned = cv2.morphologyEx(piece_mask, cv2.MORPH_OPEN, kernel)
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel)
 
+        # Show the mask in debug window
+        debug_mask = cv2.cvtColor(cleaned, cv2.COLOR_GRAY2BGR)
+        cv2.imshow('Mask Debug', debug_mask)
+
         return cleaned
+
+    def _sample_belt_color(self, frame):
+        """Sample belt color in a grid pattern within ROI to determine color bounds."""
+        x, y, w, h = self.roi
+        roi = frame[y:y + h, x:x + w]
+
+        # Convert ROI to HSV
+        hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+
+        # Calculate grid step sizes
+        step_x = w // self.grid_size[0]
+        step_y = h // self.grid_size[1]
+
+        # Collect color samples
+        color_samples = []
+
+        for i in range(self.grid_size[0]):
+            for j in range(self.grid_size[1]):
+                # Calculate sample point
+                sample_x = i * step_x + step_x // 2
+                sample_y = j * step_y + step_y // 2
+
+                # Get color at sample point
+                if sample_y < hsv_roi.shape[0] and sample_x < hsv_roi.shape[1]:
+                    color = hsv_roi[sample_y, sample_x]
+                    color_samples.append(color)
+
+        # Convert to numpy array for calculations
+        samples = np.array(color_samples)
+
+        # Calculate mean and standard deviation
+        mean_color = np.mean(samples, axis=0)
+        std_color = np.std(samples, axis=0)
+
+        # Create bounds with margin
+        lower_bound = np.clip(mean_color - std_color - self.color_margin, 0, 255)
+        upper_bound = np.clip(mean_color + std_color + self.color_margin, 0, 255)
+
+        return lower_bound.astype(np.uint8), upper_bound.astype(np.uint8)
+
+    def _visualize_color_calibration(self, frame):
+        """Visualize the sampled points and color range."""
+        x, y, w, h = self.roi
+        debug_frame = frame.copy()
+
+        # Draw grid points
+        step_x = w // self.grid_size[0]
+        step_y = h // self.grid_size[1]
+
+        for i in range(self.grid_size[0]):
+            for j in range(self.grid_size[1]):
+                sample_x = x + i * step_x + step_x // 2
+                sample_y = y + j * step_y + step_y // 2
+                cv2.circle(debug_frame, (sample_x, sample_y), 2, (0, 255, 0), -1)
+
+        cv2.imshow('Color Calibration', debug_frame)
+        cv2.waitKey(1000)  # Show for 1 second
+        cv2.destroyWindow('Color Calibration')  # Close the window after showing
 
     def _find_new_contours(self, mask):
         """Find contours with filtering for Lego pieces"""
@@ -369,9 +411,14 @@ class TrackedLegoDetector:
         if len(self.detection_history) > self.history_length:
             self.detection_history.pop(0)
 
+        # Print debug info
+        if in_capture_zone:
+            print(f"Piece in capture zone: {piece_center_x:.1f} (zone: {self.valid_zone})")
+            print(f"Detection history: {self.detection_history}")
+
         # Only capture if piece has been consistently detected
         return (in_capture_zone and
-                len(self.detection_history) == self.history_length and
+                len(self.detection_history) >= self.history_length and
                 all(self.detection_history))
 
     def _crop_piece_image(self, frame, piece: TrackedPiece) -> np.ndarray:
@@ -388,6 +435,34 @@ class TrackedLegoDetector:
 
         return frame[y1:y2, x1:x2]
 
+    def calibrate(self, frame):
+        """Get user-selected ROI and calculate buffer zones and belt color"""
+        # Get ROI selection from user
+        roi = cv2.selectROI("Select Belt Region", frame, False)
+        cv2.destroyWindow("Select Belt Region")
+
+        self.roi = roi
+        roi_width = roi[2]
+
+        # Calculate buffer zones with increased size
+        buffer_width = int(roi_width * self.buffer_percent)
+        self.entry_zone = (roi[0], roi[0] + buffer_width)
+        self.exit_zone = (roi[0] + roi[2] - buffer_width, roi[0] + roi[2])
+        self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
+
+        # Perform color calibration
+        print("Calibrating belt color...")
+        self.lower_belt_color, self.upper_belt_color = self._sample_belt_color(frame)
+        self._visualize_color_calibration(frame)
+
+        print(f"Color calibration complete:")
+        print(f"Lower HSV bounds: {self.lower_belt_color}")
+        print(f"Upper HSV bounds: {self.upper_belt_color}")
+        print(f"ROI: {roi}")
+        print(f"Entry zone: {self.entry_zone}")
+        print(f"Valid zone: {self.valid_zone}")
+        print(f"Exit zone: {self.exit_zone}")
+
     def process_frame(self, frame, current_count) -> Tuple[List[TrackedPiece], Optional[np.ndarray]]:
         """Process a frame and return any pieces to capture."""
         self._check_initialized()
@@ -402,13 +477,9 @@ class TrackedLegoDetector:
         # Update tracking
         self._match_and_update_tracks(new_contours)
 
-        # Draw debug visualization
-        x, y, w, h = self.roi
-        cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-        # Show mask in debug window
-        debug_mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        cv2.imshow('Debug View', debug_mask)
+        # Draw debug visualization first
+        debug_frame = self.draw_debug(frame)
+        cv2.imshow("Capture Debug", debug_frame)
 
         # Check for pieces to capture
         for piece in self.tracked_pieces:
@@ -416,6 +487,17 @@ class TrackedLegoDetector:
                 cropped_image = self._crop_piece_image(frame, piece)
                 piece.captured = True
                 piece.image_number = current_count
+
+                # Draw capture indicator
+                x, y, w, h = piece.bounding_box
+                roi_x, roi_y = self.roi[0], self.roi[1]
+                cv2.rectangle(debug_frame,
+                              (x + roi_x, y + roi_y),
+                              (x + roi_x + w, y + roi_y + h),
+                              (0, 255, 255), 3)
+                cv2.imshow("Capture Debug", debug_frame)
+
+                print(f"Capturing piece #{current_count} at position {x + w / 2}")
                 return self.tracked_pieces, cropped_image
 
         return self.tracked_pieces, None
@@ -424,9 +506,29 @@ class TrackedLegoDetector:
         """Draw debug visualization"""
         debug_frame = frame.copy()
 
-        # Draw ROI
+        # Draw ROI and zones
         x, y, w, h = self.roi
+
+        # Draw main ROI
         cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+        # Draw entry zone
+        cv2.rectangle(debug_frame,
+                      (self.entry_zone[0], y),
+                      (self.entry_zone[1], y + h),
+                      (255, 0, 0), 2)
+
+        # Draw valid zone
+        cv2.rectangle(debug_frame,
+                      (self.valid_zone[0], y),
+                      (self.valid_zone[1], y + h),
+                      (0, 255, 255), 2)
+
+        # Draw exit zone
+        cv2.rectangle(debug_frame,
+                      (self.exit_zone[0], y),
+                      (self.exit_zone[1], y + h),
+                      (0, 0, 255), 2)
 
         # Draw pieces
         for piece in self.tracked_pieces:
@@ -441,20 +543,19 @@ class TrackedLegoDetector:
             color = (0, 255, 0) if piece.captured else (0, 0, 255)
             cv2.rectangle(debug_frame, (x, y), (x + w, y + h), color, 2)
 
+            # Draw center point
+            center_x = x + w // 2
+            center_y = y + h // 2
+            cv2.circle(debug_frame, (center_x, center_y), 3, (255, 0, 0), -1)
+
             # Add label
             label = f"#{piece.image_number}" if piece.captured else "Tracking"
-            label_color = (0, 255, 0) if piece.captured else (0, 0, 255)
-
-            # Draw label background
-            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-            cv2.rectangle(debug_frame, (x, y - label_size[1] - 10),
-                          (x + label_size[0], y), (0, 0, 0), -1)
-
-            # Draw label text
             cv2.putText(debug_frame, label, (x, y - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, label_color, 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
         return debug_frame
+
+
 class SortingManager:
     def __init__(self):
         """Initialize sorting manager and ensure camera count is set."""
