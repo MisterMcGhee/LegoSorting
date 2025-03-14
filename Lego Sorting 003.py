@@ -1,18 +1,153 @@
 import cv2
 import csv
 import os
+import json
 import datetime
 import requests
 import numpy as np
 from dataclasses import dataclass
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Any, Dict
 from time import time
 
 
+class ConfigManager:
+    """Manages configuration settings for the Lego sorting application."""
+
+    def __init__(self, config_path: str = "config.json"):
+        """Initialize configuration manager.
+
+        Args:
+            config_path: Path to the configuration file
+        """
+        self.config_path = config_path
+        self.config: Dict[str, Any] = {}
+        self._load_config()
+
+    def _load_config(self) -> None:
+        """Load configuration from file or create default if not exists."""
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, 'r') as f:
+                    self.config = json.load(f)
+                print(f"Configuration loaded from {self.config_path}")
+            except Exception as e:
+                print(f"Error loading configuration: {e}")
+                self._create_default_config()
+        else:
+            print(f"Configuration file not found at {self.config_path}")
+            self._create_default_config()
+
+    def _create_default_config(self) -> None:
+        """Create default configuration."""
+        self.config = {
+            "camera": {
+                "device_id": 0,
+                "directory": "LegoPictures"
+            },
+            "detector": {
+                "min_piece_area": 300,
+                "max_piece_area": 100000,
+                "buffer_percent": 0.1,
+                "crop_padding": 50,
+                "history_length": 2,
+                "grid_size": [10, 10],
+                "color_margin": 40
+            },
+            "piece_identifier": {
+                "csv_path": "Lego_Categories.csv",
+                "confidence_threshold": 0.7
+            },
+            "sorting": {
+                "primary_bins": {
+                    "Basic": 0,
+                    "Wall": 1,
+                    "SNOT": 2,
+                    "Minifig": 3,
+                    "Clip": 4,
+                    "Hinge": 5,
+                    "Angle": 6,
+                    "Vehicle": 7,
+                    "Curved": 8
+                },
+                "overflow_bin": 9
+            }
+        }
+        self.save_config()
+
+    def save_config(self) -> None:
+        """Save current configuration to file."""
+        try:
+            with open(self.config_path, 'w') as f:
+                json.dump(self.config, f, indent=4)
+            print(f"Configuration saved to {self.config_path}")
+        except Exception as e:
+            print(f"Error saving configuration: {e}")
+
+    def get(self, section: str, key: str, default: Any = None) -> Any:
+        """Get a configuration value.
+
+        Args:
+            section: Configuration section
+            key: Configuration key
+            default: Default value if not found
+
+        Returns:
+            The configuration value or default
+        """
+        if section in self.config and key in self.config[section]:
+            return self.config[section][key]
+        return default
+
+    def get_section(self, section: str) -> Dict[str, Any]:
+        """Get an entire configuration section.
+
+        Args:
+            section: Configuration section
+
+        Returns:
+            Dictionary containing the section or empty dict if not found
+        """
+        return self.config.get(section, {})
+
+    def set(self, section: str, key: str, value: Any) -> None:
+        """Set a configuration value.
+
+        Args:
+            section: Configuration section
+            key: Configuration key
+            value: Value to set
+        """
+        if section not in self.config:
+            self.config[section] = {}
+        self.config[section][key] = value
+
+    def update_section(self, section: str, values: Dict[str, Any]) -> None:
+        """Update an entire section with new values.
+
+        Args:
+            section: Configuration section
+            values: Dictionary of values to update
+        """
+        if section not in self.config:
+            self.config[section] = {}
+        self.config[section].update(values)
+
+
 class CameraManager:
-    def __init__(self, directory="LegoPictures"):
-        """Initialize camera and directory for storing images."""
-        self.directory = os.path.abspath(directory)
+    def __init__(self, config_manager=None):
+        """Initialize camera and directory for storing images.
+
+        Args:
+            config_manager: Optional ConfigManager instance
+        """
+        # Use config if provided, otherwise use defaults
+        if config_manager:
+            device_id = config_manager.get("camera", "device_id", 0)
+            self.directory = os.path.abspath(config_manager.get("camera", "directory", "LegoPictures"))
+        else:
+            device_id = 0
+            self.directory = os.path.abspath("LegoPictures")
+
         if not os.path.exists(self.directory):
             os.makedirs(self.directory)
 
@@ -20,15 +155,15 @@ class CameraManager:
         self.count = 1  # Start at 1 by default
         if os.path.exists(self.directory):
             existing_files = [f for f in os.listdir(self.directory)
-                            if f.startswith("Lego") and f.endswith(".jpg")]
+                              if f.startswith("Lego") and f.endswith(".jpg")]
             if existing_files:
                 # Extract numbers from filenames and find the highest
                 numbers = [int(f[4:7]) for f in existing_files]  # Lego001.jpg -> 1
                 self.count = max(numbers) + 1
 
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(device_id)
         if not self.cap.isOpened():
-            raise RuntimeError("Failed to initialize camera")
+            raise RuntimeError(f"Failed to initialize camera with device ID {device_id}")
 
     def capture_image(self):
         """Captures and saves an image. Returns filename, current count, and any error."""
@@ -56,13 +191,14 @@ class CameraManager:
 
 
 class PieceIdentifier:
-    def __init__(self, csv_path='Lego_Categories.csv'):
+    def __init__(self, csv_path='Lego_Categories.csv', confidence_threshold=0.7):
         """Initialize piece identifier with category data."""
         self.lego_dict = {}
         self.primary_to_bin = {
             'Basic': 0, 'Wall': 1, 'SNOT': 2, 'Minifig': 3,
             'Clip': 4, 'Hinge': 5, 'Angle': 6, 'Vehicle': 7, 'Curved': 8
         }
+        self.confidence_threshold = confidence_threshold
         self._load_categories(csv_path)
 
     def _load_categories(self, filepath):
@@ -132,7 +268,7 @@ class PieceIdentifier:
             "confidence": piece_identity.get("score", 0)
         }
 
-        if result["confidence"] < 0.7:
+        if result["confidence"] < self.confidence_threshold:
             result["error"] = "Low confidence score"
             return result
 
@@ -209,8 +345,10 @@ class TrackedPiece:
 
 
 class TrackedLegoDetector:
-    def __init__(self, min_piece_area=1000):
+    def __init__(self, min_piece_area=1000, max_piece_area=100000,
+                 buffer_percent=0.01, crop_padding=20):
         self.min_piece_area = min_piece_area
+        self.max_piece_area = max_piece_area  # Added this parameter
         self.last_detection_time = time()
         self.tracked_pieces: List[TrackedPiece] = []
         self.next_piece_id = 1
@@ -389,14 +527,52 @@ class TrackedLegoDetector:
 
 
 class SortingManager:
-    def __init__(self):
-        """Initialize sorting manager and ensure camera count is set."""
-        self.camera = CameraManager()
-        self.identifier = PieceIdentifier()
-        self.detector = TrackedLegoDetector()
+    def __init__(self, config_path="config.json"):
+        """Initialize sorting manager with configuration.
+
+        Args:
+            config_path: Path to configuration file
+        """
+        # Initialize configuration
+        self.config_manager = ConfigManager(config_path)
+
+        # Initialize components with config
+        self.camera = CameraManager(self.config_manager)
+
+        # Get confidence threshold from config
+        confidence_threshold = self.config_manager.get(
+            "piece_identifier", "confidence_threshold", 0.7  # Default value as fallback
+        )
+
+        self.identifier = PieceIdentifier(
+            csv_path=self.config_manager.get("piece_identifier", "csv_path", "Lego_Categories.csv")
+        )
+
+        # Create detector with config parameters
+        self.detector = TrackedLegoDetector(
+            min_piece_area=self.config_manager.get("detector", "min_piece_area", 300),
+            max_piece_area=self.config_manager.get("detector", "max_piece_area", 100000)
+        )
+
+        # Initialize other tracker properties from config
+        detector_config = self.config_manager.get_section("detector")
+        if detector_config:
+            if "buffer_percent" in detector_config:
+                self.detector.buffer_percent = detector_config["buffer_percent"]
+            if "crop_padding" in detector_config:
+                self.detector.crop_padding = detector_config["crop_padding"]
+            if "history_length" in detector_config:
+                self.detector.history_length = detector_config["history_length"]
+            if "grid_size" in detector_config:
+                self.detector.grid_size = tuple(detector_config["grid_size"])
+            if "color_margin" in detector_config:
+                self.detector.color_margin = detector_config["color_margin"]
+
+        # Initialize sorting parameters
         self.sort_type = None
         self.target_category = None
-        print(f"Starting with image count: {self.camera.count}")  # Debug print
+
+        print(f"Starting with image count: {self.camera.count}")
 
     def get_sorting_preference(self):
         """Get user preference for sorting method."""
@@ -502,7 +678,21 @@ class SortingManager:
         finally:
             self.cleanup()
 
-# Main program
+    def cleanup(self):
+        """Clean up resources."""
+        self.camera.cleanup()
+        cv2.destroyAllWindows()
+
+# Main program that runs
 if __name__ == "__main__":
-    sorter = SortingManager()
+    import argparse
+
+    # Add command-line argument for config file
+    parser = argparse.ArgumentParser(description='Lego Sorting System')
+    parser.add_argument('--config', type=str, default='config.json',
+                        help='Path to configuration file')
+    args = parser.parse_args()
+
+    # Initialize with specified config file
+    sorter = SortingManager(config_path=args.config)
     sorter.run()
