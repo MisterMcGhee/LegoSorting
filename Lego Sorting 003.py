@@ -5,7 +5,7 @@ import datetime
 import requests
 import numpy as np
 from dataclasses import dataclass
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Dict, Literal
 from time import time
 
 
@@ -58,7 +58,8 @@ class CameraManager:
 class PieceIdentifier:
     def __init__(self, csv_path='Lego_Categories.csv'):
         """Initialize piece identifier with category data."""
-        self.lego_dict = {}
+        # Define the exact structure of the nested dictionary
+        self.lego_dict: Dict[str, Dict[Literal['name', 'primary_category', 'secondary_category'], str]] = {}
         self.primary_to_bin = {
             'Basic': 0, 'Wall': 1, 'SNOT': 2, 'Minifig': 3,
             'Clip': 4, 'Hinge': 5, 'Angle': 6, 'Vehicle': 7, 'Curved': 8
