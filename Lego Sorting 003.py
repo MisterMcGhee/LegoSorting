@@ -1,18 +1,156 @@
 import cv2
 import csv
 import os
+import json
 import datetime
 import requests
 import numpy as np
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Literal
+from typing import Tuple, List, Optional, Any, Dict
 from time import time
+from camera_module import create_camera
+from detector_module import create_detector, TrackedPiece
+
+
+class ConfigManager:
+    """Manages configuration settings for the Lego sorting application."""
+
+    def __init__(self, config_path: str = "config.json"):
+        """Initialize configuration manager.
+
+        Args:
+            config_path: Path to the configuration file
+        """
+        self.config_path = config_path
+        self.config: Dict[str, Any] = {}
+        self._load_config()
+
+    def _load_config(self) -> None:
+        """Load configuration from file or create default if not exists."""
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, 'r') as f:
+                    self.config = json.load(f)
+                print(f"Configuration loaded from {self.config_path}")
+            except Exception as e:
+                print(f"Error loading configuration: {e}")
+                self._create_default_config()
+        else:
+            print(f"Configuration file not found at {self.config_path}")
+            self._create_default_config()
+
+    # Make sure the ConfigManager has the necessary fields for the camera
+    def _create_default_config(self) -> None:
+        """Create default configuration."""
+        self.config = {
+            "camera": {
+                "device_id": 0,
+                "directory": "LegoPictures",
+                "filename_prefix": "Lego"  # Add this for the new camera module
+            },
+            "detector": {
+                "min_piece_area": 300,
+                "max_piece_area": 100000,
+                "buffer_percent": 0.1,
+                "crop_padding": 50,
+                "history_length": 2,
+                "grid_size": [10, 10],
+                "color_margin": 40
+            },
+            "piece_identifier": {
+                "csv_path": "Lego_Categories.csv",
+                "confidence_threshold": 0.7
+            },
+            "sorting": {
+                "primary_bins": {
+                    "Basic": 0,
+                    "Wall": 1,
+                    "SNOT": 2,
+                    "Minifig": 3,
+                    "Clip": 4,
+                    "Hinge": 5,
+                    "Angle": 6,
+                    "Vehicle": 7,
+                    "Curved": 8
+                },
+                "overflow_bin": 9
+            }
+        }
+        self.save_config()
+    def save_config(self) -> None:
+        """Save current configuration to file."""
+        try:
+            with open(self.config_path, 'w') as f:
+                json.dump(self.config, f, indent=4)
+            print(f"Configuration saved to {self.config_path}")
+        except Exception as e:
+            print(f"Error saving configuration: {e}")
+
+    def get(self, section: str, key: str, default: Any = None) -> Any:
+        """Get a configuration value.
+
+        Args:
+            section: Configuration section
+            key: Configuration key
+            default: Default value if not found
+
+        Returns:
+            The configuration value or default
+        """
+        if section in self.config and key in self.config[section]:
+            return self.config[section][key]
+        return default
+
+    def get_section(self, section: str) -> Dict[str, Any]:
+        """Get an entire configuration section.
+
+        Args:
+            section: Configuration section
+
+        Returns:
+            Dictionary containing the section or empty dict if not found
+        """
+        return self.config.get(section, {})
+
+    def set(self, section: str, key: str, value: Any) -> None:
+        """Set a configuration value.
+
+        Args:
+            section: Configuration section
+            key: Configuration key
+            value: Value to set
+        """
+        if section not in self.config:
+            self.config[section] = {}
+        self.config[section][key] = value
+
+    def update_section(self, section: str, values: Dict[str, Any]) -> None:
+        """Update an entire section with new values.
+
+        Args:
+            section: Configuration section
+            values: Dictionary of values to update
+        """
+        if section not in self.config:
+            self.config[section] = {}
+        self.config[section].update(values)
 
 
 class CameraManager:
-    def __init__(self, directory="LegoPictures"):
-        """Initialize camera and directory for storing images."""
-        self.directory = os.path.abspath(directory)
+    def __init__(self, config_manager=None):
+        """Initialize camera and directory for storing images.
+
+        Args:
+            config_manager: Optional ConfigManager instance
+        """
+        # Use config if provided, otherwise use defaults
+        if config_manager:
+            device_id = config_manager.get("camera", "device_id", 0)
+            self.directory = os.path.abspath(config_manager.get("camera", "directory", "LegoPictures"))
+        else:
+            device_id = 0
+            self.directory = os.path.abspath("LegoPictures")
+
         if not os.path.exists(self.directory):
             os.makedirs(self.directory)
 
@@ -26,9 +164,9 @@ class CameraManager:
                 numbers = [int(f[4:7]) for f in existing_files]  # Lego001.jpg -> 1
                 self.count = max(numbers) + 1
 
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(device_id)
         if not self.cap.isOpened():
-            raise RuntimeError("Failed to initialize camera")
+            raise RuntimeError(f"Failed to initialize camera with device ID {device_id}")
 
     def capture_image(self):
         """Captures and saves an image. Returns filename, current count, and any error."""
@@ -56,14 +194,14 @@ class CameraManager:
 
 
 class PieceIdentifier:
-    def __init__(self, csv_path='Lego_Categories.csv'):
+    def __init__(self, csv_path='Lego_Categories.csv', confidence_threshold=0.7):
         """Initialize piece identifier with category data."""
-        # Define the exact structure of the nested dictionary
-        self.lego_dict: Dict[str, Dict[Literal['name', 'primary_category', 'secondary_category'], str]] = {}
+        self.lego_dict = {}
         self.primary_to_bin = {
             'Basic': 0, 'Wall': 1, 'SNOT': 2, 'Minifig': 3,
             'Clip': 4, 'Hinge': 5, 'Angle': 6, 'Vehicle': 7, 'Curved': 8
         }
+        self.confidence_threshold = confidence_threshold
         self._load_categories(csv_path)
 
     def _load_categories(self, filepath):
@@ -133,7 +271,7 @@ class PieceIdentifier:
             "confidence": piece_identity.get("score", 0)
         }
 
-        if result["confidence"] < 0.7:
+        if result["confidence"] < self.confidence_threshold:
             result["error"] = "Low confidence score"
             return result
 
@@ -199,373 +337,37 @@ class PieceIdentifier:
 
 
 @dataclass
-class TrackedPiece:
-    """Represents a piece being tracked through the ROI"""
-    id: int  # Unique identifier for this piece
-    contour: np.ndarray  # Current contour
-    bounding_box: Tuple[int, int, int, int]  # x, y, w, h
-    entry_time: float  # When the piece entered tracking
-    captured: bool = False  # Whether this piece has been photographed
-    image_number: Optional[int] = None  # The number used when saving the image
+class SortingManager:
+    def __init__(self, config_path="config.json"):
+        """Initialize sorting manager with configuration.
 
+        Args:
+            config_path: Path to configuration file
+        """
+        # Initialize configuration
+        self.config_manager = ConfigManager(config_path)
 
-class TrackedLegoDetector:
-    def __init__(self, min_piece_area=300, max_piece_area=100000):
-        self.min_piece_area = min_piece_area
-        self.max_piece_area = max_piece_area
-        self.last_detection_time = time()
-        self.tracked_pieces: List[TrackedPiece] = []
-        self.next_piece_id = 1
-        self.buffer_percent = 0.1  # Increased buffer zone
-        self.crop_padding = 50
-        self.detection_history = []
-        self.history_length = 2  # Reduced for more responsive capture
+        # Initialize components with config
+        self.camera = create_camera("webcam", self.config_manager)
 
-        # Initialize ROI-related attributes
-        self.roi = None
-        self.entry_zone = None
-        self.exit_zone = None
-        self.valid_zone = None
-
-        # Initialize color calibration attributes
-        self.lower_belt_color = None
-        self.upper_belt_color = None
-        self.grid_size = (10, 10)
-        self.color_margin = 40  # Increased color margin
-
-    def _check_initialized(self):
-        """Check if the detector has been properly initialized"""
-        if self.roi is None:
-            raise RuntimeError("TrackedLegoDetector must be calibrated before use. Call calibrate() first.")
-
-    def _preprocess_frame(self, frame):
-        """Preprocess frame using dynamically calculated belt color"""
-        self._check_initialized()
-
-        x, y, w, h = self.roi
-        roi = frame[y:y + h, x:x + w]
-
-        # Convert to HSV for better color separation
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-        # Create mask for belt using calibrated colors
-        belt_mask = cv2.inRange(hsv, self.lower_belt_color, self.upper_belt_color)
-
-        # Invert mask to get pieces
-        piece_mask = cv2.bitwise_not(belt_mask)
-
-        # More aggressive noise removal
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))  # Increased kernel size
-        cleaned = cv2.morphologyEx(piece_mask, cv2.MORPH_OPEN, kernel)
-        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel)
-
-        # Show the mask in debug window
-        debug_mask = cv2.cvtColor(cleaned, cv2.COLOR_GRAY2BGR)
-        cv2.imshow('Mask Debug', debug_mask)
-
-        return cleaned
-
-    def _sample_belt_color(self, frame):
-        """Sample belt color in a grid pattern within ROI to determine color bounds."""
-        x, y, w, h = self.roi
-        roi = frame[y:y + h, x:x + w]
-
-        # Convert ROI to HSV
-        hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-        # Calculate grid step sizes
-        step_x = w // self.grid_size[0]
-        step_y = h // self.grid_size[1]
-
-        # Collect color samples
-        color_samples = []
-
-        for i in range(self.grid_size[0]):
-            for j in range(self.grid_size[1]):
-                # Calculate sample point
-                sample_x = i * step_x + step_x // 2
-                sample_y = j * step_y + step_y // 2
-
-                # Get color at sample point
-                if sample_y < hsv_roi.shape[0] and sample_x < hsv_roi.shape[1]:
-                    color = hsv_roi[sample_y, sample_x]
-                    color_samples.append(color)
-
-        # Convert to numpy array for calculations
-        samples = np.array(color_samples)
-
-        # Calculate mean and standard deviation
-        mean_color = np.mean(samples, axis=0)
-        std_color = np.std(samples, axis=0)
-
-        # Create bounds with margin
-        lower_bound = np.clip(mean_color - std_color - self.color_margin, 0, 255)
-        upper_bound = np.clip(mean_color + std_color + self.color_margin, 0, 255)
-
-        return lower_bound.astype(np.uint8), upper_bound.astype(np.uint8)
-
-    def _visualize_color_calibration(self, frame):
-        """Visualize the sampled points and color range."""
-        x, y, w, h = self.roi
-        debug_frame = frame.copy()
-
-        # Draw grid points
-        step_x = w // self.grid_size[0]
-        step_y = h // self.grid_size[1]
-
-        for i in range(self.grid_size[0]):
-            for j in range(self.grid_size[1]):
-                sample_x = x + i * step_x + step_x // 2
-                sample_y = y + j * step_y + step_y // 2
-                cv2.circle(debug_frame, (sample_x, sample_y), 2, (0, 255, 0), -1)
-
-        cv2.imshow('Color Calibration', debug_frame)
-        cv2.waitKey(1000)  # Show for 1 second
-        cv2.destroyWindow('Color Calibration')  # Close the window after showing
-
-    def _find_new_contours(self, mask):
-        """Find contours with filtering for Lego pieces"""
-        contours, _ = cv2.findContours(
-            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        # Get confidence threshold from config
+        confidence_threshold = self.config_manager.get(
+            "piece_identifier", "confidence_threshold", 0.7  # Default value as fallback
         )
 
-        valid_contours = []
-        for contour in contours:
-            area = cv2.contourArea(contour)
+        self.identifier = PieceIdentifier(
+            csv_path=self.config_manager.get("piece_identifier", "csv_path", "Lego_Categories.csv")
+        )
 
-            # Filter by area
-            if area < self.min_piece_area or area > self.max_piece_area:
-                continue
-
-            # Get bounding box
-            x, y, w, h = cv2.boundingRect(contour)
-
-            # Calculate aspect ratio
-            aspect_ratio = float(w) / h
-
-            # Less strict aspect ratio for Lego pieces
-            if aspect_ratio > 4 or aspect_ratio < 0.25:
-                continue
-
-            # Verify position relative to ROI
-            if self.roi[0] <= x < self.roi[0] + self.roi[2]:
-                valid_contours.append((contour, (x, y, w, h)))
-
-        return valid_contours
-
-    def _match_and_update_tracks(self, new_contours):
-        """Match new contours to existing tracks and update"""
-        current_time = time()
-
-        # Remove old tracks
-        self.tracked_pieces = [piece for piece in self.tracked_pieces
-                               if current_time - piece.entry_time < 5.0
-                               and piece.bounding_box[0] < self.exit_zone[0]]
-
-        # Match new contours to existing tracks or create new ones
-        for contour, bbox in new_contours:
-            x, y, w, h = bbox
-            matched = False
-
-            # Try to match with existing tracks
-            for piece in self.tracked_pieces:
-                old_x, old_y, old_w, old_h = piece.bounding_box
-
-                # Calculate center points
-                new_center = (x + w / 2, y + h / 2)
-                old_center = (old_x + old_w / 2, old_y + old_h / 2)
-
-                # Check if centers are close enough
-                distance = np.sqrt((new_center[0] - old_center[0]) ** 2 +
-                                   (new_center[1] - old_center[1]) ** 2)
-
-                if distance < max(w, h) * 0.7:  # Increased movement threshold
-                    piece.contour = contour
-                    piece.bounding_box = bbox
-                    matched = True
-                    break
-
-            if not matched and x <= self.entry_zone[1]:
-                # Create new track
-                new_piece = TrackedPiece(
-                    id=self.next_piece_id,
-                    contour=contour,
-                    bounding_box=bbox,
-                    entry_time=current_time
-                )
-                self.tracked_pieces.append(new_piece)
-                self.next_piece_id += 1
-
-    def _should_capture(self, piece: TrackedPiece) -> bool:
-        """Determine if piece should be captured"""
-        if piece.captured:
-            return False
-
-        x, y, w, h = piece.bounding_box
-        piece_center_x = x + w / 2
-
-        # Check if piece is in the valid capture zone
-        in_capture_zone = (self.valid_zone[0] <= piece_center_x <= self.valid_zone[1])
-
-        # Add to detection history
-        self.detection_history.append(in_capture_zone)
-        if len(self.detection_history) > self.history_length:
-            self.detection_history.pop(0)
-
-        # Print debug info
-        if in_capture_zone:
-            print(f"Piece in capture zone: {piece_center_x:.1f} (zone: {self.valid_zone})")
-            print(f"Detection history: {self.detection_history}")
-
-        # Only capture if piece has been consistently detected
-        return (in_capture_zone and
-                len(self.detection_history) >= self.history_length and
-                all(self.detection_history))
-
-    def _crop_piece_image(self, frame, piece: TrackedPiece) -> np.ndarray:
-        """Crop the frame to just the piece with padding"""
-        x, y, w, h = piece.bounding_box
-        roi_x, roi_y = self.roi[0], self.roi[1]
-
-        # Add padding and ensure within frame bounds
-        pad = self.crop_padding
-        x1 = max(0, x + roi_x - pad)
-        y1 = max(0, y + roi_y - pad)
-        x2 = min(frame.shape[1], x + roi_x + w + pad)
-        y2 = min(frame.shape[0], y + roi_y + h + pad)
-
-        return frame[y1:y2, x1:x2]
-
-    def calibrate(self, frame):
-        """Get user-selected ROI and calculate buffer zones and belt color"""
-        # Get ROI selection from user
-        roi = cv2.selectROI("Select Belt Region", frame, False)
-        cv2.destroyWindow("Select Belt Region")
-
-        self.roi = roi
-        roi_width = roi[2]
-
-        # Calculate buffer zones with increased size
-        buffer_width = int(roi_width * self.buffer_percent)
-        self.entry_zone = (roi[0], roi[0] + buffer_width)
-        self.exit_zone = (roi[0] + roi[2] - buffer_width, roi[0] + roi[2])
-        self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
-
-        # Perform color calibration
-        print("Calibrating belt color...")
-        self.lower_belt_color, self.upper_belt_color = self._sample_belt_color(frame)
-        self._visualize_color_calibration(frame)
-
-        print(f"Color calibration complete:")
-        print(f"Lower HSV bounds: {self.lower_belt_color}")
-        print(f"Upper HSV bounds: {self.upper_belt_color}")
-        print(f"ROI: {roi}")
-        print(f"Entry zone: {self.entry_zone}")
-        print(f"Valid zone: {self.valid_zone}")
-        print(f"Exit zone: {self.exit_zone}")
-
-    def process_frame(self, frame, current_count) -> Tuple[List[TrackedPiece], Optional[np.ndarray]]:
-        """Process a frame and return any pieces to capture."""
-        self._check_initialized()
-
-        # Create debug frame
-        debug_frame = frame.copy()
-
-        # Preprocess frame and find contours
-        mask = self._preprocess_frame(frame)
-        new_contours = self._find_new_contours(mask)
-
-        # Update tracking
-        self._match_and_update_tracks(new_contours)
-
-        # Draw debug visualization first
-        debug_frame = self.draw_debug(frame)
-        cv2.imshow("Capture Debug", debug_frame)
-
-        # Check for pieces to capture
-        for piece in self.tracked_pieces:
-            if self._should_capture(piece) and not piece.captured:
-                cropped_image = self._crop_piece_image(frame, piece)
-                piece.captured = True
-                piece.image_number = current_count
-
-                # Draw capture indicator
-                x, y, w, h = piece.bounding_box
-                roi_x, roi_y = self.roi[0], self.roi[1]
-                cv2.rectangle(debug_frame,
-                              (x + roi_x, y + roi_y),
-                              (x + roi_x + w, y + roi_y + h),
-                              (0, 255, 255), 3)
-                cv2.imshow("Capture Debug", debug_frame)
-
-                print(f"Capturing piece #{current_count} at position {x + w / 2}")
-                return self.tracked_pieces, cropped_image
-
-        return self.tracked_pieces, None
-
-    def draw_debug(self, frame):
-        """Draw debug visualization"""
-        debug_frame = frame.copy()
-
-        # Draw ROI and zones
-        x, y, w, h = self.roi
-
-        # Draw main ROI
-        cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-        # Draw entry zone
-        cv2.rectangle(debug_frame,
-                      (self.entry_zone[0], y),
-                      (self.entry_zone[1], y + h),
-                      (255, 0, 0), 2)
-
-        # Draw valid zone
-        cv2.rectangle(debug_frame,
-                      (self.valid_zone[0], y),
-                      (self.valid_zone[1], y + h),
-                      (0, 255, 255), 2)
-
-        # Draw exit zone
-        cv2.rectangle(debug_frame,
-                      (self.exit_zone[0], y),
-                      (self.exit_zone[1], y + h),
-                      (0, 0, 255), 2)
-
-        # Draw pieces
-        for piece in self.tracked_pieces:
-            x, y, w, h = piece.bounding_box
-            roi_x, roi_y = self.roi[0], self.roi[1]
-
-            # Adjust coordinates to full frame
-            x += roi_x
-            y += roi_y
-
-            # Draw bounding box
-            color = (0, 255, 0) if piece.captured else (0, 0, 255)
-            cv2.rectangle(debug_frame, (x, y), (x + w, y + h), color, 2)
-
-            # Draw center point
-            center_x = x + w // 2
-            center_y = y + h // 2
-            cv2.circle(debug_frame, (center_x, center_y), 3, (255, 0, 0), -1)
-
-            # Add label
-            label = f"#{piece.image_number}" if piece.captured else "Tracking"
-            cv2.putText(debug_frame, label, (x, y - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-
-        return debug_frame
+        # Create detector with config parameters
+        self.detector = create_detector("tracked", self.config_manager)
 
 
-class SortingManager:
-    def __init__(self):
-        """Initialize sorting manager and ensure camera count is set."""
-        self.camera = CameraManager()
-        self.identifier = PieceIdentifier()
-        self.detector = TrackedLegoDetector()
+        # Initialize sorting parameters
         self.sort_type = None
         self.target_category = None
-        print(f"Starting with image count: {self.camera.count}")  # Debug print
+
+        print(f"Starting with image count: {self.camera.count}")
 
     def get_sorting_preference(self):
         """Get user preference for sorting method."""
@@ -639,27 +441,31 @@ class SortingManager:
                 # If we have a piece to capture
                 if piece_image is not None:
                     # Save the cropped image
-                    image_path = os.path.join(self.camera.directory, f"Lego{self.camera.count:03}.jpg")
-                    cv2.imwrite(image_path, piece_image)
+                    file_path, image_number, error = self.camera.capture_image()
+
+                    if error:
+                        print(f"Error capturing image: {error}")
+                        continue
+
+                    # Save the cropped piece image
+                    cv2.imwrite(file_path, piece_image)
 
                     # Process with API using selected sort type
                     result, error = self.identifier.identify_piece(
-                        image_path,
+                        file_path,
                         sort_type=self.sort_type,
                         target_category=self.target_category
                     )
                     if error:
                         print(f"Identification error: {error}")
                     else:
-                        print(f"\nPiece #{self.camera.count:03} identified:")
-                        print(f"Image: Lego{self.camera.count:03}.jpg")
+                        print(f"\nPiece #{image_number:03} identified:")
+                        print(f"Image: {os.path.basename(file_path)}")
                         print(f"Element ID: {result.get('element_id', 'Unknown')}")
                         print(f"Name: {result.get('name', 'Unknown')}")
                         print(f"Primary Category: {result.get('primary_category', 'Unknown')}")
                         print(f"Secondary Category: {result.get('secondary_category', 'Unknown')}")
                         print(f"Bin Number: {result.get('bin_number', 9)}")
-
-                    self.camera.count += 1
 
                 # Show debug view
                 debug_frame = self.detector.draw_debug(frame)
@@ -671,8 +477,22 @@ class SortingManager:
         finally:
             self.cleanup()
 
+    def cleanup(self):
+        """Clean up resources."""
+        self.camera.release()
+        cv2.destroyAllWindows()
 
-# Main program
+
+# Main program that runs
 if __name__ == "__main__":
-    sorter = SortingManager()
+    import argparse
+
+    # Add command-line argument for config file
+    parser = argparse.ArgumentParser(description='Lego Sorting System')
+    parser.add_argument('--config', type=str, default='config.json',
+                        help='Path to configuration file')
+    args = parser.parse_args()
+
+    # Initialize with specified config file
+    sorter = SortingManager(config_path=args.config)
     sorter.run()
