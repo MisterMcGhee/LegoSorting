@@ -1,15 +1,13 @@
-import cv2
-import csv
-import os
 import json
-import datetime
+import os
+from typing import Any, Dict
+
+import cv2
 import requests
-import numpy as np
-from dataclasses import dataclass
-from typing import Tuple, List, Optional, Any, Dict
-from time import time
+
 from camera_module import create_camera
-from detector_module import create_detector, TrackedPiece
+from detector_module import create_detector
+from sorting_module import create_sorting_manager
 
 
 class ConfigManager:
@@ -62,21 +60,15 @@ class ConfigManager:
                 "confidence_threshold": 0.7
             },
             "sorting": {
-                "primary_bins": {
-                    "Basic": 0,
-                    "Wall": 1,
-                    "SNOT": 2,
-                    "Minifig": 3,
-                    "Clip": 4,
-                    "Hinge": 5,
-                    "Angle": 6,
-                    "Vehicle": 7,
-                    "Curved": 8
-                },
+                "strategy": "primary",
+                "target_primary_category": "Basic",
+                "target_secondary_category": "Brick",
+                "max_bins": 9,
                 "overflow_bin": 9
             }
         }
         self.save_config()
+
     def save_config(self) -> None:
         """Save current configuration to file."""
         try:
@@ -193,57 +185,32 @@ class CameraManager:
         self.cap.release()
 
 
-class PieceIdentifier:
-    def __init__(self, csv_path='Lego_Categories.csv', confidence_threshold=0.7):
-        """Initialize piece identifier with category data."""
-        self.lego_dict = {}
-        self.primary_to_bin = {
-            'Basic': 0, 'Wall': 1, 'SNOT': 2, 'Minifig': 3,
-            'Clip': 4, 'Hinge': 5, 'Angle': 6, 'Vehicle': 7, 'Curved': 8
-        }
-        self.confidence_threshold = confidence_threshold
-        self._load_categories(csv_path)
+class BrickognizeAPI:
+    """Handles communication with the Brickognize API."""
 
-    def _load_categories(self, filepath):
-        """Load piece categories from CSV file."""
-        try:
-            with open(filepath, 'r', encoding='utf-8') as file:
-                csv_reader = csv.DictReader(file)
-                for row in csv_reader:
-                    self.lego_dict[row['element_id']] = {
-                        'name': row['name'],
-                        'primary_category': row['primary_category'],
-                        'secondary_category': row['secondary_category']
-                    }
-        except FileNotFoundError:
-            print(f"Error: Could not find file at {filepath}")
-        except Exception as e:
-            print(f"Error reading CSV file: {e}")
+    @staticmethod
+    def send_to_api(image_path: str) -> Dict[str, Any]:
+        """Send image to Brickognize API for identification.
 
-    def identify_piece(self, image_path, sort_type='primary', target_category=None):
-        """Identify piece and determine sorting bin."""
-        api_result = self._send_to_brickognize_api(image_path)
-        if "error" in api_result:
-            return None, api_result["error"]
+        Args:
+            image_path: Path to the image file
 
-        result = self._process_identification(api_result, sort_type, target_category)
-        return result, None
-
-    def _send_to_brickognize_api(self, file_name):
-        """Send image to Brickognize API."""
+        Returns:
+            Dictionary with API response or error
+        """
         url = "https://api.brickognize.com/predict/"
         valid_extensions = ['.jpg', '.jpeg', '.png', '.gif']
 
-        if not os.path.isfile(file_name):
-            return {"error": f"File not found: {file_name}"}
-        if os.path.getsize(file_name) == 0:
+        if not os.path.isfile(image_path):
+            return {"error": f"File not found: {image_path}"}
+        if os.path.getsize(image_path) == 0:
             return {"error": "File is empty"}
-        if not any(file_name.lower().endswith(ext) for ext in valid_extensions):
+        if not any(image_path.lower().endswith(ext) for ext in valid_extensions):
             return {"error": f"Invalid file type. Allowed: {', '.join(valid_extensions)}"}
 
         try:
-            with open(file_name, "rb") as image_file:
-                files = {"query_image": (file_name, image_file, "image/jpeg")}
+            with open(image_path, "rb") as image_file:
+                files = {"query_image": (image_path, image_file, "image/jpeg")}
                 response = requests.post(url, files=files)
 
             if response.status_code != 200:
@@ -263,80 +230,7 @@ class PieceIdentifier:
         except Exception as e:
             return {"error": f"Request error: {str(e)}"}
 
-    def _process_identification(self, piece_identity, sort_type, target_category):
-        """Process API result and determine sorting bin."""
-        result = {
-            "id": piece_identity.get("id"),
-            "bin_number": 9,  # Default to overflow bin
-            "confidence": piece_identity.get("score", 0)
-        }
 
-        if result["confidence"] < self.confidence_threshold:
-            result["error"] = "Low confidence score"
-            return result
-
-        piece_id = result["id"]
-        if not piece_id or piece_id not in self.lego_dict:
-            self._log_missing_piece(result)
-            result["error"] = "Piece not found in dictionary"
-            return result
-
-        piece_info = self.lego_dict[piece_id]
-        result.update({
-            "element_id": piece_id,
-            "name": piece_info['name'],
-            "primary_category": piece_info['primary_category'],
-            "secondary_category": piece_info['secondary_category']
-        })
-
-        # Determine bin number based on sort type
-        if sort_type == 'primary':
-            result["bin_number"] = self.primary_to_bin.get(
-                piece_info['primary_category'], 9)
-        else:
-            result["bin_number"] = self._get_secondary_bin(
-                piece_info, target_category)
-
-        return result
-
-    def _get_secondary_bin(self, piece_info, target_category):
-        """Determine bin number for secondary sorting."""
-        if piece_info['primary_category'] != target_category:
-            return 9
-
-        secondary_categories = self._get_secondary_categories(target_category)
-        try:
-            return secondary_categories.index(piece_info['secondary_category'])
-        except ValueError:
-            return 9
-
-    def _get_secondary_categories(self, primary_category):
-        """Get list of secondary categories for a primary category."""
-        categories = {
-            'Basic': ['Brick', 'Plate', 'Tile'],
-            'Wall': ['Decorative', 'Groove_Rail', 'Panel', 'Window', 'Door', 'Stairs', 'Fence'],
-            'SNOT': ['Bracket', 'Brick', 'Jumper'],
-            'Minifig': ['Clothing', 'Body'],
-            'Clip': ['Bar', 'Clip', 'Flag', 'Handle', 'Door', 'Flexible'],
-            'Hinge': ['Click_brick', 'Click_plate', 'Click-other', 'Hinge', 'Turntable'],
-            'Angle': ['Wedge-brick', 'Wedge-plate', 'Wedge-tile', 'Wedge-nose'],
-            'Vehicle': ['Windscreen', 'Mudguard'],
-            'Curved': ['plate', 'brick', 'tile', 'cylinder', 'Cone', 'Arch_bow']
-        }
-        return categories.get(primary_category, [])
-
-    def _log_missing_piece(self, piece_data):
-        """Log unknown pieces for review."""
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open("Missing_Pieces.txt", 'a') as f:
-            f.write(f"\nTimestamp: {timestamp}\n")
-            f.write(f"Piece ID: {piece_data.get('id', 'Unknown')}\n")
-            f.write(f"Name: {piece_data.get('name', 'Unknown')}\n")
-            f.write(f"Confidence: {piece_data.get('confidence', 0)}\n")
-            f.write("-" * 50)
-
-
-@dataclass
 class SortingManager:
     def __init__(self, config_path="config.json"):
         """Initialize sorting manager with configuration.
@@ -350,65 +244,22 @@ class SortingManager:
         # Initialize components with config
         self.camera = create_camera("webcam", self.config_manager)
 
-        # Get confidence threshold from config
-        confidence_threshold = self.config_manager.get(
-            "piece_identifier", "confidence_threshold", 0.7  # Default value as fallback
-        )
-
-        self.identifier = PieceIdentifier(
-            csv_path=self.config_manager.get("piece_identifier", "csv_path", "Lego_Categories.csv")
-        )
-
         # Create detector with config parameters
         self.detector = create_detector("tracked", self.config_manager)
 
+        # Initialize the sorting module
+        self.sorting_manager = create_sorting_manager(self.config_manager)
 
-        # Initialize sorting parameters
-        self.sort_type = None
-        self.target_category = None
+        # API interface
+        self.api = BrickognizeAPI()
 
         print(f"Starting with image count: {self.camera.count}")
-
-    def get_sorting_preference(self):
-        """Get user preference for sorting method."""
-        while True:
-            print("\nSelect sorting method:")
-            print("1. Sort by Primary Categories")
-            print("2. Sort by Secondary Categories")
-
-            choice = input("Enter choice (1 or 2): ").strip()
-
-            if choice == '1':
-                self.sort_type = 'primary'
-                break
-            elif choice == '2':
-                self.sort_type = 'secondary'
-                # For secondary sorting, need to select primary category
-                print("\nSelect primary category to sort by secondary categories:")
-                for idx, category in enumerate(self.identifier.primary_to_bin.keys(), 1):
-                    print(f"{idx}. {category}")
-
-                while True:
-                    try:
-                        cat_choice = int(input("Enter category number: "))
-                        if 1 <= cat_choice <= len(self.identifier.primary_to_bin):
-                            self.target_category = list(self.identifier.primary_to_bin.keys())[cat_choice - 1]
-                            break
-                        else:
-                            print("Invalid choice. Please try again.")
-                    except ValueError:
-                        print("Please enter a valid number.")
-                break
-            else:
-                print("Invalid choice. Please enter 1 or 2.")
+        print(f"Sorting strategy: {self.sorting_manager.get_strategy_description()}")
 
     def run(self):
         """Main sorting loop."""
         try:
             print("\nInitializing sorting system...")
-
-            # Get sorting preferences first
-            self.get_sorting_preference()
 
             print("\nOpening camera preview for belt region selection.")
             print("Position the camera to view the belt clearly.")
@@ -450,14 +301,18 @@ class SortingManager:
                     # Save the cropped piece image
                     cv2.imwrite(file_path, piece_image)
 
-                    # Process with API using selected sort type
-                    result, error = self.identifier.identify_piece(
-                        file_path,
-                        sort_type=self.sort_type,
-                        target_category=self.target_category
-                    )
-                    if error:
-                        print(f"Identification error: {error}")
+                    # Send to API for identification
+                    api_result = self.api.send_to_api(file_path)
+
+                    if "error" in api_result:
+                        print(f"API error: {api_result['error']}")
+                        continue
+
+                    # Process with sorting manager
+                    result = self.sorting_manager.identify_piece(api_result)
+
+                    if "error" in result:
+                        print(f"Sorting error: {result['error']}")
                     else:
                         print(f"\nPiece #{image_number:03} identified:")
                         print(f"Image: {os.path.basename(file_path)}")
@@ -479,7 +334,7 @@ class SortingManager:
 
     def cleanup(self):
         """Clean up resources."""
-        self.camera.release()
+        self.camera.cleanup()
         cv2.destroyAllWindows()
 
 

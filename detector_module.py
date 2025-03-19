@@ -1,8 +1,9 @@
-import cv2
-import numpy as np
 import time
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Any, Dict
+from typing import Tuple, List, Optional
+
+import cv2
+import numpy as np
 
 
 @dataclass
@@ -15,6 +16,11 @@ class TrackedPiece:
     captured: bool = False  # Whether this piece has been photographed
     image_number: Optional[int] = None  # The number used when saving the image
     updated: bool = True  # Whether this piece was updated in the current frame
+    last_update_time: float = None  # The time when this piece was last updated
+
+    def __post_init__(self):
+        """Initialize the last_update_time to the current time"""
+        self.last_update_time = time.time()
 
 
 class TrackedLegoDetector:
@@ -35,6 +41,13 @@ class TrackedLegoDetector:
         self.grid_size = (10, 10)
         self.color_margin = 40
         self.show_grid = False
+        self.track_timeout = 1.0  # Time in seconds before removing a track that hasn't been updated
+
+        # Capture cooldown settings
+        self.capture_min_interval = 3.0  # Minimum seconds between captures
+        self.new_piece_grace_period = 0.5  # Seconds to wait before capturing a new piece
+        self.spatial_cooldown_radius = 150  # Pixels - don't capture if too close to a previous capture
+        self.spatial_cooldown_time = 10.0  # Seconds to maintain spatial cooldown zones
 
         # Initialize from config if provided
         if config_manager:
@@ -48,6 +61,13 @@ class TrackedLegoDetector:
                 self.grid_size = tuple(grid_size)
             self.color_margin = config_manager.get("detector", "color_margin", self.color_margin)
             self.show_grid = config_manager.get("detector", "show_grid", self.show_grid)
+            self.track_timeout = config_manager.get("detector", "track_timeout", self.track_timeout)
+            self.capture_min_interval = config_manager.get("detector", "capture_min_interval",
+                                                           self.capture_min_interval)
+            self.spatial_cooldown_radius = config_manager.get("detector", "spatial_cooldown_radius",
+                                                              self.spatial_cooldown_radius)
+            self.spatial_cooldown_time = config_manager.get("detector", "spatial_cooldown_time",
+                                                            self.spatial_cooldown_time)
 
         # Initialize background model
         self.background_model = None
@@ -60,6 +80,10 @@ class TrackedLegoDetector:
         self.entry_zone = None
         self.exit_zone = None
         self.valid_zone = None
+        self.last_capture_time = 0
+
+        # Add spatial cooldown tracking
+        self.captured_locations = []  # List of (center_x, center_y, capture_time)
 
     def calibrate(self, frame):
         """Get user-selected ROI and calculate buffer zones
@@ -202,6 +226,8 @@ class TrackedLegoDetector:
             piece.updated = False
 
         # Try to match new contours to existing tracks
+        matched_pieces = set()  # Keep track of which pieces have been matched
+
         for contour, bbox in new_contours:
             x, y, w, h = bbox
 
@@ -209,9 +235,14 @@ class TrackedLegoDetector:
             if x < self.entry_zone[0]:
                 continue
 
-            # Check if this contour matches any existing piece
-            matched = False
-            for piece in self.tracked_pieces:
+            # Find the best match for this contour
+            best_match = None
+            best_distance = float('inf')
+
+            for i, piece in enumerate(self.tracked_pieces):
+                if i in matched_pieces:  # Skip pieces that are already matched to prevent duplicates
+                    continue
+
                 old_x, old_y, old_w, old_h = piece.bounding_box
 
                 # Calculate center points
@@ -224,16 +255,23 @@ class TrackedLegoDetector:
                 distance = ((new_center_x - old_center_x) ** 2 +
                             (new_center_y - old_center_y) ** 2) ** 0.5
 
-                # If centers are close enough, update the existing track
-                if distance < max(w, h) * 0.5:  # Adjust threshold as needed
-                    piece.contour = contour
-                    piece.bounding_box = bbox
-                    piece.updated = True
-                    matched = True
-                    break
+                # Track the best match (lowest distance)
+                if distance < best_distance:
+                    best_distance = distance
+                    best_match = (i, piece)
 
-            # If no match found, create a new track
-            if not matched:
+            # Check if the best match is within our threshold
+            max_allowed_distance = max(w, h) * 0.5  # Adjust threshold as needed
+
+            if best_match is not None and best_distance < max_allowed_distance:
+                index, piece = best_match
+                piece.contour = contour
+                piece.bounding_box = bbox
+                piece.updated = True
+                piece.last_update_time = time.time()
+                matched_pieces.add(index)
+            else:
+                # If no match found, create a new track
                 new_piece = TrackedPiece(
                     id=self.next_piece_id,
                     contour=contour,
@@ -243,29 +281,66 @@ class TrackedLegoDetector:
                 self.tracked_pieces.append(new_piece)
                 self.next_piece_id += 1
 
-        # Remove pieces that have left the ROI or weren't updated
-        self.tracked_pieces = [p for p in self.tracked_pieces if
-                               (p.updated or p.bounding_box[0] < self.exit_zone[0])]
+        # Remove stale tracks that haven't been updated recently
+        current_time = time.time()
+        updated_tracks = []
+
+        for piece in self.tracked_pieces:
+            # Keep track if:
+            # 1. It was just updated
+            # 2. It hasn't timed out yet
+            # 3. It has been captured (we want to keep it visible a bit longer)
+            if (piece.updated or
+                    (current_time - piece.last_update_time < self.track_timeout) or
+                    (piece.captured and current_time - piece.last_update_time < self.track_timeout * 2)):
+                updated_tracks.append(piece)
+            else:
+                print(
+                    f"Removing stale track ID: {piece.id}, Last update: {current_time - piece.last_update_time:.2f}s ago")
+
+        self.tracked_pieces = updated_tracks
+
+    def _clean_captured_locations(self):
+        """Remove expired spatial cooldown zones"""
+        current_time = time.time()
+        expired_threshold = current_time - self.spatial_cooldown_time
+        self.captured_locations = [(x, y, t) for x, y, t in self.captured_locations if t > expired_threshold]
 
     def _should_capture(self, piece: TrackedPiece) -> bool:
         """Determine if the piece should be captured."""
+        # Skip if already marked as captured
         if piece.captured:
-            return False  # Already captured
-
-        # Don't capture if it's too soon after the last capture
-        current_time = time.time()
-        if hasattr(self, 'last_capture_time') and current_time - self.last_capture_time < 1.0:
             return False
 
-        x, y, w, h = piece.bounding_box
-        piece_left = x
-        piece_right = x + w
+        current_time = time.time()
 
-        # Capture if the piece is entirely within the valid zone
-        if (self.valid_zone[0] <= piece_left and piece_right <= self.valid_zone[1]):
-            self.last_capture_time = current_time
-            return True
-        return False
+        # Don't capture if it's too soon after the last capture
+        if current_time - self.last_capture_time < self.capture_min_interval:
+            return False
+
+        # Don't capture pieces that just appeared (avoid post-stutter duplicates)
+        if current_time - piece.entry_time < self.new_piece_grace_period:
+            return False
+
+        # Get piece position
+        x, y, w, h = piece.bounding_box
+        center_x = x + w / 2
+        center_y = y + h / 2
+
+        # Only capture in the valid zone
+        if not (self.valid_zone[0] <= x and x + w <= self.valid_zone[1]):
+            return False
+
+        # Check if we're too close to a previously captured location
+        for loc_x, loc_y, _ in self.captured_locations:
+            distance = ((center_x - loc_x) ** 2 + (center_y - loc_y) ** 2) ** 0.5
+            if distance < self.spatial_cooldown_radius:
+                print(f"Skipping piece ID {piece.id} - too close to previous capture location ({distance:.1f}px)")
+                piece.captured = True  # Mark as captured to avoid repeated checks
+                return False
+
+        # If all checks passed, this piece should be captured
+        return True
 
     def _crop_piece_image(self, frame, piece: TrackedPiece) -> np.ndarray:
         """Crop the frame to just the piece with padding
@@ -304,6 +379,9 @@ class TrackedLegoDetector:
         if self.roi is None:
             raise ValueError("Detector not calibrated. Call calibrate() first.")
 
+        # Clean up expired capture locations
+        self._clean_captured_locations()
+
         mask = self._preprocess_frame(frame)
         new_contours = self._find_new_contours(mask)
 
@@ -312,10 +390,24 @@ class TrackedLegoDetector:
 
         # Check for pieces to capture
         for piece in self.tracked_pieces:
-            if self._should_capture(piece) and not piece.captured:
+            if self._should_capture(piece):
+                # Get piece position for spatial cooldown
+                x, y, w, h = piece.bounding_box
+                center_x = x + w / 2
+                center_y = y + h / 2
+
+                # Crop the image
                 cropped_image = self._crop_piece_image(frame, piece)
+
+                # Mark as captured and update tracking
                 piece.captured = True
                 piece.image_number = current_count
+                self.last_capture_time = time.time()
+
+                # Register capture location
+                self.captured_locations.append((center_x, center_y, time.time()))
+
+                print(f"Capturing piece ID {piece.id} at position ({center_x:.1f}, {center_y:.1f})")
                 return self.tracked_pieces, cropped_image
 
         return self.tracked_pieces, None
@@ -365,6 +457,25 @@ class TrackedLegoDetector:
                 x_pos = x + j * cell_w
                 cv2.line(debug_frame, (x_pos, y), (x_pos, y + h), (200, 200, 200), 1)
 
+        # Draw spatial cooldown zones
+        for loc_x, loc_y, t in self.captured_locations:
+            # Calculate age as percentage of total cooldown time
+            current_time = time.time()
+            age_pct = min(1.0, (current_time - t) / self.spatial_cooldown_time)
+
+            # Color fades from red to transparent as it ages
+            color = (0, 0, 255)
+
+            # Draw circle showing the cooldown zone
+            cv2.circle(debug_frame,
+                       (int(loc_x + self.roi[0]), int(loc_y + self.roi[1])),
+                       int(self.spatial_cooldown_radius),
+                       color,
+                       1)  # Thickness
+
+        # Get current time for age calculation
+        current_time = time.time()
+
         for piece in self.tracked_pieces:
             x, y, w, h = piece.bounding_box
             roi_x, roi_y = self.roi[0], self.roi[1]
@@ -373,18 +484,34 @@ class TrackedLegoDetector:
             x += roi_x
             y += roi_y
 
-            # Determine box color
-            box_color = (0, 255, 0) if piece.captured else (0, 0, 255)
+            # Determine box color based on captured status and update freshness
+            age = current_time - piece.last_update_time
+
+            if piece.captured:
+                # Green for captured pieces
+                box_color = (0, 255, 0)
+            elif not piece.updated and age > 0.2:
+                # Yellow for pieces that haven't been updated recently but aren't stale
+                freshness = max(0, 1 - (age / self.track_timeout))
+                box_color = (0, 255 * freshness, 255)  # Blend from cyan to blue as track ages
+            else:
+                # Red for active, uncaptured pieces
+                box_color = (0, 0, 255)
 
             # Draw bounding box
             cv2.rectangle(debug_frame, (x, y), (x + w, y + h), box_color, 2)
 
             # Add label
-            label_text = f"#{piece.image_number}" if piece.captured else f"ID:{piece.id}"
-            label_color = (0, 255, 0) if piece.captured else (0, 0, 255)
-            label_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+            if piece.captured:
+                label_text = f"#{piece.image_number}"
+            else:
+                # Show ID and age for debugging
+                label_text = f"ID:{piece.id} ({age:.1f}s)"
+
+            label_color = box_color
+            label_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
             cv2.rectangle(debug_frame, (x, y - label_size[1] - 10), (x + label_size[0], y), (0, 0, 0), -1)
-            cv2.putText(debug_frame, label_text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, label_color, 2)
+            cv2.putText(debug_frame, label_text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, label_color, 1)
 
         return debug_frame
 
@@ -404,56 +531,3 @@ def create_detector(detector_type="tracked", config_manager=None):
         return TrackedLegoDetector(config_manager)
     else:
         raise ValueError(f"Unsupported detector type: {detector_type}. Currently only 'tracked' is supported.")
-
-
-# Example usage
-if __name__ == "__main__":
-    # Simple test to demonstrate the module
-    import sys
-
-    # Create a detector
-    detector = create_detector("tracked")
-
-    # Initialize a camera
-    camera = cv2.VideoCapture(0)
-    if not camera.isOpened():
-        print("Error: Could not open camera")
-        sys.exit(1)
-
-    # Get a frame for calibration
-    ret, frame = camera.read()
-    if not ret:
-        print("Error: Could not read from camera")
-        sys.exit(1)
-
-    # Calibrate the detector
-    detector.calibrate(frame)
-
-    try:
-        while True:
-            # Get a frame
-            ret, frame = camera.read()
-            if not ret:
-                break
-
-            # Process the frame
-            tracked_pieces, cropped_image = detector.process_frame(frame)
-
-            # Draw debug visualization
-            debug_frame = detector.draw_debug(frame)
-
-            # Display the frame
-            cv2.imshow("Lego Detector", debug_frame)
-
-            # If we have a cropped image, display it
-            if cropped_image is not None:
-                cv2.imshow("Cropped Piece", cropped_image)
-
-            # Exit on ESC key
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
-
-    finally:
-        # Clean up
-        camera.release()
-        cv2.destroyAllWindows()

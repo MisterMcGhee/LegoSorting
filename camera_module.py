@@ -4,7 +4,6 @@ camera_module.py - A simple module for camera functionality
 
 import os
 import cv2
-from typing import Dict, Any, Tuple, Optional
 
 
 class CameraModule:

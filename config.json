@@ -4,31 +4,28 @@
         "directory": "LegoPictures"
     },
     "detector": {
-        "min_piece_area": 250,
-        "max_piece_area": 500000,
+        "min_piece_area": 500,
+        "max_piece_area": 750000,
         "buffer_percent": 0.2,
         "crop_padding": 50,
         "history_length": 2,
         "grid_size": [10, 10],
         "color_margin": 40,
-        "show_grid": true
+        "show_grid": true,
+        "track_timeout": 1.0,
+        "capture_min_interval": 0.5,
+        "spatial_cooldown_radius": 80,
+        "spatial_cooldown_time": 2.0
     },
     "piece_identifier": {
         "csv_path": "Lego_Categories.csv",
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "primary_bins": {
-            "Basic": 0,
-            "Wall": 1,
-            "SNOT": 2,
-            "Minifig": 3,
-            "Clip": 4,
-            "Hinge": 5,
-            "Angle": 6,
-            "Vehicle": 7,
-            "Curved": 8
-        },
+        "strategy": "primary",
+        "target_primary_category": "",
+        "target_secondary_category": "",
+        "max_bins": 9,
         "overflow_bin": 9
     }
 }
