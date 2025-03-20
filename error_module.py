@@ -10,31 +10,40 @@ from typing import Optional, Dict, Any, Union
 
 
 # Configure application-wide logging
-def setup_logging(log_file: str = "lego_sorting.log", console_level: int = logging.INFO) -> None:
+def setup_logging(log_file: str = "lego_sorting.log", console_level: int = logging.WARNING) -> None:
     """Set up logging configuration for the entire application.
 
     Args:
         log_file: Path to the log file
         console_level: Logging level for console output
+                      (DEBUG=10, INFO=20, WARNING=30, ERROR=40, CRITICAL=50)
     """
-    # Configure root logger
-    logging.basicConfig(
-        level=logging.DEBUG,  # Capture all levels in the file
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            # File handler captures everything for debugging
-            logging.FileHandler(log_file),
-            # Console handler shows only specified level and above
-            logging.StreamHandler()
-        ]
-    )
+    # Configure root logger with a null handler to avoid duplicate messages
+    logging.getLogger().handlers = []
 
-    # Set console handler to the specified level
-    logging.getLogger().handlers[1].setLevel(console_level)
+    # Create formatters
+    file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_formatter = logging.Formatter('%(levelname)s: %(message)s')  # Simpler format for console
+
+    # File handler - captures everything for debugging
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(file_formatter)
+
+    # Console handler - only shows important messages
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(console_level)
+    console_handler.setFormatter(console_formatter)
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Capture all levels
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
 
     # Initial log message
     logging.getLogger(__name__).info("Logging initialized")
-
+    logging.getLogger(__name__).debug(f"Console logging level: {console_level}")
 
 # Custom Exception Hierarchy
 class LegoSortingError(Exception):
@@ -121,18 +130,3 @@ def log_and_return(result: Union[Dict[str, Any], Exception],
     logger.log(success_level, f"Operation succeeded: {result}")
     return result
 
-
-# Example usage
-if __name__ == "__main__":
-    # Set up logging
-    setup_logging()
-    logger = logging.getLogger(__name__)
-
-    # Example of using custom exceptions
-    try:
-        config_value = None
-        if config_value is None:
-            raise ConfigError("Missing required configuration value")
-    except LegoSortingError as e:
-        result = handle_error(e, logger, return_dict=True)
-        print(f"Returned: {result}")

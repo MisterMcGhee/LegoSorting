@@ -4,6 +4,7 @@ camera_module.py - A simple module for camera functionality
 
 import os
 import cv2
+import time
 import logging
 from typing import Tuple, Optional, Any
 
@@ -71,7 +72,12 @@ class CameraModule:
                 logger.error(error_msg)
                 raise CameraError(error_msg)
 
+            # Set camera properties for better performance
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffering for real-time
+
+            # Camera is now initialized but may need warm-up
             self.is_initialized = True
+            self.is_warmed_up = False  # Flag to track warm-up state
             logger.info(f"Camera initialized with starting count: {self.count}")
         except Exception as e:
             logger.error(f"Error during camera initialization: {str(e)}")
@@ -110,7 +116,7 @@ class CameraModule:
             logger.error(error_msg)
             return None, None, error_msg
 
-    def get_preview_frame(self) -> Optional[Any]:
+    def get_preview_frame(self):
         """Gets a frame for preview without saving
 
         Returns:
@@ -120,12 +126,55 @@ class CameraModule:
             logger.error("Attempted to get preview frame, but camera is not initialized")
             return None
 
-        ret, frame = self.cap.read()
-        if not ret:
-            logger.error("Failed to get preview frame")
-            return None
+        # If camera hasn't been warmed up yet, discard some frames to ensure we get a valid one
+        if not self.is_warmed_up:
+            logger.info("Warming up camera...")
+            self._warm_up_camera()
 
-        return frame
+        # Try to get a valid frame
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            ret, frame = self.cap.read()
+            if ret and frame is not None and not self._is_empty_frame(frame):
+                return frame
+            logger.warning(f"Got invalid frame, attempt {attempt + 1}/{max_attempts}")
+            time.sleep(0.1)  # Small delay between attempts
+
+        logger.error("Failed to get valid preview frame after multiple attempts")
+        return None
+
+    def _warm_up_camera(self, num_frames=10, delay=0.1):
+        """Warm up the camera by capturing and discarding initial frames.
+
+        Args:
+            num_frames: Number of frames to discard
+            delay: Delay between frame captures in seconds
+        """
+        logger.info(f"Warming up camera by discarding {num_frames} frames")
+        for i in range(num_frames):
+            ret, _ = self.cap.read()
+            if not ret:
+                logger.warning(f"Failed to read frame during warm-up ({i + 1}/{num_frames})")
+            time.sleep(delay)  # Small delay between frames
+        self.is_warmed_up = True
+        logger.info("Camera warm-up complete")
+
+    def _is_empty_frame(self, frame):
+        """Check if a frame is empty or just black.
+
+        Args:
+            frame: The frame to check
+
+        Returns:
+            bool: True if frame is empty/black, False otherwise
+        """
+        if frame is None:
+            return True
+
+        # Check if frame is all zeros (black) or very close to it
+        # Using mean value across all channels as a simple heuristic
+        mean_value = cv2.mean(frame)[0]
+        return mean_value < 5.0  # Threshold for "blackness"
 
     def release(self) -> None:
         """Releases camera resources"""
@@ -186,36 +235,3 @@ def create_camera(camera_type="webcam", config_manager=None):
             raise
         logger.error(f"Error creating camera: {str(e)}")
         raise CameraError(f"Failed to create camera: {str(e)}")
-
-
-# Example usage
-if __name__ == "__main__":
-    from error_module import setup_logging
-    setup_logging()
-
-    try:
-        # Create camera
-        camera = create_camera("webcam")
-
-        # Show preview
-        frame = camera.get_preview_frame()
-        if frame is not None:
-            cv2.imshow("Preview", frame)
-            cv2.waitKey(1000)  # Wait for 1 second
-
-        # Capture image
-        filename, count, error = camera.capture_image()
-        if error:
-            logger.error(f"Error: {error}")
-        else:
-            logger.info(f"Image saved to: {filename}")
-
-    except CameraError as e:
-        logger.error(f"Camera error: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-    finally:
-        # Clean up
-        if 'camera' in locals():
-            camera.release()
-            cv2.destroyAllWindows()

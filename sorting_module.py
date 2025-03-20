@@ -1,5 +1,19 @@
+"""
+sorting_module.py - Module for sorting Lego pieces into bins by category
+
+This module handles the sorting logic for identified Lego pieces,
+determining which bin each piece should go into based on various
+sorting strategies and configuration.
+"""
+
 import csv
-from typing import Dict, Any
+import logging
+from typing import Dict, Any, Optional, List
+
+from error_module import SortingError
+
+# Set up module logger
+logger = logging.getLogger(__name__)
 
 
 class SortingStrategy:
@@ -20,6 +34,8 @@ class SortingStrategy:
         self.category_to_bin = {}  # Maps category keys to bin numbers
         self.next_available_bin = 0
         self.max_bins = config.get("max_bins", 9)  # Maximum number of bins (excluding overflow)
+
+        logger.debug(f"Sorting strategy initialized: max_bins={self.max_bins}, overflow_bin={self.overflow_bin}")
 
     def get_bin(self, element_id: str, confidence: float) -> int:
         """Determine bin for a piece (to be implemented by specific strategies).
@@ -48,6 +64,7 @@ class PrimaryCategorySorter(SortingStrategy):
             Bin number
         """
         if element_id not in self.categories_data:
+            logger.warning(f"Element ID {element_id} not found in categories data, using overflow bin")
             return self.overflow_bin
 
         piece_info = self.categories_data[element_id]
@@ -55,16 +72,21 @@ class PrimaryCategorySorter(SortingStrategy):
 
         # If we've already assigned a bin to this category, use it
         if category_key in self.category_to_bin:
-            return self.category_to_bin[category_key]
+            bin_number = self.category_to_bin[category_key]
+            logger.debug(f"Using existing bin {bin_number} for primary category '{category_key}'")
+            return bin_number
 
         # If we have room for a new bin, assign the next available one
         if self.next_available_bin < self.max_bins:
             bin_number = self.next_available_bin
             self.category_to_bin[category_key] = bin_number
             self.next_available_bin += 1
+            logger.info(f"Assigned new bin {bin_number} to primary category '{category_key}'")
             return bin_number
 
         # Otherwise, use the overflow bin
+        logger.info(
+            f"Using overflow bin {self.overflow_bin} for primary category '{category_key}' (no more bins available)")
         return self.overflow_bin
 
     def get_description(self) -> str:
@@ -84,7 +106,11 @@ class SecondaryCategorySorter(SortingStrategy):
         self.target_primary = config.get("target_primary_category")
 
         if not self.target_primary:
-            raise ValueError("Secondary category sorting requires a target primary category")
+            error_msg = "Secondary category sorting requires a target primary category"
+            logger.error(error_msg)
+            raise SortingError(error_msg)
+
+        logger.info(f"Secondary category sorter targeting primary category: '{self.target_primary}'")
 
     def get_bin(self, element_id: str, confidence: float) -> int:
         """Assign bin based on secondary category within target primary category.
@@ -97,12 +123,15 @@ class SecondaryCategorySorter(SortingStrategy):
             Bin number
         """
         if element_id not in self.categories_data:
+            logger.warning(f"Element ID {element_id} not found in categories data, using overflow bin")
             return self.overflow_bin
 
         piece_info = self.categories_data[element_id]
 
         # Check if this piece belongs to the target primary category
         if piece_info.get("primary_category") != self.target_primary:
+            logger.debug(
+                f"Element ID {element_id} not in target primary category '{self.target_primary}', using overflow bin")
             return self.overflow_bin
 
         # Use secondary category as the key
@@ -110,16 +139,21 @@ class SecondaryCategorySorter(SortingStrategy):
 
         # If we've already assigned a bin to this category, use it
         if category_key in self.category_to_bin:
-            return self.category_to_bin[category_key]
+            bin_number = self.category_to_bin[category_key]
+            logger.debug(f"Using existing bin {bin_number} for secondary category '{category_key}'")
+            return bin_number
 
         # If we have room for a new bin, assign the next available one
         if self.next_available_bin < self.max_bins:
             bin_number = self.next_available_bin
             self.category_to_bin[category_key] = bin_number
             self.next_available_bin += 1
+            logger.info(f"Assigned new bin {bin_number} to secondary category '{category_key}'")
             return bin_number
 
         # Otherwise, use the overflow bin
+        logger.info(
+            f"Using overflow bin {self.overflow_bin} for secondary category '{category_key}' (no more bins available)")
         return self.overflow_bin
 
     def get_description(self) -> str:
@@ -140,7 +174,11 @@ class TertiaryCategorySorter(SortingStrategy):
         self.target_secondary = config.get("target_secondary_category")
 
         if not self.target_primary or not self.target_secondary:
-            raise ValueError("Tertiary category sorting requires target primary and secondary categories")
+            error_msg = "Tertiary category sorting requires target primary and secondary categories"
+            logger.error(error_msg)
+            raise SortingError(error_msg)
+
+        logger.info(f"Tertiary category sorter targeting: '{self.target_primary}/{self.target_secondary}'")
 
     def get_bin(self, element_id: str, confidence: float) -> int:
         """Assign bin based on tertiary category within target primary and secondary categories.
@@ -153,6 +191,7 @@ class TertiaryCategorySorter(SortingStrategy):
             Bin number
         """
         if element_id not in self.categories_data:
+            logger.warning(f"Element ID {element_id} not found in categories data, using overflow bin")
             return self.overflow_bin
 
         piece_info = self.categories_data[element_id]
@@ -160,6 +199,7 @@ class TertiaryCategorySorter(SortingStrategy):
         # Check if this piece belongs to the target primary and secondary categories
         if (piece_info.get("primary_category") != self.target_primary or
                 piece_info.get("secondary_category") != self.target_secondary):
+            logger.debug(f"Element ID {element_id} not in target primary/secondary categories, using overflow bin")
             return self.overflow_bin
 
         # Use tertiary category as the key
@@ -167,16 +207,21 @@ class TertiaryCategorySorter(SortingStrategy):
 
         # If we've already assigned a bin to this category, use it
         if category_key in self.category_to_bin:
-            return self.category_to_bin[category_key]
+            bin_number = self.category_to_bin[category_key]
+            logger.debug(f"Using existing bin {bin_number} for tertiary category '{category_key}'")
+            return bin_number
 
         # If we have room for a new bin, assign the next available one
         if self.next_available_bin < self.max_bins:
             bin_number = self.next_available_bin
             self.category_to_bin[category_key] = bin_number
             self.next_available_bin += 1
+            logger.info(f"Assigned new bin {bin_number} to tertiary category '{category_key}'")
             return bin_number
 
         # Otherwise, use the overflow bin
+        logger.info(
+            f"Using overflow bin {self.overflow_bin} for tertiary category '{category_key}' (no more bins available)")
         return self.overflow_bin
 
     def get_description(self) -> str:
@@ -201,18 +246,35 @@ class SortingManager:
         self.sorting_config = config_manager.get_section("sorting")
         self.categories_data = {}
 
+        logger.info("Initializing sorting manager")
+
         # Load categories data
         csv_path = config_manager.get("piece_identifier", "csv_path", "Lego_Categories.csv")
-        self._load_categories(csv_path)
+
+        try:
+            self._load_categories(csv_path)
+        except Exception as e:
+            error_msg = f"Failed to load categories from CSV: {str(e)}"
+            logger.error(error_msg)
+            raise SortingError(error_msg)
 
         # Set up sorting strategy based on config
-        self.strategy = self._configure_strategy()
+        try:
+            self.strategy = self._configure_strategy()
+            logger.info(f"Sorting strategy configured: {self.get_strategy_description()}")
+        except Exception as e:
+            error_msg = f"Failed to configure sorting strategy: {str(e)}"
+            logger.error(error_msg)
+            raise SortingError(error_msg)
 
     def _load_categories(self, filepath: str) -> None:
         """Load piece categories from CSV file.
 
         Args:
             filepath: Path to CSV file
+
+        Raises:
+            SortingError: If categories cannot be loaded
         """
         try:
             with open(filepath, 'r', encoding='utf-8') as file:
@@ -224,20 +286,35 @@ class SortingManager:
                         'secondary_category': row['secondary_category'],
                         'tertiary_category': row.get('tertiary_category', '')
                     }
-            print(f"Loaded {len(self.categories_data)} pieces from {filepath}")
+            logger.info(f"Loaded {len(self.categories_data)} pieces from {filepath}")
+
+            # Log some sample categories for debugging
+            sample_keys = list(self.categories_data.keys())[:3]
+            if sample_keys:
+                for key in sample_keys:
+                    logger.debug(f"Sample piece: {key} - {self.categories_data[key]['name']}")
+
         except FileNotFoundError:
-            print(f"Error: Could not find file at {filepath}")
+            error_msg = f"Could not find categories file at {filepath}"
+            logger.error(error_msg)
+            raise SortingError(error_msg)
         except Exception as e:
-            print(f"Error reading CSV file: {e}")
+            error_msg = f"Error reading CSV file: {str(e)}"
+            logger.error(error_msg)
+            raise SortingError(error_msg)
 
     def _configure_strategy(self) -> SortingStrategy:
         """Configure sorting strategy based on config settings.
 
         Returns:
             Configured SortingStrategy
+
+        Raises:
+            SortingError: If strategy cannot be configured
         """
         # Get the strategy type or default to primary
         strategy_type = self.sorting_config.get("strategy", "primary")
+        logger.info(f"Configuring sorting strategy of type: {strategy_type}")
 
         try:
             if strategy_type == "primary":
@@ -250,13 +327,13 @@ class SortingManager:
                 return TertiaryCategorySorter(self.sorting_config, self.categories_data)
 
             else:
-                print(f"Warning: Unknown sorting strategy '{strategy_type}'.")
-                print("Defaulting to primary category sorting.")
+                logger.warning(f"Unknown sorting strategy '{strategy_type}'. Defaulting to primary category sorting.")
                 return PrimaryCategorySorter(self.sorting_config, self.categories_data)
 
         except ValueError as e:
-            print(f"Error configuring sorting strategy: {e}")
-            print("Defaulting to primary category sorting.")
+            error_msg = f"Error configuring sorting strategy: {str(e)}"
+            logger.error(error_msg)
+            logger.info("Defaulting to primary category sorting")
             return PrimaryCategorySorter(self.sorting_config, self.categories_data)
 
     def identify_piece(self, api_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -272,6 +349,8 @@ class SortingManager:
         element_id = api_result.get("id")
         confidence = api_result.get("score", 0)
 
+        logger.debug(f"Identifying piece: element_id={element_id}, confidence={confidence}")
+
         # Create result dictionary
         result = {
             "id": element_id,
@@ -284,12 +363,16 @@ class SortingManager:
             "piece_identifier", "confidence_threshold", 0.7
         )
         if confidence < confidence_threshold:
-            result["error"] = "Low confidence score"
+            error_msg = f"Low confidence score: {confidence} < {confidence_threshold}"
+            logger.warning(error_msg)
+            result["error"] = error_msg
             return result
 
         # Check if piece exists in our database
         if not element_id or element_id not in self.categories_data:
-            result["error"] = "Piece not found in dictionary"
+            error_msg = f"Piece not found in dictionary: {element_id}"
+            logger.warning(error_msg)
+            result["error"] = error_msg
             return result
 
         # Add piece information to result
@@ -303,7 +386,13 @@ class SortingManager:
         })
 
         # Get bin number from strategy
-        result["bin_number"] = self.strategy.get_bin(element_id, confidence)
+        try:
+            result["bin_number"] = self.strategy.get_bin(element_id, confidence)
+            logger.info(f"Assigned piece {element_id} ({piece_info['name']}) to bin {result['bin_number']}")
+        except Exception as e:
+            error_msg = f"Error determining bin: {str(e)}"
+            logger.error(error_msg)
+            result["error"] = error_msg
 
         return result
 
@@ -323,6 +412,11 @@ class SortingManager:
         """
         return self.strategy.category_to_bin.copy()
 
+    def release(self) -> None:
+        """Release any resources used by the sorting manager"""
+        logger.info("Releasing sorting manager resources")
+        # Currently no resources to release, but adding for API consistency
+
 
 def create_sorting_manager(config_manager):
     """Factory function to create a sorting manager.
@@ -332,5 +426,18 @@ def create_sorting_manager(config_manager):
 
     Returns:
         SortingManager instance
+
+    Raises:
+        SortingError: If manager creation fails
     """
-    return SortingManager(config_manager)
+    logger.info("Creating sorting manager")
+
+    try:
+        return SortingManager(config_manager)
+    except Exception as e:
+        if isinstance(e, SortingError):
+            raise
+        error_msg = f"Failed to create sorting manager: {str(e)}"
+        logger.error(error_msg)
+        raise SortingError(error_msg)
+
