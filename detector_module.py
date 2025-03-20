@@ -45,7 +45,6 @@ class TrackedLegoDetector:
 
         # Capture cooldown settings
         self.capture_min_interval = 3.0  # Minimum seconds between captures
-        self.new_piece_grace_period = 0.5  # Seconds to wait before capturing a new piece
         self.spatial_cooldown_radius = 150  # Pixels - don't capture if too close to a previous capture
         self.spatial_cooldown_time = 10.0  # Seconds to maintain spatial cooldown zones
 
@@ -73,8 +72,7 @@ class TrackedLegoDetector:
         self.background_model = None
 
         # Initialize tracking-related variables
-        self.last_detection_time = time.time()
-        self.tracked_pieces: List[TrackedPiece] = []
+        self.tracked_pieces = []
         self.next_piece_id = 1
         self.roi = None
         self.entry_zone = None
@@ -319,7 +317,9 @@ class TrackedLegoDetector:
             return False
 
         # Don't capture pieces that just appeared (avoid post-stutter duplicates)
-        if current_time - piece.entry_time < self.new_piece_grace_period:
+        # Either use this with a class variable:
+        new_piece_grace_period = 0.5  # Local variable definition
+        if current_time - piece.entry_time < new_piece_grace_period:
             return False
 
         # Get piece position

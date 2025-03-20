@@ -4,6 +4,13 @@ camera_module.py - A simple module for camera functionality
 
 import os
 import cv2
+import logging
+from typing import Tuple, Optional, Any
+
+from error_module import CameraError
+
+# Set up module logger
+logger = logging.getLogger(__name__)
 
 
 class CameraModule:
@@ -25,9 +32,17 @@ class CameraModule:
             self.directory = os.path.abspath("LegoPictures")
             self.filename_prefix = "Lego"
 
+        logger.info(f"Initializing camera with device ID {device_id}")
+        logger.info(f"Image directory: {self.directory}")
+
         # Create directory if it doesn't exist
         if not os.path.exists(self.directory):
-            os.makedirs(self.directory)
+            try:
+                os.makedirs(self.directory)
+                logger.info(f"Created directory: {self.directory}")
+            except Exception as e:
+                logger.error(f"Failed to create directory {self.directory}: {str(e)}")
+                raise CameraError(f"Failed to create directory: {str(e)}")
 
         # Initialize count by checking existing files
         self.count = 1  # Start at 1 by default
@@ -49,14 +64,20 @@ class CameraModule:
                     self.count = max(numbers) + 1
 
         # Initialize camera
-        self.cap = cv2.VideoCapture(device_id)
-        if not self.cap.isOpened():
-            raise RuntimeError(f"Failed to initialize camera with device ID {device_id}")
+        try:
+            self.cap = cv2.VideoCapture(device_id)
+            if not self.cap.isOpened():
+                error_msg = f"Failed to initialize camera with device ID {device_id}"
+                logger.error(error_msg)
+                raise CameraError(error_msg)
 
-        self.is_initialized = True
-        print(f"Camera initialized with starting count: {self.count}")
+            self.is_initialized = True
+            logger.info(f"Camera initialized with starting count: {self.count}")
+        except Exception as e:
+            logger.error(f"Error during camera initialization: {str(e)}")
+            raise CameraError(f"Camera initialization error: {str(e)}")
 
-    def capture_image(self):
+    def capture_image(self) -> Tuple[Optional[str], Optional[int], Optional[str]]:
         """Captures and saves an image
 
         Returns:
@@ -66,11 +87,15 @@ class CameraModule:
                 - error_message: Error message if failed, or None if successful
         """
         if not self.is_initialized:
-            return None, None, "Camera not initialized"
+            error_msg = "Camera not initialized"
+            logger.error(error_msg)
+            return None, None, error_msg
 
         ret, frame = self.cap.read()
         if not ret:
-            return None, None, "Failed to capture image"
+            error_msg = "Failed to capture image"
+            logger.error(error_msg)
+            return None, None, error_msg
 
         filename = os.path.join(self.directory, f"{self.filename_prefix}{self.count:03d}.jpg")
 
@@ -78,28 +103,38 @@ class CameraModule:
             cv2.imwrite(filename, frame)
             current_count = self.count  # Store current count before incrementing
             self.count += 1
+            logger.info(f"Image captured and saved to {filename}")
             return filename, current_count, None
         except Exception as e:
-            return None, None, f"Failed to save image: {str(e)}"
+            error_msg = f"Failed to save image: {str(e)}"
+            logger.error(error_msg)
+            return None, None, error_msg
 
-    def get_preview_frame(self):
+    def get_preview_frame(self) -> Optional[Any]:
         """Gets a frame for preview without saving
 
         Returns:
             numpy.ndarray or None: Frame if successful, None otherwise
         """
         if not self.is_initialized:
+            logger.error("Attempted to get preview frame, but camera is not initialized")
             return None
 
         ret, frame = self.cap.read()
-        return frame if ret else None
+        if not ret:
+            logger.error("Failed to get preview frame")
+            return None
 
-    def release(self):
+        return frame
+
+    def release(self) -> None:
         """Releases camera resources"""
-        if self.is_initialized:
+        if hasattr(self, 'is_initialized') and self.is_initialized:
             self.cap.release()
             self.is_initialized = False
-            print("Camera resources released")
+            logger.info("Camera resources released")
+        else:
+            logger.debug("Release called on non-initialized camera")
 
 
 class VideoFileModule:
@@ -116,7 +151,11 @@ class VideoFileModule:
     Future implementation would mimic the CameraModule's interface
     but read frames from a video file instead of a live camera.
     """
-    pass
+
+    def release(self) -> None:
+        """Placeholder for resource release method"""
+        logger.debug("VideoFileModule.release() called")
+        pass
 
 
 # Simple factory function
@@ -129,19 +168,35 @@ def create_camera(camera_type="webcam", config_manager=None):
 
     Returns:
         Camera module instance
+
+    Raises:
+        CameraError: When camera initialization fails or an unsupported type is requested
     """
-    if camera_type == "webcam":
-        return CameraModule(config_manager)
-    else:
-        raise ValueError(f"Unsupported camera type: {camera_type}. Currently only 'webcam' is supported.")
+    logger.info(f"Creating camera of type: {camera_type}")
+
+    try:
+        if camera_type == "webcam":
+            return CameraModule(config_manager)
+        else:
+            error_msg = f"Unsupported camera type: {camera_type}. Currently only 'webcam' is supported."
+            logger.error(error_msg)
+            raise CameraError(error_msg)
+    except Exception as e:
+        if isinstance(e, CameraError):
+            raise
+        logger.error(f"Error creating camera: {str(e)}")
+        raise CameraError(f"Failed to create camera: {str(e)}")
 
 
 # Example usage
 if __name__ == "__main__":
-    # Create camera
-    camera = create_camera("webcam")
+    from error_module import setup_logging
+    setup_logging()
 
     try:
+        # Create camera
+        camera = create_camera("webcam")
+
         # Show preview
         frame = camera.get_preview_frame()
         if frame is not None:
@@ -151,11 +206,16 @@ if __name__ == "__main__":
         # Capture image
         filename, count, error = camera.capture_image()
         if error:
-            print(f"Error: {error}")
+            logger.error(f"Error: {error}")
         else:
-            print(f"Image saved to: {filename}")
+            logger.info(f"Image saved to: {filename}")
 
+    except CameraError as e:
+        logger.error(f"Camera error: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
     finally:
         # Clean up
-        camera.release()
-        cv2.destroyAllWindows()
+        if 'camera' in locals():
+            camera.release()
+            cv2.destroyAllWindows()
