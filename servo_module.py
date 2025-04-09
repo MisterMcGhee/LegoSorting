@@ -11,16 +11,14 @@ import logging
 from typing import Dict, Any, Optional
 import cv2
 
+# Import Adafruit ServoKit library
 try:
-    import board
-    import busio
-    from adafruit_pca9685 import PCA9685
-    from adafruit_motor import servo
+    from adafruit_servokit import ServoKit
 
     HARDWARE_AVAILABLE = True
 except (ImportError, NotImplementedError):
     HARDWARE_AVAILABLE = False
-    print("Warning: Adafruit libraries not found. Servo will run in simulation mode.")
+    print("Warning: Adafruit ServoKit library not found. Servo will run in simulation mode.")
 
 # Get module logger
 logger = logging.getLogger(__name__)
@@ -37,9 +35,8 @@ class ServoModule:
         """
         # Default configuration values
         self.channel = 0
-        self.frequency = 50
-        self.min_pulse = 150  # Typically ~1ms pulse for 0 degrees
-        self.max_pulse = 600  # Typically ~2ms pulse for 180 degrees
+        self.min_pulse = 500  # Typically ~1ms pulse for 0 degrees (in microseconds)
+        self.max_pulse = 2500  # Typically ~2ms pulse for 180 degrees (in microseconds)
         self.default_position = 90  # Center position in degrees
         self.bin_positions = {}  # Will store bin_number -> angle mapping
         self.current_bin = None  # Currently selected bin
@@ -52,7 +49,6 @@ class ServoModule:
 
             if servo_config:
                 self.channel = servo_config.get("channel", self.channel)
-                self.frequency = servo_config.get("frequency", self.frequency)
                 self.min_pulse = servo_config.get("min_pulse", self.min_pulse)
                 self.max_pulse = servo_config.get("max_pulse", self.max_pulse)
                 self.default_position = servo_config.get("default_position", self.default_position)
@@ -73,8 +69,8 @@ class ServoModule:
             self.overflow_bin = 9
 
         # Initialize hardware connection
-        self.pca = None
-        self.servo_motor = None
+        self.kit = None
+        self.servo = None
         self.initialized = False
         self.simulation_mode = not HARDWARE_AVAILABLE
 
@@ -82,6 +78,7 @@ class ServoModule:
 
         # If in calibration mode, run calibration
         if self.calibration_mode and self.initialized:
+            print("Starting servo calibration mode...")
             self.calibrate()
             # Turn off calibration mode in config after running
             if self.config_manager:
@@ -89,34 +86,37 @@ class ServoModule:
                 self.config_manager.save_config()
 
     def _initialize_hardware(self):
-        """Initialize the PCA9685 and servo motor"""
+        """Initialize the ServoKit and servo motor"""
+        print(f"Initializing servo hardware. HARDWARE_AVAILABLE = {HARDWARE_AVAILABLE}")
+
         if self.simulation_mode:
             logger.info("Running in servo simulation mode")
+            print("Running in servo simulation mode")
             self.initialized = True
             return
 
         try:
-            # Initialize I2C bus and PCA9685
-            i2c = busio.I2C(board.SCL, board.SDA)
-            self.pca = PCA9685(i2c)
-            self.pca.frequency = self.frequency
+            # Initialize ServoKit
+            print(f"Creating ServoKit instance...")
+            self.kit = ServoKit(channels=16)  # Assuming 16-channel PCA9685
 
-            # Initialize servo
-            self.servo_motor = servo.Servo(
-                self.pca.channels[self.channel],
-                min_pulse=self.min_pulse,
-                max_pulse=self.max_pulse,
-                actuation_range=180  # Full range in degrees
-            )
+            # Configure servo parameters
+            print(f"Configuring servo on channel {self.channel}")
+            print(f"Setting pulse width range: {self.min_pulse}-{self.max_pulse}")
+            self.servo = self.kit.servo[self.channel]
+            self.servo.set_pulse_width_range(self.min_pulse, self.max_pulse)
 
             # Move to default position
-            self.servo_motor.angle = self.default_position
+            print(f"Moving to default position: {self.default_position} degrees")
+            self.servo.angle = self.default_position
             time.sleep(0.5)  # Allow time for servo to move
 
             self.initialized = True
+            print("Servo hardware initialized successfully")
             logger.info("Servo hardware initialized successfully")
 
         except Exception as e:
+            print(f"Failed to initialize servo hardware: {str(e)}")
             logger.error(f"Failed to initialize servo hardware: {str(e)}")
             self.simulation_mode = True
             self.initialized = True  # Still mark as initialized for simulation mode
@@ -140,12 +140,15 @@ class ServoModule:
         try:
             if self.simulation_mode:
                 logger.info(f"Simulation: Moving servo to {angle} degrees")
+                print(f"Simulation: Moving servo to {angle} degrees")
             else:
-                self.servo_motor.angle = angle
+                self.servo.angle = angle
                 logger.debug(f"Moved servo to {angle} degrees")
+                print(f"Moved servo to {angle} degrees")
             return True
         except Exception as e:
             logger.error(f"Error moving servo: {str(e)}")
+            print(f"Error moving servo: {str(e)}")
             return False
 
     def move_to_bin(self, bin_number: int) -> bool:
@@ -231,7 +234,7 @@ class ServoModule:
                         finally:
                             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                     except (ImportError, AttributeError):
-                        # Fall back to regular input if it can't get single char input
+                        # Fall back to regular input if can't get single char input
                         command = input().lower()[0] if input() else ""
 
                 if command == '+':
@@ -281,11 +284,11 @@ class ServoModule:
             self.move_to_angle(self.default_position)
             time.sleep(0.5)  # Allow time for servo to move
 
-            # Deinitialize hardware
-            self.pca.deinit()
             logger.info("Servo resources released")
+            print("Servo resources released")
         except Exception as e:
             logger.error(f"Error releasing servo resources: {str(e)}")
+            print(f"Error releasing servo resources: {str(e)}")
 
 
 # Factory function
