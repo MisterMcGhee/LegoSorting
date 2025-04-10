@@ -161,7 +161,7 @@ class TrackedLegoDetector:
             roi_frame = detection_frame[y:y + h, x:x + w]
             self._initialize_background_model(roi_frame)
 
-        return self.original_roi  # Return the original ROI for display purposes
+        return roi  # Return the original ROI for display purposes
 
     def _initialize_background_model(self, roi_frame):
         """Initialize the background model by computing average colors for each grid cell
@@ -570,18 +570,20 @@ class TrackedLegoDetector:
         x, y, w, h = self.original_roi
         cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
+        # Calculate entry and exit zones in original coordinates
+        orig_entry_x = int(self.entry_zone[1] / self.detection_scale_factor)
+        orig_exit_x = int(self.exit_zone[0] / self.detection_scale_factor)
+
         # Draw entry zone - Blue (scaled to original coordinates)
-        entry_x = int(self.entry_zone[1] / self.detection_scale_factor)
         cv2.line(debug_frame,
-                 (x + entry_x, y),
-                 (x + entry_x, y + h),
+                 (x + orig_entry_x, y),
+                 (x + orig_entry_x, y + h),
                  (255, 0, 0), 2)
 
         # Draw exit zone - Red (scaled to original coordinates)
-        exit_x = int(self.exit_zone[0] / self.detection_scale_factor)
         cv2.line(debug_frame,
-                 (x + exit_x, y),
-                 (x + exit_x, y + h),
+                 (x + orig_exit_x, y),
+                 (x + orig_exit_x, y + h),
                  (0, 0, 255), 2)
 
         # Draw grid if enabled
