@@ -3,8 +3,7 @@ Lego Sorting 003 - Main application for Lego piece sorting
 
 This script serves as the entry point for the Lego sorting application,
 coordinating between the various modules. This version includes multithreaded
-processing for improved performance and reduced stuttering, as well as support
-for default ROI configuration for headless operation.
+processing for improved performance and reduced stuttering.
 """
 
 import os
@@ -196,31 +195,14 @@ class LegoSortingApplication:
             logger.info("Initializing sorting system")
             print("\nInitializing sorting system...")
 
-            # Check if visualization is enabled
-            show_visualizer = self.config_manager.get("detector", "show_visualizer", True)
-
-            # Check if ROI should be drawn manually or use default
-            draw_roi = self.config_manager.get("detector", "draw_roi", True)
-
-            if draw_roi and show_visualizer:
-                # Show instructions for manual ROI selection
-                print("\nOpening camera preview for belt region selection.")
-                print("Position the camera to view the belt clearly.")
-                print("Select the region to monitor by dragging a rectangle:")
-                print("Press SPACE or ENTER to confirm selection")
-                print("Press ESC to exit")
-            else:
-                # Using default ROI
-                print("\nUsing default ROI from configuration.")
-
-            # Get initial frame for calibration
+            # Get initial frame for ROI selection
             frame = self.camera.get_preview_frame()
             if frame is None:
                 logger.error("Failed to get preview frame")
                 raise RuntimeError("Failed to get preview frame")
 
-            # Initialize detector with ROI
-            self.detector.calibrate(frame)
+            # Initialize detector with ROI (from config if available)
+            self.detector.load_roi_from_config(frame, self.config_manager)
 
             print("\nSetup complete!")
 
@@ -325,28 +307,15 @@ class LegoSortingApplication:
                     cv2.putText(debug_frame, bin_text, (10, 150),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-                # Show frame if visualization is enabled
-                if self.config_manager.get("detector", "show_visualizer", True):
-                    cv2.imshow("Lego Sorting System", debug_frame)
+                # Show frame
+                cv2.imshow("Lego Sorting System", debug_frame)
 
-                    # Check for exit
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == 27:  # ESC key
-                        logger.info("ESC key pressed, exiting")
-                        self.running = False
-                        break
-                else:
-                    # When not showing visualization, still need a way to exit gracefully
-                    # Using a small sleep to prevent 100% CPU usage
-                    time.sleep(0.01)
-
-                    # For headless mode, you might want to implement an alternative exit mechanism
-                    # Such as checking for a specific file, or implementing a timeout
-                    # Example: Check if a stop file exists
-                    if os.path.exists("stop.txt"):
-                        logger.info("Stop file detected, exiting")
-                        self.running = False
-                        break
+                # Check for exit
+                key = cv2.waitKey(1) & 0xFF
+                if key == 27:  # ESC key
+                    logger.info("ESC key pressed, exiting")
+                    self.running = False
+                    break
 
         except Exception as e:
             logger.exception("Error in main loop: %s", str(e))
@@ -372,9 +341,8 @@ class LegoSortingApplication:
         if not self.threading_enabled and hasattr(self, 'servo') and self.servo:
             self.servo.release()
 
-        # Close windows if visualizer was enabled
-        if self.config_manager.get("detector", "show_visualizer", True):
-            cv2.destroyAllWindows()
+        # Close windows
+        cv2.destroyAllWindows()
 
         # Calculate and log final statistics
         if self.start_time:
@@ -401,10 +369,6 @@ if __name__ == "__main__":
     parser.add_argument('--log-level', type=str, default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Set logging level')
-    parser.add_argument('--headless', action='store_true',
-                        help='Run in headless mode (no GUI)')
-    parser.add_argument('--default-roi', action='store_true',
-                        help='Use default ROI from config instead of manual selection')
     args = parser.parse_args()
 
     # Set up logging
@@ -426,18 +390,6 @@ if __name__ == "__main__":
         config_manager.set("threading", "enabled", False)
         config_manager.save_config()
         logger.info("Threading disabled via command line")
-
-    # If headless mode is enabled, update config
-    if args.headless:
-        config_manager.set("detector", "show_visualizer", False)
-        config_manager.save_config()
-        logger.info("Headless mode activated")
-
-    # If default ROI is enabled, update config
-    if args.default_roi:
-        config_manager.set("detector", "draw_roi", False)
-        config_manager.save_config()
-        logger.info("Default ROI mode activated")
 
     # Create and run application
     application = LegoSortingApplication(config_path=args.config)

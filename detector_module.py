@@ -39,6 +39,9 @@ class TrackedLegoDetector:
             config_manager: Optional configuration manager
             thread_manager: Optional thread manager for asynchronous operation
         """
+        # Store the config manager for later use
+        self.config_manager = config_manager
+
         # Set default values
         self.min_piece_area = 1000
         self.max_piece_area = 100000
@@ -114,6 +117,70 @@ class TrackedLegoDetector:
         # Asynchronous mode flag
         self.async_mode = thread_manager is not None
 
+    def load_roi_from_config(self, frame, config_manager=None):
+        """Load ROI from configuration if available, otherwise calibrate manually.
+
+        Args:
+            frame: The video frame to use for calibration if needed
+            config_manager: Configuration manager with ROI settings (optional)
+
+        Returns:
+            tuple: The selected/loaded ROI as (x, y, w, h)
+        """
+        if config_manager is None:
+            config_manager = self.config_manager
+
+        if config_manager:
+            # Check if we have ROI saved in configuration
+            roi_config = config_manager.get_section("detector_roi")
+
+            if roi_config and "x" in roi_config and "y" in roi_config and "w" in roi_config and "h" in roi_config:
+                # ROI exists in config, use it
+                roi = (roi_config["x"], roi_config["y"], roi_config["w"], roi_config["h"])
+                print(f"Loading ROI from config: {roi}")
+
+                with self.lock:
+                    # Store original resolution ROI
+                    self.original_roi = roi
+
+                    # Create detection resolution ROI
+                    detection_x = int(roi[0] * self.detection_scale_factor)
+                    detection_y = int(roi[1] * self.detection_scale_factor)
+                    detection_w = int(roi[2] * self.detection_scale_factor)
+                    detection_h = int(roi[3] * self.detection_scale_factor)
+                    self.detection_roi = (detection_x, detection_y, detection_w, detection_h)
+
+                    # Use detection ROI for internal processing
+                    self.roi = self.detection_roi
+                    roi_width = self.roi[2]
+
+                    # Calculate buffer zones
+                    buffer_width = int(roi_width * self.buffer_percent)
+                    self.entry_zone = (self.roi[0], self.roi[0] + buffer_width)
+                    self.exit_zone = (self.roi[0] + self.roi[2] - buffer_width, self.roi[0] + self.roi[2])
+                    self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
+
+                    print(f"Original ROI: {self.original_roi}")
+                    print(f"Detection ROI: {self.detection_roi}")
+                    print(f"Entry buffer: {self.entry_zone}")
+                    print(f"Valid zone: {self.valid_zone}")
+                    print(f"Exit buffer: {self.exit_zone}")
+
+                    # Initialize background model with detection resolution
+                    x, y, w, h = self.roi
+                    # Create a downscaled version of the frame for detection
+                    detection_frame = cv2.resize(frame, (0, 0), fx=self.detection_scale_factor,
+                                                 fy=self.detection_scale_factor)
+                    roi_frame = detection_frame[y:y + h, x:x + w]
+                    self._initialize_background_model(roi_frame)
+
+                return roi
+
+        # If we get here, either no config manager or no ROI in config
+        # Fall back to manual calibration
+        print("No ROI configuration found. Please select ROI manually.")
+        return self.calibrate(frame)
+
     def calibrate(self, frame):
         """Get user-selected ROI and calculate buffer zones
 
@@ -124,6 +191,9 @@ class TrackedLegoDetector:
             tuple: The selected ROI as (x, y, w, h)
         """
         # Get ROI selection from user
+        print("\nSelect belt region by dragging a rectangle with your mouse.")
+        print("Press SPACE or ENTER to confirm selection")
+        print("Press ESC to exit")
         roi = cv2.selectROI("Select Belt Region", frame, False)
         cv2.destroyWindow("Select Belt Region")
 
@@ -160,6 +230,18 @@ class TrackedLegoDetector:
             detection_frame = cv2.resize(frame, (0, 0), fx=self.detection_scale_factor, fy=self.detection_scale_factor)
             roi_frame = detection_frame[y:y + h, x:x + w]
             self._initialize_background_model(roi_frame)
+
+            # Save ROI to config
+            if hasattr(self, 'config_manager') and self.config_manager:
+                roi_config = {
+                    "x": roi[0],
+                    "y": roi[1],
+                    "w": roi[2],
+                    "h": roi[3]
+                }
+                self.config_manager.update_section("detector_roi", roi_config)
+                self.config_manager.save_config()
+                print("ROI saved to configuration")
 
         return roi  # Return the original ROI for display purposes
 
