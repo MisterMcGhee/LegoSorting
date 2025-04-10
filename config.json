@@ -16,7 +16,10 @@
         "track_timeout": 1.0,
         "capture_min_interval": 1.0,
         "spatial_cooldown_radius": 80,
-        "spatial_cooldown_time": 2.0
+        "spatial_cooldown_time": 2.0,
+        "draw_roi": false,
+        "default_roi": [250, 250, 1400, 500],
+        "show_visualizer": true
     },
     "piece_identifier": {
         "csv_path": "Lego_Categories.csv",

@@ -1,10 +1,17 @@
+"""
+detector_module.py - Detector and tracker for Lego pieces
+
+This module handles detection and tracking of Lego pieces on a moving belt,
+with various options for calibration, tracking, and visualization.
+"""
+
 import time
+import threading
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Any
 
 import cv2
 import numpy as np
-import threading
 
 
 @dataclass
@@ -53,6 +60,16 @@ class TrackedLegoDetector:
         self.spatial_cooldown_radius = 150  # Pixels - don't capture if too close to a previous capture
         self.spatial_cooldown_time = 10.0  # Seconds to maintain spatial cooldown zones
 
+        # Default ROI settings
+        self.draw_roi = True  # Whether to draw ROI or use the default
+        self.default_roi = (100, 100, 400, 300)  # Default ROI (x, y, w, h)
+
+        # Visualizer settings
+        self.show_visualizer = True  # Whether to show the visualizer
+
+        # Store config_manager for later use
+        self.config_manager = config_manager
+
         # Initialize from config if provided
         if config_manager:
             self.min_piece_area = config_manager.get("detector", "min_piece_area", self.min_piece_area)
@@ -72,6 +89,15 @@ class TrackedLegoDetector:
                                                               self.spatial_cooldown_radius)
             self.spatial_cooldown_time = config_manager.get("detector", "spatial_cooldown_time",
                                                             self.spatial_cooldown_time)
+
+            # Get ROI settings from config
+            self.draw_roi = config_manager.get("detector", "draw_roi", self.draw_roi)
+            default_roi = config_manager.get("detector", "default_roi", self.default_roi)
+            if isinstance(default_roi, list) and len(default_roi) == 4:
+                self.default_roi = tuple(default_roi)
+
+            # Get visualizer settings from config
+            self.show_visualizer = config_manager.get("detector", "show_visualizer", self.show_visualizer)
 
             # Check if threading is enabled
             if config_manager.is_threading_enabled():
@@ -102,17 +128,23 @@ class TrackedLegoDetector:
         self.async_mode = thread_manager is not None
 
     def calibrate(self, frame):
-        """Get user-selected ROI and calculate buffer zones
+        """Get user-selected ROI or use default ROI and calculate buffer zones
 
         Args:
             frame: The video frame to use for calibration
 
         Returns:
-            tuple: The selected ROI as (x, y, w, h)
+            tuple: The selected or default ROI as (x, y, w, h)
         """
-        # Get ROI selection from user
-        roi = cv2.selectROI("Select Belt Region", frame, False)
-        cv2.destroyWindow("Select Belt Region")
+        # Get ROI selection from user or use default
+        if self.draw_roi and self.show_visualizer:
+            # Get ROI selection from user
+            roi = cv2.selectROI("Select Belt Region", frame, False)
+            cv2.destroyWindow("Select Belt Region")
+        else:
+            # Use default ROI
+            roi = self.default_roi
+            print(f"Using default ROI: {roi}")
 
         with self.lock:
             self.roi = roi
@@ -508,6 +540,10 @@ class TrackedLegoDetector:
         if self.roi is None:
             return frame
 
+        # If visualization is disabled, return the original frame
+        if not self.show_visualizer:
+            return frame
+
         debug_frame = frame.copy()
 
         # Draw ROI - Green boundary
@@ -609,6 +645,16 @@ class TrackedLegoDetector:
                 label_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
                 cv2.rectangle(debug_frame, (x, y - label_size[1] - 10), (x + label_size[0], y), (0, 0, 0), -1)
                 cv2.putText(debug_frame, label_text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, label_color, 1)
+
+        # Add a label to show whether we're using default ROI or not
+        roi_type = "DEFAULT" if not self.draw_roi else "MANUAL"
+        cv2.putText(debug_frame, f"ROI: {roi_type}", (10, debug_frame.shape[0] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        # Add threading mode label
+        threading_mode = "ASYNC" if self.async_mode else "SYNC"
+        cv2.putText(debug_frame, f"Mode: {threading_mode}", (200, debug_frame.shape[0] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
         return debug_frame
 
