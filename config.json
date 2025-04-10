@@ -10,7 +10,10 @@
         "buffer_percent": 0.2,
         "crop_padding": 50,
         "history_length": 5,
-        "grid_size": [10, 10],
+        "grid_size": [
+            10,
+            10
+        ],
         "color_margin": 40,
         "show_grid": true,
         "track_timeout": 1.0,
@@ -18,7 +21,12 @@
         "spatial_cooldown_radius": 80,
         "spatial_cooldown_time": 2.0,
         "draw_roi": false,
-        "default_roi": [250, 250, 1400, 500],
+        "default_roi": [
+            250,
+            250,
+            1400,
+            500
+        ],
         "show_visualizer": true
     },
     "piece_identifier": {

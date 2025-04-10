@@ -134,7 +134,12 @@ class TrackedLegoDetector:
             # Check if we have ROI saved in configuration
             roi_config = config_manager.get_section("detector_roi")
 
-            if roi_config and "x" in roi_config and "y" in roi_config and "w" in roi_config and "h" in roi_config:
+            # Validate ROI configuration - check if all required values exist AND are non-zero
+            if (roi_config and
+                    "x" in roi_config and "y" in roi_config and
+                    "w" in roi_config and "h" in roi_config and
+                    roi_config["w"] > 0 and roi_config["h"] > 0):  # Ensure width and height are positive
+
                 # ROI exists in config, use it
                 roi = (roi_config["x"], roi_config["y"], roi_config["w"], roi_config["h"])
                 print(f"Loading ROI from config: {roi}")
@@ -175,12 +180,13 @@ class TrackedLegoDetector:
                     self._initialize_background_model(roi_frame)
 
                 return roi
+            else:
+                print("ROI configuration is invalid or incomplete. Running manual calibration.")
 
-        # If we get here, either no config manager or no ROI in config
+        # If we get here, either no config manager or no valid ROI in config
         # Fall back to manual calibration
-        print("No ROI configuration found. Please select ROI manually.")
+        print("No valid ROI configuration found. Please select ROI manually.")
         return self.calibrate(frame)
-
     def calibrate(self, frame):
         """Get user-selected ROI and calculate buffer zones
 

@@ -47,25 +47,54 @@ class LegoSortingApplication:
         self.threading_enabled = self.config_manager.is_threading_enabled()
         logger.info("Threading enabled: %s", self.threading_enabled)
 
+        # Initialize components that don't depend on threading first
+        try:
+            self.camera = create_camera("webcam", self.config_manager)
+            logger.info("Camera initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize camera: {str(e)}")
+            raise RuntimeError(f"Camera initialization failed: {str(e)}")
+
         # Initialize thread manager if threading is enabled
         self.thread_manager = None
         if self.threading_enabled:
-            self.thread_manager = create_thread_manager(self.config_manager)
+            try:
+                self.thread_manager = create_thread_manager(self.config_manager)
+                # Register callbacks for processing events
+                self.thread_manager.register_callback("piece_processed", self._on_piece_processed)
+                self.thread_manager.register_callback("piece_error", self._on_piece_error)
+                logger.info("Thread manager initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize thread manager: {str(e)}")
+                self.threading_enabled = False
+                logger.warning("Disabling threading due to initialization failure")
 
-            # Register callbacks for processing events
-            self.thread_manager.register_callback("piece_processed", self._on_piece_processed)
-            self.thread_manager.register_callback("piece_error", self._on_piece_error)
+        # Now initialize detector with thread manager (or None if threading disabled)
+        try:
+            self.detector = create_detector("tracked", self.config_manager, self.thread_manager)
+            logger.info("Detector initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize detector: {str(e)}")
+            raise RuntimeError(f"Detector initialization failed: {str(e)}")
 
-        # Initialize components with config
-        self.camera = create_camera("webcam", self.config_manager)
-        self.detector = create_detector("tracked", self.config_manager, self.thread_manager)
-        self.sorting_manager = create_sorting_manager(self.config_manager)
+        # Initialize sorting manager
+        try:
+            self.sorting_manager = create_sorting_manager(self.config_manager)
+            logger.info("Sorting manager initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize sorting manager: {str(e)}")
+            raise RuntimeError(f"Sorting manager initialization failed: {str(e)}")
 
         # Only initialize API client and servo in the main thread if threading is disabled
         # Otherwise, these will be initialized in the worker thread
         if not self.threading_enabled:
-            self.api_client = create_api_client("brickognize", self.config_manager)
-            self.servo = create_servo_module(self.config_manager)
+            try:
+                self.api_client = create_api_client("brickognize", self.config_manager)
+                self.servo = create_servo_module(self.config_manager)
+                logger.info("API client and servo initialized in main thread")
+            except Exception as e:
+                logger.error(f"Failed to initialize API client or servo: {str(e)}")
+                raise RuntimeError(f"API client or servo initialization failed: {str(e)}")
         else:
             self.api_client = None
             self.servo = None
@@ -84,7 +113,6 @@ class LegoSortingApplication:
         self.fps = 0
         self.last_fps_update = 0
         self.processed_pieces = 0
-
     def _start_processing_thread(self):
         """Start the processing worker thread."""
         if not self.threading_enabled:
@@ -189,6 +217,11 @@ class LegoSortingApplication:
 
         return debug_frame
 
+    """
+    Modified run method for LegoSortingApplication class to improve
+    ROI loading and error handling.
+    """
+
     def run(self):
         """Run the main sorting application loop."""
         try:
@@ -196,13 +229,30 @@ class LegoSortingApplication:
             print("\nInitializing sorting system...")
 
             # Get initial frame for ROI selection
-            frame = self.camera.get_preview_frame()
+            frame = None
+            max_attempts = 5
+            for attempt in range(max_attempts):
+                frame = self.camera.get_preview_frame()
+                if frame is not None:
+                    break
+                print(f"Attempt {attempt + 1}/{max_attempts} to get preview frame failed, retrying...")
+                time.sleep(1)
+
             if frame is None:
-                logger.error("Failed to get preview frame")
-                raise RuntimeError("Failed to get preview frame")
+                logger.error("Failed to get preview frame after multiple attempts")
+                raise RuntimeError("Failed to get preview frame after multiple attempts")
 
             # Initialize detector with ROI (from config if available)
-            self.detector.load_roi_from_config(frame, self.config_manager)
+            try:
+                # Initialize detector with ROI
+                self.detector.load_roi_from_config(frame, self.config_manager)
+                logger.info("Detector ROI initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize detector ROI: {str(e)}")
+                print(f"\nError initializing detector ROI: {str(e)}")
+                print("Attempting manual calibration...")
+                # Try manual calibration as fallback
+                self.detector.calibrate(frame)
 
             print("\nSetup complete!")
 
@@ -217,7 +267,9 @@ class LegoSortingApplication:
                 print(f"Default overflow bin: {overflow_bin}")
             else:
                 # In synchronous mode, move servo to default position initially
-                self.servo.move_to_bin(self.config_manager.get("sorting", "overflow_bin", 9))
+                if hasattr(self, 'servo') and self.servo:
+                    self.servo.move_to_bin(self.config_manager.get("sorting", "overflow_bin", 9))
+                    print("Moved servo to default position")
 
             print("\nSorting system ready. Press ESC to exit.")
 
@@ -233,25 +285,32 @@ class LegoSortingApplication:
                 frame = self.camera.get_preview_frame()
                 if frame is None:
                     logger.warning("Failed to get preview frame")
+                    time.sleep(0.1)  # Short delay to avoid tight loop if camera is failing
                     continue
 
                 # Increment frame counter
                 self.frame_count += 1
 
                 # Process frame based on threading mode
-                if self.threading_enabled:
-                    # Asynchronous mode - detection only, processing happens in worker thread
-                    tracked_pieces = self.detector.process_frame_async(
-                        frame=frame,
-                        current_count=self.camera.count
-                    )
-                    piece_image = None  # No immediate image in async mode
-                else:
-                    # Synchronous mode - detection and immediate processing
-                    tracked_pieces, piece_image = self.detector.process_frame(
-                        frame=frame,
-                        current_count=self.camera.count
-                    )
+                try:
+                    if self.threading_enabled:
+                        # Asynchronous mode - detection only, processing happens in worker thread
+                        tracked_pieces = self.detector.process_frame_async(
+                            frame=frame,
+                            current_count=self.camera.count
+                        )
+                        piece_image = None  # No immediate image in async mode
+                    else:
+                        # Synchronous mode - detection and immediate processing
+                        tracked_pieces, piece_image = self.detector.process_frame(
+                            frame=frame,
+                            current_count=self.camera.count
+                        )
+                except Exception as e:
+                    logger.error(f"Error processing frame: {str(e)}")
+                    print(f"Error processing frame: {str(e)}")
+                    time.sleep(0.1)  # Short delay to avoid tight loop in case of errors
+                    continue
 
                 # In synchronous mode, process detected pieces immediately
                 if not self.threading_enabled and piece_image is not None:
@@ -296,19 +355,25 @@ class LegoSortingApplication:
                         self.processed_pieces += 1
 
                 # Show debug view
-                debug_frame = self.detector.draw_debug(frame)
+                try:
+                    debug_frame = self.detector.draw_debug(frame)
 
-                # Add status information
-                debug_frame = self._update_status(frame, debug_frame)
+                    # Add status information
+                    debug_frame = self._update_status(frame, debug_frame)
 
-                # Add servo information to debug frame
-                if not self.threading_enabled and self.servo.current_bin is not None:
-                    bin_text = f"Current Bin: {self.servo.current_bin}"
-                    cv2.putText(debug_frame, bin_text, (10, 150),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    # Add servo information to debug frame
+                    if not self.threading_enabled and hasattr(self,
+                                                              'servo') and self.servo and self.servo.current_bin is not None:
+                        bin_text = f"Current Bin: {self.servo.current_bin}"
+                        cv2.putText(debug_frame, bin_text, (10, 150),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-                # Show frame
-                cv2.imshow("Lego Sorting System", debug_frame)
+                    # Show frame
+                    cv2.imshow("Lego Sorting System", debug_frame)
+                except Exception as e:
+                    logger.error(f"Error displaying debug frame: {str(e)}")
+                    # Show original frame as fallback
+                    cv2.imshow("Lego Sorting System", frame)
 
                 # Check for exit
                 key = cv2.waitKey(1) & 0xFF
@@ -322,7 +387,6 @@ class LegoSortingApplication:
             print(f"Error: {str(e)}")
         finally:
             self.cleanup()
-
     def cleanup(self):
         """Clean up resources."""
         logger.info("Cleaning up resources")
