@@ -1,7 +1,8 @@
 {
     "camera": {
         "device_id": 0,
-        "directory": "LegoPictures"
+        "directory": "LegoPictures",
+        "filename_prefix": "Lego"
     },
     "detector": {
         "min_piece_area": 500,
@@ -15,10 +16,7 @@
         "track_timeout": 1.0,
         "capture_min_interval": 1.0,
         "spatial_cooldown_radius": 80,
-        "spatial_cooldown_time": 2.0,
-        "draw_roi": false,
-        "default_roi": [250, 250, 1400, 500],
-        "show_visualizer": true
+        "spatial_cooldown_time": 2.0
     },
     "piece_identifier": {
         "csv_path": "Lego_Categories.csv",
@@ -31,10 +29,19 @@
         "max_bins": 9,
         "overflow_bin": 9
     },
+    "threading": {
+        "enabled": true,
+        "max_queue_size": 100,
+        "worker_count": 1,
+        "api_timeout": 30.0,
+        "processing_timeout": 60.0,
+        "shutdown_timeout": 5.0,
+        "polling_interval": 0.01
+    },
     "servo": {
         "channel": 0,
-        "min_pulse": 150,
-        "max_pulse": 600,
+        "min_pulse": 500,
+        "max_pulse": 2500,
         "frequency": 50,
         "default_position": 90,
         "calibration_mode": false,
