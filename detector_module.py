@@ -1,17 +1,10 @@
-"""
-detector_module.py - Detector and tracker for Lego pieces
-
-This module handles detection and tracking of Lego pieces on a moving belt,
-with various options for calibration, tracking, and visualization.
-"""
-
 import time
-import threading
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Any
 
 import cv2
 import numpy as np
+import threading
 
 
 @dataclass
@@ -28,6 +21,8 @@ class TrackedPiece:
     # New fields for threading support
     being_processed: bool = False  # Whether this piece is being processed by worker thread
     processing_start_time: Optional[float] = None  # When processing started
+    # New field to store the scaling factor used for this piece
+    scale_factor: Tuple[float, float] = (1.0, 1.0)  # Scale factor (fx, fy) to convert between resolutions
 
     def __post_init__(self):
         """Initialize the last_update_time to the current time"""
@@ -50,7 +45,7 @@ class TrackedLegoDetector:
         self.buffer_percent = 0.01
         self.crop_padding = 20
         self.history_length = 2
-        self.grid_size = (10, 10)
+        self.grid_size = (5, 5)  # Changed from (10, 10) to (5, 5)
         self.color_margin = 40
         self.show_grid = False
         self.track_timeout = 1.0  # Time in seconds before removing a track that hasn't been updated
@@ -60,15 +55,10 @@ class TrackedLegoDetector:
         self.spatial_cooldown_radius = 150  # Pixels - don't capture if too close to a previous capture
         self.spatial_cooldown_time = 10.0  # Seconds to maintain spatial cooldown zones
 
-        # Default ROI settings
-        self.draw_roi = True  # Whether to draw ROI or use the default
-        self.default_roi = (100, 100, 400, 300)  # Default ROI (x, y, w, h)
-
-        # Visualizer settings
-        self.show_visualizer = True  # Whether to show the visualizer
-
-        # Store config_manager for later use
-        self.config_manager = config_manager
+        # New parameters for dual resolution processing
+        self.detection_scale_factor = 0.5  # Process at half resolution for detection
+        self.original_roi = None  # Will store the ROI in original resolution
+        self.detection_roi = None  # Will store the ROI in detection resolution
 
         # Initialize from config if provided
         if config_manager:
@@ -90,14 +80,11 @@ class TrackedLegoDetector:
             self.spatial_cooldown_time = config_manager.get("detector", "spatial_cooldown_time",
                                                             self.spatial_cooldown_time)
 
-            # Get ROI settings from config
-            self.draw_roi = config_manager.get("detector", "draw_roi", self.draw_roi)
-            default_roi = config_manager.get("detector", "default_roi", self.default_roi)
-            if isinstance(default_roi, list) and len(default_roi) == 4:
-                self.default_roi = tuple(default_roi)
-
-            # Get visualizer settings from config
-            self.show_visualizer = config_manager.get("detector", "show_visualizer", self.show_visualizer)
+            # Adjust min and max piece area for the detection resolution
+            self.detection_min_piece_area = int(
+                self.min_piece_area * self.detection_scale_factor * self.detection_scale_factor)
+            self.detection_max_piece_area = int(
+                self.max_piece_area * self.detection_scale_factor * self.detection_scale_factor)
 
             # Check if threading is enabled
             if config_manager.is_threading_enabled():
@@ -128,45 +115,53 @@ class TrackedLegoDetector:
         self.async_mode = thread_manager is not None
 
     def calibrate(self, frame):
-        """Get user-selected ROI or use default ROI and calculate buffer zones
+        """Get user-selected ROI and calculate buffer zones
 
         Args:
             frame: The video frame to use for calibration
 
         Returns:
-            tuple: The selected or default ROI as (x, y, w, h)
+            tuple: The selected ROI as (x, y, w, h)
         """
-        # Get ROI selection from user or use default
-        if self.draw_roi and self.show_visualizer:
-            # Get ROI selection from user
-            roi = cv2.selectROI("Select Belt Region", frame, False)
-            cv2.destroyWindow("Select Belt Region")
-        else:
-            # Use default ROI
-            roi = self.default_roi
-            print(f"Using default ROI: {roi}")
+        # Get ROI selection from user
+        roi = cv2.selectROI("Select Belt Region", frame, False)
+        cv2.destroyWindow("Select Belt Region")
 
         with self.lock:
-            self.roi = roi
-            roi_width = roi[2]
+            # Store original resolution ROI
+            self.original_roi = roi
+
+            # Create detection resolution ROI
+            detection_x = int(roi[0] * self.detection_scale_factor)
+            detection_y = int(roi[1] * self.detection_scale_factor)
+            detection_w = int(roi[2] * self.detection_scale_factor)
+            detection_h = int(roi[3] * self.detection_scale_factor)
+            self.detection_roi = (detection_x, detection_y, detection_w, detection_h)
+
+            # Use detection ROI for internal processing
+            self.roi = self.detection_roi
+            roi_width = self.roi[2]
 
             # Calculate buffer zones
             buffer_width = int(roi_width * self.buffer_percent)
-            self.entry_zone = (roi[0], roi[0] + buffer_width)
-            self.exit_zone = (roi[0] + roi[2] - buffer_width, roi[0] + roi[2])
+            self.entry_zone = (self.roi[0], self.roi[0] + buffer_width)
+            self.exit_zone = (self.roi[0] + self.roi[2] - buffer_width, self.roi[0] + self.roi[2])
             self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
 
-            print(f"ROI: {roi}")
+            print(f"Original ROI: {self.original_roi}")
+            print(f"Detection ROI: {self.detection_roi}")
             print(f"Entry buffer: {self.entry_zone}")
             print(f"Valid zone: {self.valid_zone}")
             print(f"Exit buffer: {self.exit_zone}")
 
-            # Initialize background model
+            # Initialize background model with detection resolution
             x, y, w, h = self.roi
-            roi_frame = frame[y:y + h, x:x + w]
+            # Create a downscaled version of the frame for detection
+            detection_frame = cv2.resize(frame, (0, 0), fx=self.detection_scale_factor, fy=self.detection_scale_factor)
+            roi_frame = detection_frame[y:y + h, x:x + w]
             self._initialize_background_model(roi_frame)
 
-        return roi
+        return self.original_roi  # Return the original ROI for display purposes
 
     def _initialize_background_model(self, roi_frame):
         """Initialize the background model by computing average colors for each grid cell
@@ -254,9 +249,9 @@ class TrackedLegoDetector:
 
         valid_contours = []
         for contour in contours:
-            # Filter by area
+            # Filter by area using detection resolution area thresholds
             area = cv2.contourArea(contour)
-            if area < self.min_piece_area or area > self.max_piece_area:
+            if area < self.detection_min_piece_area or area > self.detection_max_piece_area:
                 continue
 
             # Get bounding box
@@ -325,7 +320,9 @@ class TrackedLegoDetector:
                         id=self.next_piece_id,
                         contour=contour,
                         bounding_box=bbox,
-                        entry_time=time.time()
+                        entry_time=time.time(),
+                        scale_factor=(1.0 / self.detection_scale_factor, 1.0 / self.detection_scale_factor)
+                        # Store scale factor
                     )
                     self.tracked_pieces.append(new_piece)
                     self.next_piece_id += 1
@@ -407,25 +404,48 @@ class TrackedLegoDetector:
             # If all checks passed, this piece should be captured
             return True
 
+    def _scale_to_original_coordinates(self, piece: TrackedPiece) -> Tuple[int, int, int, int]:
+        """Scale detection coordinates to original resolution.
+
+        Args:
+            piece: The tracked piece with detection resolution coordinates
+
+        Returns:
+            Tuple[int, int, int, int]: Scaled coordinates (x, y, w, h) in original resolution
+        """
+        x, y, w, h = piece.bounding_box
+        fx, fy = piece.scale_factor
+
+        # Scale the coordinates
+        orig_x = int(x * fx)
+        orig_y = int(y * fy)
+        orig_w = int(w * fx)
+        orig_h = int(h * fy)
+
+        return (orig_x, orig_y, orig_w, orig_h)
+
     def _crop_piece_image(self, frame, piece: TrackedPiece) -> np.ndarray:
         """Crop the frame to just the piece with padding
 
         Args:
-            frame: The video frame to crop
-            piece: The TrackedPiece to crop around
+            frame: The video frame to crop (original resolution)
+            piece: The TrackedPiece to crop around (detection resolution coordinates)
 
         Returns:
             np.ndarray: The cropped image
         """
-        x, y, w, h = piece.bounding_box
-        roi_x, roi_y = self.roi[0], self.roi[1]
+        # Scale coordinates to original resolution
+        orig_x, orig_y, orig_w, orig_h = self._scale_to_original_coordinates(piece)
+
+        # Apply original ROI offset
+        roi_x, roi_y = self.original_roi[0], self.original_roi[1]
 
         # Add padding and ensure within frame bounds
         pad = self.crop_padding
-        x1 = max(0, x + roi_x - pad)
-        y1 = max(0, y + roi_y - pad)
-        x2 = min(frame.shape[1], x + roi_x + w + pad)
-        y2 = min(frame.shape[0], y + roi_y + h + pad)
+        x1 = max(0, orig_x + roi_x - pad)
+        y1 = max(0, orig_y + roi_y - pad)
+        x2 = min(frame.shape[1], orig_x + roi_x + orig_w + pad)
+        y2 = min(frame.shape[0], orig_y + roi_y + orig_h + pad)
 
         return frame[y1:y2, x1:x2]
 
@@ -433,7 +453,7 @@ class TrackedLegoDetector:
         """Process a frame and return any pieces to capture.
 
         Args:
-            frame: The video frame to process
+            frame: The original resolution video frame to process
             current_count: The current image count (optional)
 
         Returns:
@@ -447,7 +467,11 @@ class TrackedLegoDetector:
         # Clean up expired capture locations
         self._clean_captured_locations()
 
-        mask = self._preprocess_frame(frame)
+        # Create a downscaled version of the frame for detection
+        detection_frame = cv2.resize(frame, (0, 0), fx=self.detection_scale_factor, fy=self.detection_scale_factor)
+
+        # Process the downscaled frame
+        mask = self._preprocess_frame(detection_frame)
         new_contours = self._find_new_contours(mask)
 
         # Update tracking
@@ -457,12 +481,12 @@ class TrackedLegoDetector:
         with self.lock:
             for piece in self.tracked_pieces:
                 if self._should_capture(piece):
-                    # Get piece position for spatial cooldown
+                    # Get piece position for spatial cooldown (in detection coordinates)
                     x, y, w, h = piece.bounding_box
                     center_x = x + w / 2
                     center_y = y + h / 2
 
-                    # Crop the image
+                    # Crop the image from the original full-resolution frame
                     cropped_image = self._crop_piece_image(frame, piece)
 
                     # If in asynchronous mode, add to processing queue and don't wait
@@ -476,7 +500,7 @@ class TrackedLegoDetector:
                             piece_id=piece.id,
                             image=cropped_image.copy(),  # Make a copy to avoid reference issues
                             frame_number=current_count,
-                            position=piece.bounding_box,
+                            position=self._scale_to_original_coordinates(piece),  # Use original coordinates
                             priority=0  # Normal priority
                         )
 
@@ -540,26 +564,24 @@ class TrackedLegoDetector:
         if self.roi is None:
             return frame
 
-        # If visualization is disabled, return the original frame
-        if not self.show_visualizer:
-            return frame
-
         debug_frame = frame.copy()
 
-        # Draw ROI - Green boundary
-        x, y, w, h = self.roi
+        # Draw original ROI - Green boundary
+        x, y, w, h = self.original_roi
         cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-        # Draw entry zone - Blue
+        # Draw entry zone - Blue (scaled to original coordinates)
+        entry_x = int(self.entry_zone[1] / self.detection_scale_factor)
         cv2.line(debug_frame,
-                 (self.entry_zone[1], y),
-                 (self.entry_zone[1], y + h),
+                 (x + entry_x, y),
+                 (x + entry_x, y + h),
                  (255, 0, 0), 2)
 
-        # Draw exit zone - Red
+        # Draw exit zone - Red (scaled to original coordinates)
+        exit_x = int(self.exit_zone[0] / self.detection_scale_factor)
         cv2.line(debug_frame,
-                 (self.exit_zone[0], y),
-                 (self.exit_zone[0], y + h),
+                 (x + exit_x, y),
+                 (x + exit_x, y + h),
                  (0, 0, 255), 2)
 
         # Draw grid if enabled
@@ -577,7 +599,7 @@ class TrackedLegoDetector:
                 x_pos = x + j * cell_w
                 cv2.line(debug_frame, (x_pos, y), (x_pos, y + h), (200, 200, 200), 1)
 
-        # Draw spatial cooldown zones
+        # Draw spatial cooldown zones (scaled to original coordinates)
         with self.lock:
             for loc_x, loc_y, t in self.captured_locations:
                 # Calculate age as percentage of total cooldown time
@@ -587,10 +609,15 @@ class TrackedLegoDetector:
                 # Color fades from red to transparent as it ages
                 color = (0, 0, 255)
 
+                # Scale coordinates to original resolution
+                orig_x = int(loc_x / self.detection_scale_factor)
+                orig_y = int(loc_y / self.detection_scale_factor)
+                orig_radius = int(self.spatial_cooldown_radius / self.detection_scale_factor)
+
                 # Draw circle showing the cooldown zone
                 cv2.circle(debug_frame,
-                           (int(loc_x + self.roi[0]), int(loc_y + self.roi[1])),
-                           int(self.spatial_cooldown_radius),
+                           (int(orig_x + self.original_roi[0]), int(orig_y + self.original_roi[1])),
+                           orig_radius,
                            color,
                            1)  # Thickness
 
@@ -604,12 +631,15 @@ class TrackedLegoDetector:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             for piece in self.tracked_pieces:
-                x, y, w, h = piece.bounding_box
-                roi_x, roi_y = self.roi[0], self.roi[1]
+                # Scale detection coordinates to original resolution
+                orig_x, orig_y, orig_w, orig_h = self._scale_to_original_coordinates(piece)
 
-                # Adjust coordinates to the full frame
-                x += roi_x
-                y += roi_y
+                # Apply original ROI offset
+                roi_x, roi_y = self.original_roi[0], self.original_roi[1]
+                x = orig_x + roi_x
+                y = orig_y + roi_y
+                w = orig_w
+                h = orig_h
 
                 # Determine box color based on captured status and update freshness
                 age = current_time - piece.last_update_time
@@ -645,16 +675,6 @@ class TrackedLegoDetector:
                 label_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
                 cv2.rectangle(debug_frame, (x, y - label_size[1] - 10), (x + label_size[0], y), (0, 0, 0), -1)
                 cv2.putText(debug_frame, label_text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, label_color, 1)
-
-        # Add a label to show whether we're using default ROI or not
-        roi_type = "DEFAULT" if not self.draw_roi else "MANUAL"
-        cv2.putText(debug_frame, f"ROI: {roi_type}", (10, debug_frame.shape[0] - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-        # Add threading mode label
-        threading_mode = "ASYNC" if self.async_mode else "SYNC"
-        cv2.putText(debug_frame, f"Mode: {threading_mode}", (200, debug_frame.shape[0] - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
         return debug_frame
 
