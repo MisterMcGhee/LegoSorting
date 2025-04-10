@@ -37,25 +37,21 @@ class ConfigManager:
         self._load_config()
 
     def _load_config(self) -> None:
-        """Load configuration from file or create default if not exists.
-
-        This internal method attempts to read the config file from disk.
-        If the file doesn't exist or has errors, it falls back to creating
-        a default configuration.
-        """
+        """Load configuration from file or create default if not exists."""
         with self._config_lock:
+            print(f"Attempting to load configuration from: {os.path.abspath(self.config_path)}")
             if os.path.exists(self.config_path):
                 try:
                     with open(self.config_path, 'r') as f:
                         self.config = json.load(f)
                     print(f"Configuration loaded from {self.config_path}")
+                    print(f"Loaded config contents: {self.config}")
                 except Exception as e:
                     print(f"Error loading configuration: {e}")
                     self._create_default_config()
             else:
                 print(f"Configuration file not found at {self.config_path}")
                 self._create_default_config()
-
     def _create_default_config(self) -> None:
         """Create default configuration.
 

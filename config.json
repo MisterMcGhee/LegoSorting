@@ -11,8 +11,8 @@
         "crop_padding": 50,
         "history_length": 5,
         "grid_size": [
-            10,
-            10
+            5,
+            5
         ],
         "color_margin": 40,
         "show_grid": true,
@@ -45,8 +45,8 @@
         "max_queue_size": 100,
         "worker_count": 1,
         "api_timeout": 30.0,
-        "processing_timeout": 60.0,
-        "shutdown_timeout": 5.0,
+        "processing_timeout": 3.0,
+        "shutdown_timeout": 3.0,
         "polling_interval": 0.01
     },
     "servo": {
@@ -68,5 +68,11 @@
             "8": 180,
             "9": 90
         }
+    },
+    "detector_roi": {
+        "x": 151,
+        "y": 298,
+        "w": 1518,
+        "h": 458
     }
 }
