@@ -18,7 +18,7 @@ from thread_management_module import ThreadManager, PieceMessage
 from error_module import get_logger, retry_on_error, APIError, SortingError, TimeoutError
 from api_module import create_api_client
 from sorting_module import create_sorting_manager
-from servo_module import create_servo_module
+from arduino_servo_module import create_arduino_servo_module
 
 # Initialize module logger
 logger = get_logger(__name__)
@@ -52,7 +52,10 @@ class ProcessingWorker:
         # Initialize components
         self.api_client = create_api_client("brickognize", config_manager)
         self.sorting_manager = create_sorting_manager(config_manager)
-        self.servo = create_servo_module(config_manager)
+
+        # Initialize Arduino servo control
+        self.servo = create_arduino_servo_module(config_manager)
+        logger.info("Processing worker using Arduino-based servo control")
 
         # Get configuration values
         threading_config = config_manager.get_section("threading")

@@ -11,8 +11,8 @@
         "crop_padding": 50,
         "history_length": 5,
         "grid_size": [
-            5,
-            5
+            10,
+            10
         ],
         "color_margin": 40,
         "show_grid": true,
@@ -44,9 +44,9 @@
         "enabled": true,
         "max_queue_size": 100,
         "worker_count": 1,
-        "api_timeout": 30.0,
-        "processing_timeout": 3.0,
-        "shutdown_timeout": 3.0,
+        "api_timeout": 5.0,
+        "processing_timeout": 10.0,
+        "shutdown_timeout": 5.0,
         "polling_interval": 0.01
     },
     "servo": {
@@ -69,10 +69,17 @@
             "9": 90
         }
     },
+    "arduino_servo": {
+        "port": "/dev/cu.usbmodem48CA435B6CCC2",
+        "baud_rate": 9600,
+        "timeout": 2.0,
+        "connection_retries": 3,
+        "retry_delay": 1.0
+    },
     "detector_roi": {
-        "x": 151,
-        "y": 298,
-        "w": 1518,
-        "h": 458
+        "x": 93,
+        "y": 195,
+        "w": 1566,
+        "h": 577
     }
 }
