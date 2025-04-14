@@ -5,7 +5,7 @@
         "filename_prefix": "Lego"
     },
     "detector": {
-        "min_piece_area": 500,
+        "min_piece_area": 1000,
         "max_piece_area": 750000,
         "buffer_percent": 0.2,
         "crop_padding": 50,

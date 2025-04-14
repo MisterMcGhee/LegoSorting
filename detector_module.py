@@ -1,6 +1,10 @@
 import time
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Any
+from error_module import get_logger
+
+# Get module logger
+logger = get_logger(__name__)
 
 import cv2
 import numpy as np
@@ -187,6 +191,7 @@ class TrackedLegoDetector:
         # Fall back to manual calibration
         print("No valid ROI configuration found. Please select ROI manually.")
         return self.calibrate(frame)
+
     def calibrate(self, frame):
         """Get user-selected ROI and calculate buffer zones
 
@@ -422,7 +427,7 @@ class TrackedLegoDetector:
                         piece.processing_start_time is not None and
                         current_time - piece.processing_start_time > self.processing_timeout):
                     # Reset processing status if timeout exceeded
-                    print(f"Processing timeout for piece ID {piece.id}, resetting status")
+                    logger.info(f"Processing timeout for piece ID {piece.id}, resetting status")
                     piece.being_processed = False
                     piece.processing_start_time = None
 
@@ -441,11 +446,10 @@ class TrackedLegoDetector:
                         piece.being_processed):
                     updated_tracks.append(piece)
                 else:
-                    print(
+                    logger.debug(
                         f"Removing stale track ID: {piece.id}, Last update: {current_time - piece.last_update_time:.2f}s ago")
 
             self.tracked_pieces = updated_tracks
-
     def _clean_captured_locations(self):
         """Remove expired spatial cooldown zones"""
         with self.lock:
