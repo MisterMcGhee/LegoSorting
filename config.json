@@ -5,17 +5,27 @@
         "filename_prefix": "Lego"
     },
     "detector": {
-        "min_piece_area": 300,
-        "max_piece_area": 100000,
-        "buffer_percent": 0.1,
-        "crop_padding": 50,
-        "track_timeout": 1.0,
-        "capture_min_interval": 1.0,
-        "min_tracking_updates": 5,
-        "history_length": 200,
-        "var_threshold": 36,
-        "morphology_size": 5,
-        "show_bg_subtraction": true
+    "min_piece_area": 1000,
+    "max_piece_area": 50000,
+    "buffer_percent": 0.1,
+    "crop_padding": 50,
+    "track_timeout": 1.0,
+    "capture_min_interval": 0.5,
+    "min_updates": 5,
+    "bg_history": 500,
+    "bg_threshold": 800,
+    "learn_rate": 0.005,
+    "morph_kernel_size": 5,
+    "match_threshold": 50,
+    "gaussian_blur": 7,
+    "processing_timeout": 10.0,
+    "load_roi_from_config": true,
+    "text_margin_top": 40,
+    "default_roi_x": 125,
+    "default_roi_y": 200,
+    "default_roi_w": 1600,
+    "default_roi_h": 500,
+    "show_bg_subtraction": true
     },
     "piece_identifier": {
         "csv_path": "Lego_Categories.csv",
@@ -26,7 +36,7 @@
         "target_primary_category": "",
         "target_secondary_category": "",
         "max_bins": 9,
-        "overflow_bin": 9
+        "overflow_bin": 0
     },
     "threading": {
         "enabled": true,
@@ -54,7 +64,7 @@
             "6": 140,
             "7": 160,
             "8": 180,
-            "9": 90
+            "9": 0
         }
     },
     "arduino_servo": {
@@ -65,9 +75,9 @@
         "retry_delay": 1.0
     },
     "detector_roi": {
-        "x": 93,
-        "y": 195,
-        "w": 1566,
-        "h": 577
+        "x": 125,
+        "y": 200,
+        "w": 1600,
+        "h": 500
     }
 }

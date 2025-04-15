@@ -8,18 +8,18 @@ sorting strategies and configuration.
 
 import csv
 import logging
-from typing import Dict, Any, Optional, List
 import os
 import time
+from typing import Dict, Any, Optional, List
 
-from error_module import SortingError
+from error_module import SortingError, log_and_return
 
 # Set up module logger
 logger = logging.getLogger(__name__)
 
 
-class SortingStrategy:
-    """Base class for Lego piece sorting with dynamic bin assignment."""
+class UnifiedSortingStrategy:
+    """Unified strategy for Lego piece sorting with dynamic bin assignment."""
 
     def __init__(self, config: Dict[str, Any], categories_data: Dict[str, Dict[str, str]]):
         """Initialize sorting strategy.
@@ -30,47 +30,76 @@ class SortingStrategy:
         """
         self.config = config
         self.categories_data = categories_data
-        self.overflow_bin = config.get("overflow_bin", 9)
+        self.overflow_bin = 0  # Always use bin 0 as overflow bin
+
+        # Strategy type can be 'primary', 'secondary', or 'tertiary'
+        self.strategy_type = config.get("strategy", "primary")
+        logger.info(f"Initialized sorting with strategy: {self.strategy_type}")
+
+        # Target categories for secondary/tertiary sorts
+        self.target_primary = config.get("target_primary_category", "")
+        self.target_secondary = config.get("target_secondary_category", "")
+
+        # Validate strategy configuration
+        if self.strategy_type == "secondary" and not self.target_primary:
+            error_msg = "Secondary sorting requires a target primary category"
+            logger.error(error_msg)
+            raise SortingError(error_msg)
+
+        if self.strategy_type == "tertiary" and (not self.target_primary or not self.target_secondary):
+            error_msg = "Tertiary sorting requires target primary and secondary categories"
+            logger.error(error_msg)
+            raise SortingError(error_msg)
 
         # For dynamic bin assignment
         self.category_to_bin = {}  # Maps category keys to bin numbers
-        self.next_available_bin = 0
+        self.next_available_bin = 1  # Start at 1 since 0 is the overflow bin
         self.max_bins = config.get("max_bins", 9)  # Maximum number of bins (excluding overflow)
 
         logger.debug(f"Sorting strategy initialized: max_bins={self.max_bins}, overflow_bin={self.overflow_bin}")
+        if self.strategy_type != "primary":
+            logger.debug(f"Target categories: primary='{self.target_primary}', secondary='{self.target_secondary}'")
 
     def get_bin(self, element_id: str, confidence: float) -> int:
-        """Determine bin for a piece (to be implemented by specific strategies).
+        """Determine bin for a piece using the configured sorting strategy.
 
         Args:
             element_id: Element ID of the Lego piece
             confidence: Confidence score of the identification
 
         Returns:
-            Bin number
-        """
-        raise NotImplementedError("Subclasses must implement get_bin method")
-
-
-class PrimaryCategorySorter(SortingStrategy):
-    """Sort Lego pieces by their primary category."""
-
-    def get_bin(self, element_id: str, confidence: float) -> int:
-        """Assign bin based on primary category.
-
-        Args:
-            element_id: Element ID of the Lego piece
-            confidence: Confidence score of the identification
-
-        Returns:
-            Bin number
+            Bin number (0 = overflow bin)
         """
         if element_id not in self.categories_data:
             logger.warning(f"Element ID {element_id} not found in categories data, using overflow bin")
             return self.overflow_bin
 
         piece_info = self.categories_data[element_id]
-        category_key = piece_info.get("primary_category")
+
+        # Handle strategy-specific logic
+        if self.strategy_type == "primary":
+            return self._assign_bin_for_primary(piece_info)
+        elif self.strategy_type == "secondary":
+            return self._assign_bin_for_secondary(piece_info)
+        elif self.strategy_type == "tertiary":
+            return self._assign_bin_for_tertiary(piece_info)
+        else:
+            logger.warning(f"Unknown strategy type: {self.strategy_type}, falling back to primary sorting")
+            return self._assign_bin_for_primary(piece_info)
+
+    def _assign_bin_for_primary(self, piece_info: Dict[str, str]) -> int:
+        """Assign bin based on primary category.
+
+        Args:
+            piece_info: Dictionary with piece category information
+
+        Returns:
+            Bin number
+        """
+        category_key = piece_info.get("primary_category", "")
+        if not category_key:
+            logger.warning("Piece has no primary category, using overflow bin")
+            return self.overflow_bin
 
         # If we've already assigned a bin to this category, use it
         if category_key in self.category_to_bin:
@@ -79,7 +108,7 @@ class PrimaryCategorySorter(SortingStrategy):
             return bin_number
 
         # If we have room for a new bin, assign the next available one
-        if self.next_available_bin < self.max_bins:
+        if self.next_available_bin <= self.max_bins:
             bin_number = self.next_available_bin
             self.category_to_bin[category_key] = bin_number
             self.next_available_bin += 1
@@ -91,53 +120,26 @@ class PrimaryCategorySorter(SortingStrategy):
             f"Using overflow bin {self.overflow_bin} for primary category '{category_key}' (no more bins available)")
         return self.overflow_bin
 
-    def get_description(self) -> str:
-        """Get description of this sorting strategy.
-
-        Returns:
-            Human-readable description
-        """
-        return "Sorting by primary category"
-
-
-class SecondaryCategorySorter(SortingStrategy):
-    """Sort Lego pieces by their secondary category within a specific primary category."""
-
-    def __init__(self, config: Dict[str, Any], categories_data: Dict[str, Dict[str, str]]):
-        super().__init__(config, categories_data)
-        self.target_primary = config.get("target_primary_category")
-
-        if not self.target_primary:
-            error_msg = "Secondary category sorting requires a target primary category"
-            logger.error(error_msg)
-            raise SortingError(error_msg)
-
-        logger.info(f"Secondary category sorter targeting primary category: '{self.target_primary}'")
-
-    def get_bin(self, element_id: str, confidence: float) -> int:
+    def _assign_bin_for_secondary(self, piece_info: Dict[str, str]) -> int:
         """Assign bin based on secondary category within target primary category.
 
         Args:
-            element_id: Element ID of the Lego piece
-            confidence: Confidence score of the identification
+            piece_info: Dictionary with piece category information
 
         Returns:
             Bin number
         """
-        if element_id not in self.categories_data:
-            logger.warning(f"Element ID {element_id} not found in categories data, using overflow bin")
-            return self.overflow_bin
-
-        piece_info = self.categories_data[element_id]
-
         # Check if this piece belongs to the target primary category
-        if piece_info.get("primary_category") != self.target_primary:
+        if piece_info.get("primary_category", "") != self.target_primary:
             logger.debug(
-                f"Element ID {element_id} not in target primary category '{self.target_primary}', using overflow bin")
+                f"Piece primary category '{piece_info.get('primary_category', '')}' doesn't match target '{self.target_primary}', using overflow bin")
             return self.overflow_bin
 
         # Use secondary category as the key
-        category_key = piece_info.get("secondary_category")
+        category_key = piece_info.get("secondary_category", "")
+        if not category_key:
+            logger.warning("Piece has no secondary category, using overflow bin")
+            return self.overflow_bin
 
         # If we've already assigned a bin to this category, use it
         if category_key in self.category_to_bin:
@@ -146,7 +148,7 @@ class SecondaryCategorySorter(SortingStrategy):
             return bin_number
 
         # If we have room for a new bin, assign the next available one
-        if self.next_available_bin < self.max_bins:
+        if self.next_available_bin <= self.max_bins:
             bin_number = self.next_available_bin
             self.category_to_bin[category_key] = bin_number
             self.next_available_bin += 1
@@ -158,54 +160,26 @@ class SecondaryCategorySorter(SortingStrategy):
             f"Using overflow bin {self.overflow_bin} for secondary category '{category_key}' (no more bins available)")
         return self.overflow_bin
 
-    def get_description(self) -> str:
-        """Get description of this sorting strategy.
-
-        Returns:
-            Human-readable description
-        """
-        return f"Sorting by secondary category within primary category '{self.target_primary}'"
-
-
-class TertiaryCategorySorter(SortingStrategy):
-    """Sort Lego pieces by their tertiary category within specific primary and secondary categories."""
-
-    def __init__(self, config: Dict[str, Any], categories_data: Dict[str, Dict[str, str]]):
-        super().__init__(config, categories_data)
-        self.target_primary = config.get("target_primary_category")
-        self.target_secondary = config.get("target_secondary_category")
-
-        if not self.target_primary or not self.target_secondary:
-            error_msg = "Tertiary category sorting requires target primary and secondary categories"
-            logger.error(error_msg)
-            raise SortingError(error_msg)
-
-        logger.info(f"Tertiary category sorter targeting: '{self.target_primary}/{self.target_secondary}'")
-
-    def get_bin(self, element_id: str, confidence: float) -> int:
+    def _assign_bin_for_tertiary(self, piece_info: Dict[str, str]) -> int:
         """Assign bin based on tertiary category within target primary and secondary categories.
 
         Args:
-            element_id: Element ID of the Lego piece
-            confidence: Confidence score of the identification
+            piece_info: Dictionary with piece category information
 
         Returns:
             Bin number
         """
-        if element_id not in self.categories_data:
-            logger.warning(f"Element ID {element_id} not found in categories data, using overflow bin")
-            return self.overflow_bin
-
-        piece_info = self.categories_data[element_id]
-
         # Check if this piece belongs to the target primary and secondary categories
-        if (piece_info.get("primary_category") != self.target_primary or
-                piece_info.get("secondary_category") != self.target_secondary):
-            logger.debug(f"Element ID {element_id} not in target primary/secondary categories, using overflow bin")
+        if (piece_info.get("primary_category", "") != self.target_primary or
+                piece_info.get("secondary_category", "") != self.target_secondary):
+            logger.debug(f"Piece categories don't match targets, using overflow bin")
             return self.overflow_bin
 
         # Use tertiary category as the key
-        category_key = piece_info.get("tertiary_category")
+        category_key = piece_info.get("tertiary_category", "")
+        if not category_key:
+            logger.debug("Piece has no tertiary category, using overflow bin")
+            return self.overflow_bin
 
         # If we've already assigned a bin to this category, use it
         if category_key in self.category_to_bin:
@@ -214,7 +188,7 @@ class TertiaryCategorySorter(SortingStrategy):
             return bin_number
 
         # If we have room for a new bin, assign the next available one
-        if self.next_available_bin < self.max_bins:
+        if self.next_available_bin <= self.max_bins:
             bin_number = self.next_available_bin
             self.category_to_bin[category_key] = bin_number
             self.next_available_bin += 1
@@ -232,7 +206,14 @@ class TertiaryCategorySorter(SortingStrategy):
         Returns:
             Human-readable description
         """
-        return f"Sorting by tertiary category within '{self.target_primary}/{self.target_secondary}'"
+        if self.strategy_type == "primary":
+            return "Sorting by primary category"
+        elif self.strategy_type == "secondary":
+            return f"Sorting by secondary category within primary category '{self.target_primary}'"
+        elif self.strategy_type == "tertiary":
+            return f"Sorting by tertiary category within '{self.target_primary}/{self.target_secondary}'"
+        else:
+            return "Unknown sorting strategy"
 
 
 class SortingManager:
@@ -260,9 +241,9 @@ class SortingManager:
             logger.error(error_msg)
             raise SortingError(error_msg)
 
-        # Set up sorting strategy based on config
+        # Set up sorting strategy
         try:
-            self.strategy = self._configure_strategy()
+            self.strategy = UnifiedSortingStrategy(self.sorting_config, self.categories_data)
             logger.info(f"Sorting strategy configured: {self.get_strategy_description()}")
         except Exception as e:
             error_msg = f"Failed to configure sorting strategy: {str(e)}"
@@ -304,39 +285,6 @@ class SortingManager:
             error_msg = f"Error reading CSV file: {str(e)}"
             logger.error(error_msg)
             raise SortingError(error_msg)
-
-    def _configure_strategy(self) -> SortingStrategy:
-        """Configure sorting strategy based on config settings.
-
-        Returns:
-            Configured SortingStrategy
-
-        Raises:
-            SortingError: If strategy cannot be configured
-        """
-        # Get the strategy type or default to primary
-        strategy_type = self.sorting_config.get("strategy", "primary")
-        logger.info(f"Configuring sorting strategy of type: {strategy_type}")
-
-        try:
-            if strategy_type == "primary":
-                return PrimaryCategorySorter(self.sorting_config, self.categories_data)
-
-            elif strategy_type == "secondary":
-                return SecondaryCategorySorter(self.sorting_config, self.categories_data)
-
-            elif strategy_type == "tertiary":
-                return TertiaryCategorySorter(self.sorting_config, self.categories_data)
-
-            else:
-                logger.warning(f"Unknown sorting strategy '{strategy_type}'. Defaulting to primary category sorting.")
-                return PrimaryCategorySorter(self.sorting_config, self.categories_data)
-
-        except ValueError as e:
-            error_msg = f"Error configuring sorting strategy: {str(e)}"
-            logger.error(error_msg)
-            logger.info("Defaulting to primary category sorting")
-            return PrimaryCategorySorter(self.sorting_config, self.categories_data)
 
     def _record_missing_piece(self, element_id: str, api_result: Dict[str, Any]) -> None:
         """Record missing piece data to a CSV file for later addition to the categories CSV.
@@ -395,11 +343,11 @@ class SortingManager:
 
         logger.debug(f"Identifying piece: element_id={element_id}, confidence={confidence}")
 
-        # Create result dictionary
+        # Create base result dictionary with API data
         result = {
-            "id": element_id,
+            "element_id": element_id,
             "confidence": confidence,
-            "bin_number": self.sorting_config.get("overflow_bin", 9)  # Default to overflow bin
+            "bin_number": self.sorting_config.get("overflow_bin", 0)  # Default to overflow bin
         }
 
         # Check confidence threshold
@@ -418,10 +366,27 @@ class SortingManager:
             logger.warning(error_msg)
             result["error"] = error_msg
 
-            # Add new code to record missing piece data
+            # Record missing piece data
             self._record_missing_piece(element_id, api_result)
 
             return result
+
+        # Piece exists in database, get its categories
+        piece_data = self.categories_data[element_id]
+
+        # Add category information to result
+        result["name"] = piece_data.get("name", api_result.get("name", "Unknown"))
+        result["primary_category"] = piece_data.get("primary_category", "")
+        result["secondary_category"] = piece_data.get("secondary_category", "")
+        result["tertiary_category"] = piece_data.get("tertiary_category", "")
+
+        # Determine bin using sorting strategy
+        bin_number = self.strategy.get_bin(element_id, confidence)
+        result["bin_number"] = bin_number
+
+        logger.info(f"Piece {element_id} ({result['name']}) assigned to bin {bin_number}")
+
+        return result
 
     def get_strategy_description(self) -> str:
         """Get description of the current sorting strategy.
