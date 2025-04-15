@@ -1,14 +1,20 @@
+"""
+detector_module.py - Simplified detector for Lego sorting application
+
+This module handles the detection and tracking of Lego pieces moving through a region of interest.
+It uses OpenCV's background subtraction and tracking algorithms for efficient detection.
+"""
+
 import time
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Any
-from error_module import get_logger
-
-# Get module logger
-logger = get_logger(__name__)
-
 import cv2
 import numpy as np
 import threading
+import logging
+
+# Get module logger
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -22,11 +28,10 @@ class TrackedPiece:
     image_number: Optional[int] = None  # The number used when saving the image
     updated: bool = True  # Whether this piece was updated in the current frame
     last_update_time: float = None  # The time when this piece was last updated
-    # New fields for threading support
+    update_count: int = 1  # Number of times this piece has been updated
+    # Threading support
     being_processed: bool = False  # Whether this piece is being processed by worker thread
     processing_start_time: Optional[float] = None  # When processing started
-    # New field to store the scaling factor used for this piece
-    scale_factor: Tuple[float, float] = (1.0, 1.0)  # Scale factor (fx, fy) to convert between resolutions
 
     def __post_init__(self):
         """Initialize the last_update_time to the current time"""
@@ -51,21 +56,12 @@ class TrackedLegoDetector:
         self.max_piece_area = 100000
         self.buffer_percent = 0.01
         self.crop_padding = 20
-        self.history_length = 2
-        self.grid_size = (5, 5)  # Changed from (10, 10) to (5, 5)
-        self.color_margin = 40
-        self.show_grid = False
         self.track_timeout = 1.0  # Time in seconds before removing a track that hasn't been updated
+        self.tracker_type = "KCF"  # Default tracking algorithm
 
         # Capture cooldown settings
         self.capture_min_interval = 3.0  # Minimum seconds between captures
-        self.spatial_cooldown_radius = 150  # Pixels - don't capture if too close to a previous capture
-        self.spatial_cooldown_time = 10.0  # Seconds to maintain spatial cooldown zones
-
-        # New parameters for dual resolution processing
-        self.detection_scale_factor = 0.5  # Process at half resolution for detection
-        self.original_roi = None  # Will store the ROI in original resolution
-        self.detection_roi = None  # Will store the ROI in detection resolution
+        self.min_tracking_updates = 5  # Minimum number of tracking updates before capture
 
         # Initialize from config if provided
         if config_manager:
@@ -73,36 +69,24 @@ class TrackedLegoDetector:
             self.max_piece_area = config_manager.get("detector", "max_piece_area", self.max_piece_area)
             self.buffer_percent = config_manager.get("detector", "buffer_percent", self.buffer_percent)
             self.crop_padding = config_manager.get("detector", "crop_padding", self.crop_padding)
-            self.history_length = config_manager.get("detector", "history_length", self.history_length)
-            grid_size = config_manager.get("detector", "grid_size", self.grid_size)
-            if isinstance(grid_size, list):
-                self.grid_size = tuple(grid_size)
-            self.color_margin = config_manager.get("detector", "color_margin", self.color_margin)
-            self.show_grid = config_manager.get("detector", "show_grid", self.show_grid)
             self.track_timeout = config_manager.get("detector", "track_timeout", self.track_timeout)
             self.capture_min_interval = config_manager.get("detector", "capture_min_interval",
                                                            self.capture_min_interval)
-            self.spatial_cooldown_radius = config_manager.get("detector", "spatial_cooldown_radius",
-                                                              self.spatial_cooldown_radius)
-            self.spatial_cooldown_time = config_manager.get("detector", "spatial_cooldown_time",
-                                                            self.spatial_cooldown_time)
+            self.min_tracking_updates = config_manager.get("detector", "min_tracking_updates",
+                                                           self.min_tracking_updates)
+            self.tracker_type = config_manager.get("detector", "tracker_type", self.tracker_type)
 
-            # Adjust min and max piece area for the detection resolution
-            self.detection_min_piece_area = int(
-                self.min_piece_area * self.detection_scale_factor * self.detection_scale_factor)
-            self.detection_max_piece_area = int(
-                self.max_piece_area * self.detection_scale_factor * self.detection_scale_factor)
-
-            # Check if threading is enabled
+            # Threading settings
             if config_manager.is_threading_enabled():
                 self.processing_timeout = config_manager.get("threading", "processing_timeout", 60.0)
             else:
                 self.processing_timeout = 60.0  # Default timeout
 
-        # Initialize background model
-        self.background_model = None
+        # Initialize background subtractor
+        self.bg_subtractor = None
 
         # Initialize tracking-related variables
+        self.trackers = []
         self.tracked_pieces = []
         self.next_piece_id = 1
         self.roi = None
@@ -111,15 +95,12 @@ class TrackedLegoDetector:
         self.valid_zone = None
         self.last_capture_time = 0
 
-        # Add spatial cooldown tracking
-        self.captured_locations = []  # List of (center_x, center_y, capture_time)
-
         # Thread-safety
         self.lock = threading.RLock()  # Reentrant lock for thread safety
         self.thread_manager = thread_manager
 
-        # Asynchronous mode flag
-        self.async_mode = thread_manager is not None
+        # Asynchronous mode flag (always true since we're focusing on multithread approach)
+        self.async_mode = True
 
     def load_roi_from_config(self, frame, config_manager=None):
         """Load ROI from configuration if available, otherwise calibrate manually.
@@ -149,18 +130,7 @@ class TrackedLegoDetector:
                 print(f"Loading ROI from config: {roi}")
 
                 with self.lock:
-                    # Store original resolution ROI
-                    self.original_roi = roi
-
-                    # Create detection resolution ROI
-                    detection_x = int(roi[0] * self.detection_scale_factor)
-                    detection_y = int(roi[1] * self.detection_scale_factor)
-                    detection_w = int(roi[2] * self.detection_scale_factor)
-                    detection_h = int(roi[3] * self.detection_scale_factor)
-                    self.detection_roi = (detection_x, detection_y, detection_w, detection_h)
-
-                    # Use detection ROI for internal processing
-                    self.roi = self.detection_roi
+                    self.roi = roi
                     roi_width = self.roi[2]
 
                     # Calculate buffer zones
@@ -169,18 +139,14 @@ class TrackedLegoDetector:
                     self.exit_zone = (self.roi[0] + self.roi[2] - buffer_width, self.roi[0] + self.roi[2])
                     self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
 
-                    print(f"Original ROI: {self.original_roi}")
-                    print(f"Detection ROI: {self.detection_roi}")
+                    print(f"ROI: {self.roi}")
                     print(f"Entry buffer: {self.entry_zone}")
                     print(f"Valid zone: {self.valid_zone}")
                     print(f"Exit buffer: {self.exit_zone}")
 
-                    # Initialize background model with detection resolution
+                    # Initialize background model
                     x, y, w, h = self.roi
-                    # Create a downscaled version of the frame for detection
-                    detection_frame = cv2.resize(frame, (0, 0), fx=self.detection_scale_factor,
-                                                 fy=self.detection_scale_factor)
-                    roi_frame = detection_frame[y:y + h, x:x + w]
+                    roi_frame = frame[y:y + h, x:x + w]
                     self._initialize_background_model(roi_frame)
 
                 return roi
@@ -209,18 +175,7 @@ class TrackedLegoDetector:
         cv2.destroyWindow("Select Belt Region")
 
         with self.lock:
-            # Store original resolution ROI
-            self.original_roi = roi
-
-            # Create detection resolution ROI
-            detection_x = int(roi[0] * self.detection_scale_factor)
-            detection_y = int(roi[1] * self.detection_scale_factor)
-            detection_w = int(roi[2] * self.detection_scale_factor)
-            detection_h = int(roi[3] * self.detection_scale_factor)
-            self.detection_roi = (detection_x, detection_y, detection_w, detection_h)
-
-            # Use detection ROI for internal processing
-            self.roi = self.detection_roi
+            self.roi = roi
             roi_width = self.roi[2]
 
             # Calculate buffer zones
@@ -229,17 +184,14 @@ class TrackedLegoDetector:
             self.exit_zone = (self.roi[0] + self.roi[2] - buffer_width, self.roi[0] + self.roi[2])
             self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
 
-            print(f"Original ROI: {self.original_roi}")
-            print(f"Detection ROI: {self.detection_roi}")
+            print(f"ROI: {self.roi}")
             print(f"Entry buffer: {self.entry_zone}")
             print(f"Valid zone: {self.valid_zone}")
             print(f"Exit buffer: {self.exit_zone}")
 
-            # Initialize background model with detection resolution
+            # Initialize background model
             x, y, w, h = self.roi
-            # Create a downscaled version of the frame for detection
-            detection_frame = cv2.resize(frame, (0, 0), fx=self.detection_scale_factor, fy=self.detection_scale_factor)
-            roi_frame = detection_frame[y:y + h, x:x + w]
+            roi_frame = frame[y:y + h, x:x + w]
             self._initialize_background_model(roi_frame)
 
             # Save ROI to config
@@ -254,35 +206,39 @@ class TrackedLegoDetector:
                 self.config_manager.save_config()
                 print("ROI saved to configuration")
 
-        return roi  # Return the original ROI for display purposes
+        return roi
 
     def _initialize_background_model(self, roi_frame):
-        """Initialize the background model by computing average colors for each grid cell
+        """Initialize the background subtractor with the ROI frame
 
         Args:
             roi_frame: The ROI portion of the frame
         """
-        h, w = roi_frame.shape[:2]
-        grid_h, grid_w = self.grid_size
+        # Create background subtractor - MOG2 works well with gradual changes
+        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+            history=100,  # Number of frames to build the background model
+            varThreshold=25,  # Threshold for foreground detection
+            detectShadows=False  # Don't detect shadows to improve performance
+        )
 
-        # Create storage for grid cell averages
-        self.background_model = np.zeros((grid_h, grid_w, 3), dtype=np.float32)
+        # Learn initial background from a few frames
+        for _ in range(10):
+            self.bg_subtractor.apply(roi_frame)
 
-        # Calculate average color for each grid cell
-        for i in range(grid_h):
-            for j in range(grid_w):
-                cell_y1 = i * (h // grid_h)
-                cell_y2 = (i + 1) * (h // grid_h) if i < grid_h - 1 else h
-                cell_x1 = j * (w // grid_w)
-                cell_x2 = (j + 1) * (w // grid_w) if j < grid_w - 1 else w
+        # Initialize trackers list
+        self.trackers = []
 
-                cell = roi_frame[cell_y1:cell_y2, cell_x1:cell_x2]
-                self.background_model[i, j] = np.mean(cell, axis=(0, 1))
-
-        print(f"Background model initialized with {grid_h}x{grid_w} grid")
+        logger.info("Background subtractor initialized")
 
     def _preprocess_frame(self, frame):
-        """Extract and preprocess the ROI using color-based detection with efficient NumPy operations"""
+        """Process frame with background subtraction
+
+        Args:
+            frame: Full camera frame
+
+        Returns:
+            Binary mask of detected foreground objects
+        """
         if self.roi is None:
             raise ValueError("Detector not calibrated. Call calibrate() first.")
 
@@ -290,38 +246,11 @@ class TrackedLegoDetector:
         x, y, w, h = self.roi
         roi = frame[y:y + h, x:x + w]
 
-        # Create grid
-        grid_h, grid_w = self.grid_size
+        # Apply background subtraction
+        mask = self.bg_subtractor.apply(roi)
 
-        # Initialize the mask
-        mask = np.zeros((h, w), dtype=np.uint8)
-
-        # Process each grid cell with vectorized operations
-        for i in range(grid_h):
-            for j in range(grid_w):
-                # Get cell coordinates
-                cell_y1 = i * (h // grid_h)
-                cell_y2 = (i + 1) * (h // grid_h) if i < grid_h - 1 else h
-                cell_x1 = j * (w // grid_w)
-                cell_x2 = (j + 1) * (w // grid_w) if j < grid_w - 1 else w
-
-                # Extract cell
-                cell = roi[cell_y1:cell_y2, cell_x1:cell_x2]
-
-                # Get background model for this cell
-                avg_color = self.background_model[i, j]
-
-                # Calculate color difference for all pixels in the cell at once
-                diff = np.abs(cell - avg_color)
-
-                # Find pixels where any channel differs by more than color_margin
-                color_mask = np.max(diff, axis=2) > self.color_margin
-
-                # Copy to the main mask
-                mask[cell_y1:cell_y2, cell_x1:cell_x2] = color_mask.astype(np.uint8) * 255
-
-        # Apply morphological operations to clean up
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        # Apply morphological operations to clean up noise
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
         cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel)
 
@@ -342,9 +271,9 @@ class TrackedLegoDetector:
 
         valid_contours = []
         for contour in contours:
-            # Filter by area using detection resolution area thresholds
+            # Filter by area
             area = cv2.contourArea(contour)
-            if area < self.detection_min_piece_area or area > self.detection_max_piece_area:
+            if area < self.min_piece_area or area > self.max_piece_area:
                 continue
 
             # Get bounding box
@@ -355,74 +284,69 @@ class TrackedLegoDetector:
 
         return valid_contours
 
-    def _match_and_update_tracks(self, new_contours):
-        """Match new contours to existing tracks or create new tracks"""
+    def _create_tracker(self, frame, bbox):
+        """Create an OpenCV tracker of the specified type
+
+        Args:
+            frame: Video frame
+            bbox: Bounding box (x, y, w, h)
+
+        Returns:
+            OpenCV tracker object
+        """
+        if self.tracker_type == "KCF":
+            tracker = cv2.TrackerKCF_create()
+        elif self.tracker_type == "CSRT":
+            tracker = cv2.TrackerCSRT_create()
+        elif self.tracker_type == "MIL":
+            tracker = cv2.TrackerMIL_create()
+        else:
+            # Default to KCF if specified tracker not available
+            tracker = cv2.TrackerKCF_create()
+
+        # Initialize tracker with bounding box
+        tracker.init(frame, bbox)
+        return tracker
+
+    def _update_tracking(self, frame):
+        """Update tracking with new frame
+
+        Args:
+            frame: Current video frame
+        """
         with self.lock:
-            # First, mark all existing tracks as not updated
-            for piece in self.tracked_pieces:
-                piece.updated = False
+            # Update existing trackers
+            valid_trackers = []
+            valid_pieces = []
 
-            # Try to match new contours to existing tracks
-            matched_pieces = set()  # Keep track of which pieces have been matched
+            for i, (tracker, piece) in enumerate(zip(self.trackers, self.tracked_pieces)):
+                # Update tracker with new frame
+                success, bbox = tracker.update(frame)
 
-            for contour, bbox in new_contours:
-                x, y, w, h = bbox
-
-                # Skip pieces that haven't entered the ROI yet
-                if x < self.entry_zone[0]:
-                    continue
-
-                # Find the best match for this contour
-                best_match = None
-                best_distance = float('inf')
-
-                for i, piece in enumerate(self.tracked_pieces):
-                    if i in matched_pieces:  # Skip pieces that are already matched to prevent duplicates
-                        continue
-
-                    old_x, old_y, old_w, old_h = piece.bounding_box
-
-                    # Calculate center points
-                    new_center_x = x + w / 2
-                    new_center_y = y + h / 2
-                    old_center_x = old_x + old_w / 2
-                    old_center_y = old_y + old_h / 2
-
-                    # Calculate distance between centers
-                    distance = ((new_center_x - old_center_x) ** 2 +
-                                (new_center_y - old_center_y) ** 2) ** 0.5
-
-                    # Track the best match (lowest distance)
-                    if distance < best_distance:
-                        best_distance = distance
-                        best_match = (i, piece)
-
-                # Check if the best match is within our threshold
-                max_allowed_distance = max(w, h) * 0.5  # Adjust threshold as needed
-
-                if best_match is not None and best_distance < max_allowed_distance:
-                    index, piece = best_match
-                    piece.contour = contour
-                    piece.bounding_box = bbox
+                if success:
+                    x, y, w, h = [int(v) for v in bbox]
+                    piece.bounding_box = (x, y, w, h)
                     piece.updated = True
                     piece.last_update_time = time.time()
-                    matched_pieces.add(index)
+                    piece.update_count += 1
+                    valid_trackers.append(tracker)
+                    valid_pieces.append(piece)
                 else:
-                    # If no match found, create a new track
-                    new_piece = TrackedPiece(
-                        id=self.next_piece_id,
-                        contour=contour,
-                        bounding_box=bbox,
-                        entry_time=time.time(),
-                        scale_factor=(1.0 / self.detection_scale_factor, 1.0 / self.detection_scale_factor)
-                        # Store scale factor
-                    )
-                    self.tracked_pieces.append(new_piece)
-                    self.next_piece_id += 1
+                    # If tracking failed, check if it was recently captured
+                    current_time = time.time()
+                    if piece.captured and (current_time - piece.last_update_time < self.track_timeout * 2):
+                        piece.updated = False
+                        valid_trackers.append(tracker)
+                        valid_pieces.append(piece)
+                    elif piece.being_processed:
+                        # Keep tracks being processed
+                        piece.updated = False
+                        valid_trackers.append(tracker)
+                        valid_pieces.append(piece)
 
             # Check for timed out pieces being processed
             current_time = time.time()
-            for piece in self.tracked_pieces:
+            for i, piece in enumerate(valid_pieces):
                 if (piece.being_processed and
                         piece.processing_start_time is not None and
                         current_time - piece.processing_start_time > self.processing_timeout):
@@ -431,221 +355,165 @@ class TrackedLegoDetector:
                     piece.being_processed = False
                     piece.processing_start_time = None
 
-            # Remove stale tracks that haven't been updated recently
-            updated_tracks = []
+            # Update trackers and pieces
+            self.trackers = valid_trackers
+            self.tracked_pieces = valid_pieces
 
-            for piece in self.tracked_pieces:
-                # Keep track if:
-                # 1. It was just updated
-                # 2. It hasn't timed out yet
-                # 3. It has been captured (we want to keep it visible a bit longer)
-                # 4. It is currently being processed
-                if (piece.updated or
-                        (current_time - piece.last_update_time < self.track_timeout) or
-                        (piece.captured and current_time - piece.last_update_time < self.track_timeout * 2) or
-                        piece.being_processed):
-                    updated_tracks.append(piece)
-                else:
-                    logger.debug(
-                        f"Removing stale track ID: {piece.id}, Last update: {current_time - piece.last_update_time:.2f}s ago")
+            # Process new contours to add new trackers
+            mask = self._preprocess_frame(frame)
+            new_contours = self._find_new_contours(mask)
 
-            self.tracked_pieces = updated_tracks
-    def _clean_captured_locations(self):
-        """Remove expired spatial cooldown zones"""
-        with self.lock:
-            current_time = time.time()
-            expired_threshold = current_time - self.spatial_cooldown_time
-            self.captured_locations = [(x, y, t) for x, y, t in self.captured_locations if t > expired_threshold]
+            for contour, bbox in new_contours:
+                x, y, w, h = bbox
 
-    def _should_capture(self, piece: TrackedPiece) -> bool:
-        """Determine if the piece should be captured."""
-        with self.lock:
-            # Skip if already marked as captured or being processed
-            if piece.captured or piece.being_processed:
-                return False
+                # Skip pieces that haven't entered the ROI yet
+                if x < self.entry_zone[0]:
+                    continue
 
-            current_time = time.time()
+                # Check if this contour overlaps with an existing tracked piece
+                is_new = True
+                for piece in self.tracked_pieces:
+                    px, py, pw, ph = piece.bounding_box
+                    # Calculate overlap
+                    overlap_x = max(0, min(x + w, px + pw) - max(x, px))
+                    overlap_y = max(0, min(y + h, py + ph) - max(y, py))
+                    overlap_area = overlap_x * overlap_y
+                    min_area = min(w * h, pw * ph) * 0.5  # 50% overlap threshold
 
-            # Don't capture if it's too soon after the last capture
-            if current_time - self.last_capture_time < self.capture_min_interval:
-                return False
+                    if overlap_area > min_area:
+                        is_new = False
+                        break
 
-            # Don't capture pieces that just appeared (avoid post-stutter duplicates)
-            # Either use this with a class variable:
-            new_piece_grace_period = 0.5  # Local variable definition
-            if current_time - piece.entry_time < new_piece_grace_period:
-                return False
+                if is_new:
+                    # Create new tracker
+                    tracker = self._create_tracker(frame, (x, y, w, h))
 
-            # Get piece position
-            x, y, w, h = piece.bounding_box
-            center_x = x + w / 2
-            center_y = y + h / 2
+                    # Create tracked piece object
+                    new_piece = TrackedPiece(
+                        id=self.next_piece_id,
+                        contour=contour,
+                        bounding_box=bbox,
+                        entry_time=time.time()
+                    )
 
-            # Only capture in the valid zone
-            if not (self.valid_zone[0] <= x and x + w <= self.valid_zone[1]):
-                return False
+                    self.trackers.append(tracker)
+                    self.tracked_pieces.append(new_piece)
+                    self.next_piece_id += 1
 
-            # Check if we're too close to a previously captured location
-            for loc_x, loc_y, _ in self.captured_locations:
-                distance = ((center_x - loc_x) ** 2 + (center_y - loc_y) ** 2) ** 0.5
-                if distance < self.spatial_cooldown_radius:
-                    print(f"Skipping piece ID {piece.id} - too close to previous capture location ({distance:.1f}px)")
-                    piece.captured = True  # Mark as captured to avoid repeated checks
-                    return False
-
-            # If all checks passed, this piece should be captured
-            return True
-
-    def _scale_to_original_coordinates(self, piece: TrackedPiece) -> Tuple[int, int, int, int]:
-        """Scale detection coordinates to original resolution.
+    def _should_capture(self, piece):
+        """Determine if the piece should be captured.
 
         Args:
-            piece: The tracked piece with detection resolution coordinates
+            piece: TrackedPiece to check
 
         Returns:
-            Tuple[int, int, int, int]: Scaled coordinates (x, y, w, h) in original resolution
+            bool: True if the piece should be captured
         """
+        # Skip if already marked as captured or being processed
+        if piece.captured or piece.being_processed:
+            return False
+
+        current_time = time.time()
+
+        # Don't capture if it's too soon after the last capture
+        if current_time - self.last_capture_time < self.capture_min_interval:
+            return False
+
+        # Don't capture pieces that just appeared (avoid post-stutter duplicates)
+        if current_time - piece.entry_time < 0.5:  # Half second grace period
+            return False
+
+        # Get piece position
         x, y, w, h = piece.bounding_box
-        fx, fy = piece.scale_factor
 
-        # Scale the coordinates
-        orig_x = int(x * fx)
-        orig_y = int(y * fy)
-        orig_w = int(w * fx)
-        orig_h = int(h * fy)
+        # Only capture in the valid zone
+        if not (self.valid_zone[0] <= x and x + w <= self.valid_zone[1]):
+            return False
 
-        return (orig_x, orig_y, orig_w, orig_h)
+        # Ensure piece has been tracked for enough frames
+        if piece.update_count < self.min_tracking_updates:
+            return False
 
-    def _crop_piece_image(self, frame, piece: TrackedPiece) -> np.ndarray:
+        # If all checks passed, this piece should be captured
+        return True
+
+    def _crop_piece_image(self, frame, piece):
         """Crop the frame to just the piece with padding
 
         Args:
-            frame: The video frame to crop (original resolution)
-            piece: The TrackedPiece to crop around (detection resolution coordinates)
+            frame: The video frame to crop
+            piece: The TrackedPiece to crop around
 
         Returns:
             np.ndarray: The cropped image
         """
-        # Scale coordinates to original resolution
-        orig_x, orig_y, orig_w, orig_h = self._scale_to_original_coordinates(piece)
+        # Get bounding box
+        x, y, w, h = piece.bounding_box
 
-        # Apply original ROI offset
-        roi_x, roi_y = self.original_roi[0], self.original_roi[1]
+        # Add ROI offset
+        roi_x, roi_y = self.roi[0], self.roi[1]
+        x += roi_x
+        y += roi_y
 
         # Add padding and ensure within frame bounds
         pad = self.crop_padding
-        x1 = max(0, orig_x + roi_x - pad)
-        y1 = max(0, orig_y + roi_y - pad)
-        x2 = min(frame.shape[1], orig_x + roi_x + orig_w + pad)
-        y2 = min(frame.shape[0], orig_y + roi_y + orig_h + pad)
+        x1 = max(0, x - pad)
+        y1 = max(0, y - pad)
+        x2 = min(frame.shape[1], x + w + pad)
+        y2 = min(frame.shape[0], y + h + pad)
 
         return frame[y1:y2, x1:x2]
 
-    def process_frame(self, frame, current_count=None) -> Tuple[List[TrackedPiece], Optional[np.ndarray]]:
+    def process_frame(self, frame, current_count=None):
         """Process a frame and return any pieces to capture.
-
-        Args:
-            frame: The original resolution video frame to process
-            current_count: The current image count (optional)
-
-        Returns:
-            tuple: (tracked_pieces, cropped_image)
-                - tracked_pieces: List of all currently tracked pieces
-                - cropped_image: Cropped image of a piece to capture, or None
-        """
-        if self.roi is None:
-            raise ValueError("Detector not calibrated. Call calibrate() first.")
-
-        # Clean up expired capture locations
-        self._clean_captured_locations()
-
-        # Create a downscaled version of the frame for detection
-        detection_frame = cv2.resize(frame, (0, 0), fx=self.detection_scale_factor, fy=self.detection_scale_factor)
-
-        # Process the downscaled frame
-        mask = self._preprocess_frame(detection_frame)
-        new_contours = self._find_new_contours(mask)
-
-        # Update tracking
-        self._match_and_update_tracks(new_contours)
-
-        # Check for pieces to capture
-        with self.lock:
-            for piece in self.tracked_pieces:
-                if self._should_capture(piece):
-                    # Get piece position for spatial cooldown (in detection coordinates)
-                    x, y, w, h = piece.bounding_box
-                    center_x = x + w / 2
-                    center_y = y + h / 2
-
-                    # Crop the image from the original full-resolution frame
-                    cropped_image = self._crop_piece_image(frame, piece)
-
-                    # If in asynchronous mode, add to processing queue and don't wait
-                    if self.async_mode and self.thread_manager:
-                        # Mark piece as being processed
-                        piece.being_processed = True
-                        piece.processing_start_time = time.time()
-
-                        # Add to processing queue without waiting
-                        self.thread_manager.add_message(
-                            piece_id=piece.id,
-                            image=cropped_image.copy(),  # Make a copy to avoid reference issues
-                            frame_number=current_count,
-                            position=self._scale_to_original_coordinates(piece),  # Use original coordinates
-                            priority=0  # Normal priority
-                        )
-
-                        # Mark as captured to prevent duplicate processing
-                        piece.captured = True
-                        self.last_capture_time = time.time()
-
-                        # Register capture location
-                        self.captured_locations.append((center_x, center_y, time.time()))
-
-                        print(f"Queueing piece ID {piece.id} at position ({center_x:.1f}, {center_y:.1f})")
-
-                        # Return no image to indicate async processing
-                        return self.tracked_pieces, None
-
-                    # Synchronous mode (original behavior)
-                    else:
-                        # Mark as captured and update tracking
-                        piece.captured = True
-                        if current_count is not None:
-                            piece.image_number = current_count
-                        self.last_capture_time = time.time()
-
-                        # Register capture location
-                        self.captured_locations.append((center_x, center_y, time.time()))
-
-                        print(f"Capturing piece ID {piece.id} at position ({center_x:.1f}, {center_y:.1f})")
-                        return self.tracked_pieces, cropped_image
-
-        return self.tracked_pieces, None
-
-    def process_frame_async(self, frame, current_count=None) -> List[TrackedPiece]:
-        """Process a frame with asynchronous piece detection and capture.
-
-        This method ensures detection continues without blocking even when
-        pieces are captured.
 
         Args:
             frame: The video frame to process
             current_count: The current image count (optional)
 
         Returns:
-            List[TrackedPiece]: All currently tracked pieces
+            tuple: (tracked_pieces, None)
+                - tracked_pieces: List of all currently tracked pieces
+                - Second element is always None in multithreaded mode
         """
-        if not self.async_mode:
-            raise ValueError("Detector not in asynchronous mode. Initialize with thread_manager.")
+        if self.roi is None:
+            raise ValueError("Detector not calibrated. Call calibrate() first.")
 
-        # Process frame normally but discard the cropped image
-        tracked_pieces, _ = self.process_frame(frame, current_count)
-        return tracked_pieces
+        # Update tracking with new frame
+        self._update_tracking(frame)
+
+        # Check for pieces to capture and queue for processing
+        with self.lock:
+            for piece in self.tracked_pieces:
+                if self._should_capture(piece):
+                    # Crop the image
+                    cropped_image = self._crop_piece_image(frame, piece)
+
+                    # Mark piece as being processed
+                    piece.being_processed = True
+                    piece.processing_start_time = time.time()
+
+                    # Add to processing queue
+                    self.thread_manager.add_message(
+                        piece_id=piece.id,
+                        image=cropped_image.copy(),
+                        frame_number=current_count,
+                        position=piece.bounding_box,
+                        priority=0
+                    )
+
+                    # Mark as captured to prevent duplicate processing
+                    piece.captured = True
+                    self.last_capture_time = time.time()
+
+                    # Log capture event
+                    logger.info(f"Queueing piece ID {piece.id} for processing")
+
+        # Always return None as second element since processing is async
+        return self.tracked_pieces, None
 
     def draw_debug(self, frame):
-        """Draw debug visualization with piece tracking, capture status, and grid overlay.
+        """Draw debug visualization with piece tracking and capture status.
 
         Args:
             frame: The video frame to draw on
@@ -658,82 +526,41 @@ class TrackedLegoDetector:
 
         debug_frame = frame.copy()
 
-        # Draw original ROI - Green boundary
-        x, y, w, h = self.original_roi
+        # Draw ROI - Green boundary
+        x, y, w, h = self.roi
         cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-        # Calculate entry and exit zones in original coordinates
-        orig_entry_x = int(self.entry_zone[1] / self.detection_scale_factor)
-        orig_exit_x = int(self.exit_zone[0] / self.detection_scale_factor)
-
-        # Draw entry zone - Blue (scaled to original coordinates)
+        # Draw entry zone - Blue
         cv2.line(debug_frame,
-                 (x + orig_entry_x, y),
-                 (x + orig_entry_x, y + h),
+                 (x + self.entry_zone[1] - self.roi[0], y),
+                 (x + self.entry_zone[1] - self.roi[0], y + h),
                  (255, 0, 0), 2)
 
-        # Draw exit zone - Red (scaled to original coordinates)
+        # Draw exit zone - Red
         cv2.line(debug_frame,
-                 (x + orig_exit_x, y),
-                 (x + orig_exit_x, y + h),
+                 (x + self.exit_zone[0] - self.roi[0], y),
+                 (x + self.exit_zone[0] - self.roi[0], y + h),
                  (0, 0, 255), 2)
 
-        # Draw grid if enabled
-        if self.show_grid:
-            grid_h, grid_w = self.grid_size
-            cell_h, cell_w = h // grid_h, w // grid_w
+        # Draw thread manager queue size if in async mode
+        if self.async_mode and self.thread_manager:
+            queue_size = self.thread_manager.get_queue_size()
+            cv2.putText(debug_frame, f"Queue: {queue_size}", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
-            # Draw horizontal grid lines
-            for i in range(1, grid_h):
-                y_pos = y + i * cell_h
-                cv2.line(debug_frame, (x, y_pos), (x + w, y_pos), (200, 200, 200), 1)
+        # Get current time for age calculation
+        current_time = time.time()
 
-            # Draw vertical grid lines
-            for j in range(1, grid_w):
-                x_pos = x + j * cell_w
-                cv2.line(debug_frame, (x_pos, y), (x_pos, y + h), (200, 200, 200), 1)
-
-        # Draw spatial cooldown zones (scaled to original coordinates)
+        # Draw tracked pieces
         with self.lock:
-            for loc_x, loc_y, t in self.captured_locations:
-                # Calculate age as percentage of total cooldown time
-                current_time = time.time()
-                age_pct = min(1.0, (current_time - t) / self.spatial_cooldown_time)
-
-                # Color fades from red to transparent as it ages
-                color = (0, 0, 255)
-
-                # Scale coordinates to original resolution
-                orig_x = int(loc_x / self.detection_scale_factor)
-                orig_y = int(loc_y / self.detection_scale_factor)
-                orig_radius = int(self.spatial_cooldown_radius / self.detection_scale_factor)
-
-                # Draw circle showing the cooldown zone
-                cv2.circle(debug_frame,
-                           (int(orig_x + self.original_roi[0]), int(orig_y + self.original_roi[1])),
-                           orig_radius,
-                           color,
-                           1)  # Thickness
-
-            # Get current time for age calculation
-            current_time = time.time()
-
-            # Draw thread manager queue size if in async mode
-            if self.async_mode and self.thread_manager:
-                queue_size = self.thread_manager.get_queue_size()
-                cv2.putText(debug_frame, f"Queue: {queue_size}", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-
             for piece in self.tracked_pieces:
-                # Scale detection coordinates to original resolution
-                orig_x, orig_y, orig_w, orig_h = self._scale_to_original_coordinates(piece)
+                # Get bounding box
+                x, y, w, h = piece.bounding_box
 
-                # Apply original ROI offset
-                roi_x, roi_y = self.original_roi[0], self.original_roi[1]
-                x = orig_x + roi_x
-                y = orig_y + roi_y
-                w = orig_w
-                h = orig_h
+                # Apply ROI offset
+                roi_x, roi_y = self.roi[0], self.roi[1]
+                x += roi_x
+                y += roi_y
 
                 # Determine box color based on captured status and update freshness
                 age = current_time - piece.last_update_time
@@ -762,8 +589,8 @@ class TrackedLegoDetector:
                 elif piece.captured and piece.image_number is not None:
                     label_text = f"#{piece.image_number}"
                 else:
-                    # Show ID and age for debugging
-                    label_text = f"ID:{piece.id} ({age:.1f}s)"
+                    # Show ID, age and update count for debugging
+                    label_text = f"ID:{piece.id} ({age:.1f}s) U:{piece.update_count}"
 
                 label_color = box_color
                 label_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
