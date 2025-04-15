@@ -9,6 +9,8 @@ sorting strategies and configuration.
 import csv
 import logging
 from typing import Dict, Any, Optional, List
+import os
+import time
 
 from error_module import SortingError
 
@@ -336,6 +338,48 @@ class SortingManager:
             logger.info("Defaulting to primary category sorting")
             return PrimaryCategorySorter(self.sorting_config, self.categories_data)
 
+    def _record_missing_piece(self, element_id: str, api_result: Dict[str, Any]) -> None:
+        """Record missing piece data to a CSV file for later addition to the categories CSV.
+
+        Args:
+            element_id: The element ID of the missing piece
+            api_result: The full API result containing piece information
+        """
+        missing_file_path = "missing_piece_data.csv"
+        try:
+            # Get piece name from API result if available
+            piece_name = api_result.get("name", "Unknown")
+
+            # Get current image number if available in the API result
+            image_number = api_result.get("image_number", 0)
+
+            # Check if the file exists, if not create it with headers
+            file_exists = os.path.isfile(missing_file_path)
+
+            with open(missing_file_path, 'a', encoding='utf-8', newline='') as file:
+                fieldnames = ['element_id', 'name', 'primary_category', 'secondary_category',
+                              'tertiary_category', 'image_number', 'timestamp']
+                writer = csv.DictWriter(file, fieldnames=fieldnames)
+
+                # Write header if file is new
+                if not file_exists:
+                    writer.writeheader()
+
+                # Write the piece data
+                writer.writerow({
+                    'element_id': element_id,
+                    'name': piece_name,
+                    'primary_category': '',  # Empty fields for user to fill in
+                    'secondary_category': '',
+                    'tertiary_category': '',
+                    'image_number': image_number,
+                    'timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
+                })
+
+            logger.info(f"Recorded missing piece data for element ID: {element_id} (image #{image_number})")
+        except Exception as e:
+            logger.error(f"Failed to record missing piece data: {str(e)}")
+
     def identify_piece(self, api_result: Dict[str, Any]) -> Dict[str, Any]:
         """Process API result and determine sorting bin.
 
@@ -373,28 +417,11 @@ class SortingManager:
             error_msg = f"Piece not found in dictionary: {element_id}"
             logger.warning(error_msg)
             result["error"] = error_msg
+
+            # Add new code to record missing piece data
+            self._record_missing_piece(element_id, api_result)
+
             return result
-
-        # Add piece information to result
-        piece_info = self.categories_data[element_id]
-        result.update({
-            "element_id": element_id,
-            "name": piece_info['name'],
-            "primary_category": piece_info['primary_category'],
-            "secondary_category": piece_info['secondary_category'],
-            "tertiary_category": piece_info.get('tertiary_category', '')
-        })
-
-        # Get bin number from strategy
-        try:
-            result["bin_number"] = self.strategy.get_bin(element_id, confidence)
-            logger.info(f"Assigned piece {element_id} ({piece_info['name']}) to bin {result['bin_number']}")
-        except Exception as e:
-            error_msg = f"Error determining bin: {str(e)}"
-            logger.error(error_msg)
-            result["error"] = error_msg
-
-        return result
 
     def get_strategy_description(self) -> str:
         """Get description of the current sorting strategy.
@@ -440,4 +467,3 @@ def create_sorting_manager(config_manager):
         error_msg = f"Failed to create sorting manager: {str(e)}"
         logger.error(error_msg)
         raise SortingError(error_msg)
-

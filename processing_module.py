@@ -247,6 +247,7 @@ class ProcessingWorker:
             api_result = self._call_api(file_path)
 
             # Step 3: Determine sorting bin
+            api_result['image_number'] = image_number
             sorting_result = self._identify_and_sort(api_result)
 
             # Step 4: Move servo to bin position
