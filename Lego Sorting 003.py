@@ -2,7 +2,7 @@
 Lego Sorting 003 - Main application for Lego piece sorting
 
 This script serves as the entry point for the Lego sorting application,
-coordinating between the various modules. This version includes multithreaded
+coordinating between the various modules. This version uses multithreaded
 processing for improved performance and reduced stuttering, with Arduino-based
 servo control for the sorting mechanism.
 """
@@ -44,18 +44,16 @@ class LegoSortingApplication:
         # Initialize configuration
         self.config_manager = create_config_manager(config_path)
 
-        # Check if threading is enabled
+        # Check if threading is enabled (always use threading with new detector)
         self.threading_enabled = self.config_manager.is_threading_enabled()
         logger.info("Threading enabled: %s", self.threading_enabled)
 
-        # Initialize thread manager if threading is enabled
-        self.thread_manager = None
-        if self.threading_enabled:
-            self.thread_manager = create_thread_manager(self.config_manager)
+        # Initialize thread manager
+        self.thread_manager = create_thread_manager(self.config_manager)
 
-            # Register callbacks for processing events
-            self.thread_manager.register_callback("piece_processed", self._on_piece_processed)
-            self.thread_manager.register_callback("piece_error", self._on_piece_error)
+        # Register callbacks for processing events
+        self.thread_manager.register_callback("piece_processed", self._on_piece_processed)
+        self.thread_manager.register_callback("piece_error", self._on_piece_error)
 
         # Initialize components with config
         self.camera = create_camera("webcam", self.config_manager)
@@ -89,9 +87,7 @@ class LegoSortingApplication:
 
     def _start_processing_thread(self):
         """Start the processing worker thread."""
-        if not self.threading_enabled:
-            return
-
+        # Always start the thread in the updated implementation
         logger.info("Starting processing worker thread")
 
         # Create worker thread
@@ -172,22 +168,21 @@ class LegoSortingApplication:
         cv2.putText(debug_frame, f"FPS: {self.fps:.1f}", (10, 70),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-        if self.threading_enabled and self.thread_manager:
-            # Get queue size
-            queue_size = self.thread_manager.get_queue_size()
+        # Get queue size
+        queue_size = self.thread_manager.get_queue_size()
 
-            # Add queue information
-            cv2.putText(debug_frame, f"Queue: {queue_size}", (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        # Add queue information
+        cv2.putText(debug_frame, f"Queue: {queue_size}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-            # Add processed count
-            cv2.putText(debug_frame, f"Processed: {self.processed_pieces}", (10, 110),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        # Add processed count
+        cv2.putText(debug_frame, f"Processed: {self.processed_pieces}", (10, 110),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-            # Add threading status
-            thread_status = "Threaded" if self.threading_enabled else "Synchronous"
-            cv2.putText(debug_frame, thread_status, (frame.shape[1] - 200, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        # Add threading status
+        thread_status = "Threaded" if self.threading_enabled else "Synchronous"
+        cv2.putText(debug_frame, thread_status, (frame.shape[1] - 200, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
         return debug_frame
 
@@ -208,18 +203,14 @@ class LegoSortingApplication:
 
             print("\nSetup complete!")
 
-            # Start processing thread if threading is enabled
-            if self.threading_enabled:
-                self._start_processing_thread()
-                print("Started processing thread")
+            # Start processing thread (always use threading in updated implementation)
+            self._start_processing_thread()
+            print("Started processing thread")
 
-                # Initialize overflow bin position in async mode
-                # This will be controlled by the worker thread for specific bins
-                overflow_bin = self.config_manager.get("sorting", "overflow_bin", 9)
-                print(f"Default overflow bin: {overflow_bin}")
-            else:
-                # In synchronous mode, move servo to default position initially
-                self.servo.move_to_bin(self.config_manager.get("sorting", "overflow_bin", 9))
+            # Initialize overflow bin position in async mode
+            # This will be controlled by the worker thread for specific bins
+            overflow_bin = self.config_manager.get("sorting", "overflow_bin", 9)
+            print(f"Default overflow bin: {overflow_bin}")
 
             print("\nSorting system ready. Press ESC to exit.")
 
@@ -240,22 +231,13 @@ class LegoSortingApplication:
                 # Increment frame counter
                 self.frame_count += 1
 
-                # Process frame based on threading mode
-                if self.threading_enabled:
-                    # Asynchronous mode - detection only, processing happens in worker thread
-                    tracked_pieces = self.detector.process_frame_async(
-                        frame=frame,
-                        current_count=self.camera.count
-                    )
-                    piece_image = None  # No immediate image in async mode
-                else:
-                    # Synchronous mode - detection and immediate processing
-                    tracked_pieces, piece_image = self.detector.process_frame(
-                        frame=frame,
-                        current_count=self.camera.count
-                    )
+                # Process frame - always using the unified process_frame method
+                tracked_pieces, piece_image = self.detector.process_frame(
+                    frame=frame,
+                    current_count=self.camera.count
+                )
 
-                # In synchronous mode, process detected pieces immediately
+                # In synchronous mode, process detected pieces immediately (fallback only)
                 if not self.threading_enabled and piece_image is not None:
                     # Save the cropped image
                     file_path, image_number, error = self.camera.capture_image()
@@ -304,7 +286,7 @@ class LegoSortingApplication:
                 debug_frame = self._update_status(frame, debug_frame)
 
                 # Add servo information to debug frame
-                if not self.threading_enabled and self.servo.current_bin is not None:
+                if not self.threading_enabled and hasattr(self, 'servo') and self.servo and self.servo.current_bin is not None:
                     bin_text = f"Current Bin: {self.servo.current_bin}"
                     cv2.putText(debug_frame, bin_text, (10, 150),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
@@ -329,8 +311,8 @@ class LegoSortingApplication:
         """Clean up resources."""
         logger.info("Cleaning up resources")
 
-        # Stop threads if threading is enabled
-        if self.threading_enabled and self.thread_manager:
+        # Stop threads
+        if self.thread_manager:
             logger.info("Stopping worker threads")
             timeout = self.config_manager.get("threading", "shutdown_timeout", 5.0)
             self.thread_manager.stop_all_workers(timeout=timeout)

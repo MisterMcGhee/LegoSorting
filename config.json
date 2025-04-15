@@ -5,14 +5,17 @@
         "filename_prefix": "Lego"
     },
     "detector": {
-    "min_piece_area": 300,
-    "max_piece_area": 100000,
-    "buffer_percent": 0.1,
-    "crop_padding": 50,
-    "track_timeout": 1.0,
-    "capture_min_interval": 1.0,
-    "tracker_type": "KCF",
-    "min_tracking_updates": 10
+        "min_piece_area": 300,
+        "max_piece_area": 100000,
+        "buffer_percent": 0.1,
+        "crop_padding": 50,
+        "track_timeout": 1.0,
+        "capture_min_interval": 1.0,
+        "min_tracking_updates": 5,
+        "history_length": 200,
+        "var_threshold": 36,
+        "morphology_size": 5,
+        "show_bg_subtraction": true
     },
     "piece_identifier": {
         "csv_path": "Lego_Categories.csv",

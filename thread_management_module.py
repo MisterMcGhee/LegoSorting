@@ -146,7 +146,8 @@ class ThreadManager:
             )
 
             # Add to queue with priority (negative so lower values = higher priority)
-            self.message_queue.put((priority, message), block=False)
+            # Use unique ID as tiebreaker to prevent comparing PieceMessage objects directly
+            self.message_queue.put((-priority, message.piece_id, message), block=False)
             logger.debug("Added message for piece %d to queue (priority=%d)", piece_id, priority)
             return True
 
@@ -164,8 +165,8 @@ class ThreadManager:
             PieceMessage or None if queue is empty or timeout occurs
         """
         try:
-            # Get item from priority queue (unpack the priority, message tuple)
-            _, message = self.message_queue.get(block=True, timeout=timeout)
+            # Get item from priority queue (unpack the tuple with priority, id, and message)
+            _, _, message = self.message_queue.get(block=True, timeout=timeout)
             message.status = "processing"
             return message
 

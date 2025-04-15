@@ -2,10 +2,11 @@
 detector_module.py - Simplified detector for Lego sorting application
 
 This module handles the detection and tracking of Lego pieces moving through a region of interest.
-It uses OpenCV's background subtraction and tracking algorithms for efficient detection.
+It uses OpenCV's background subtraction and position-based tracking for efficient detection.
 """
 
 import time
+import math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Any
 import cv2
@@ -57,11 +58,15 @@ class TrackedLegoDetector:
         self.buffer_percent = 0.01
         self.crop_padding = 20
         self.track_timeout = 1.0  # Time in seconds before removing a track that hasn't been updated
-        self.tracker_type = "KCF"  # Default tracking algorithm
+        self.min_tracking_updates = 5  # Minimum number of tracking updates before capture
+
+        # Background subtraction parameters
+        self.history_length = 200
+        self.var_threshold = 36
+        self.morphology_size = 5
 
         # Capture cooldown settings
         self.capture_min_interval = 3.0  # Minimum seconds between captures
-        self.min_tracking_updates = 5  # Minimum number of tracking updates before capture
 
         # Initialize from config if provided
         if config_manager:
@@ -74,7 +79,9 @@ class TrackedLegoDetector:
                                                            self.capture_min_interval)
             self.min_tracking_updates = config_manager.get("detector", "min_tracking_updates",
                                                            self.min_tracking_updates)
-            self.tracker_type = config_manager.get("detector", "tracker_type", self.tracker_type)
+            self.history_length = config_manager.get("detector", "history_length", self.history_length)
+            self.var_threshold = config_manager.get("detector", "var_threshold", self.var_threshold)
+            self.morphology_size = config_manager.get("detector", "morphology_size", self.morphology_size)
 
             # Threading settings
             if config_manager.is_threading_enabled():
@@ -86,7 +93,6 @@ class TrackedLegoDetector:
         self.bg_subtractor = None
 
         # Initialize tracking-related variables
-        self.trackers = []
         self.tracked_pieces = []
         self.next_piece_id = 1
         self.roi = None
@@ -94,6 +100,12 @@ class TrackedLegoDetector:
         self.exit_zone = None
         self.valid_zone = None
         self.last_capture_time = 0
+
+        # For visualization
+        self.last_frame_time = time.time()
+        self.frame_rate = 0
+        # Whether to show background subtraction in debug view
+        self.show_bg_subtraction = True
 
         # Thread-safety
         self.lock = threading.RLock()  # Reentrant lock for thread safety
@@ -214,24 +226,21 @@ class TrackedLegoDetector:
         Args:
             roi_frame: The ROI portion of the frame
         """
-        # Create background subtractor - MOG2 works well with gradual changes
+        # Create background subtractor with tuned parameters
         self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=100,  # Number of frames to build the background model
-            varThreshold=25,  # Threshold for foreground detection
-            detectShadows=False  # Don't detect shadows to improve performance
+            history=self.history_length,  # Frames to use for background model
+            varThreshold=self.var_threshold,  # Higher threshold = less sensitive
+            detectShadows=False  # Disable shadow detection for better performance
         )
 
-        # Learn initial background from a few frames
-        for _ in range(10):
+        # Learn initial background from several frames
+        for _ in range(30):  # Increase frames for better learning
             self.bg_subtractor.apply(roi_frame)
-
-        # Initialize trackers list
-        self.trackers = []
 
         logger.info("Background subtractor initialized")
 
     def _preprocess_frame(self, frame):
-        """Process frame with background subtraction
+        """Process frame with enhanced background subtraction
 
         Args:
             frame: Full camera frame
@@ -249,12 +258,34 @@ class TrackedLegoDetector:
         # Apply background subtraction
         mask = self.bg_subtractor.apply(roi)
 
-        # Apply morphological operations to clean up noise
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        # Convert ROI to grayscale for additional processing
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+
+        # Apply adaptive threshold to get additional detail
+        thresh = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV, 11, 2
+        )
+
+        # Combine the results (logical AND)
+        combined = cv2.bitwise_and(mask, thresh)
+
+        # Apply morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (self.morphology_size, self.morphology_size))
+
+        # Open operation (erosion followed by dilation) removes small objects
+        cleaned = cv2.morphologyEx(combined, cv2.MORPH_OPEN, kernel)
+
+        # Close operation (dilation followed by erosion) closes small holes
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel)
 
-        return cleaned
+        # Additional morphological operations to remove noise
+        # Erosion to remove small isolated regions
+        eroded = cv2.erode(cleaned, kernel, iterations=1)
+        # Dilation to restore the size of remaining regions
+        dilated = cv2.dilate(eroded, kernel, iterations=1)
+
+        return dilated
 
     def _find_new_contours(self, mask):
         """Find contours in the current frame
@@ -284,30 +315,6 @@ class TrackedLegoDetector:
 
         return valid_contours
 
-    def _create_tracker(self, frame, bbox):
-        """Create an OpenCV tracker of the specified type
-
-        Args:
-            frame: Video frame
-            bbox: Bounding box (x, y, w, h)
-
-        Returns:
-            OpenCV tracker object
-        """
-        if self.tracker_type == "KCF":
-            tracker = cv2.TrackerKCF_create()
-        elif self.tracker_type == "CSRT":
-            tracker = cv2.TrackerCSRT_create()
-        elif self.tracker_type == "MIL":
-            tracker = cv2.TrackerMIL_create()
-        else:
-            # Default to KCF if specified tracker not available
-            tracker = cv2.TrackerKCF_create()
-
-        # Initialize tracker with bounding box
-        tracker.init(frame, bbox)
-        return tracker
-
     def _update_tracking(self, frame):
         """Update tracking with new frame
 
@@ -315,38 +322,76 @@ class TrackedLegoDetector:
             frame: Current video frame
         """
         with self.lock:
-            # Update existing trackers
-            valid_trackers = []
+            # Process new contours to find new potential objects
+            mask = self._preprocess_frame(frame)
+            new_contours = self._find_new_contours(mask)
+
+            # Track existing pieces
             valid_pieces = []
+            current_time = time.time()
 
-            for i, (tracker, piece) in enumerate(zip(self.trackers, self.tracked_pieces)):
-                # Update tracker with new frame
-                success, bbox = tracker.update(frame)
+            # Convert contours to simplified objects with just position info
+            contour_objects = []
+            for contour, bbox in new_contours:
+                x, y, w, h = bbox
+                center_x = x + w / 2
+                center_y = y + h / 2
+                contour_objects.append({
+                    "contour": contour,
+                    "bbox": bbox,
+                    "center": (center_x, center_y),
+                    "matched": False
+                })
 
-                if success:
-                    x, y, w, h = [int(v) for v in bbox]
-                    piece.bounding_box = (x, y, w, h)
+            # First, try to update existing tracks
+            for piece in self.tracked_pieces:
+                # Skip pieces outside the ROI
+                if piece.bounding_box is None:
+                    continue
+
+                # Get current position
+                px, py, pw, ph = piece.bounding_box
+                center_x = px + pw / 2
+                center_y = py + ph / 2
+
+                # Find closest new contour
+                best_match = None
+                best_distance = float('inf')
+
+                for obj in contour_objects:
+                    if obj["matched"]:
+                        continue
+
+                    # Calculate distance between centers
+                    dx = center_x - obj["center"][0]
+                    dy = center_y - obj["center"][1]
+                    distance = math.sqrt(dx * dx + dy * dy)
+
+                    # Maximum allowed distance is half the width or height
+                    max_distance = max(pw, ph) / 2
+
+                    if distance < max_distance and distance < best_distance:
+                        best_distance = distance
+                        best_match = obj
+
+                if best_match:
+                    # Update with matched contour
+                    best_match["matched"] = True
+                    piece.contour = best_match["contour"]
+                    piece.bounding_box = best_match["bbox"]
                     piece.updated = True
-                    piece.last_update_time = time.time()
+                    piece.last_update_time = current_time
                     piece.update_count += 1
-                    valid_trackers.append(tracker)
                     valid_pieces.append(piece)
-                else:
-                    # If tracking failed, check if it was recently captured
-                    current_time = time.time()
-                    if piece.captured and (current_time - piece.last_update_time < self.track_timeout * 2):
-                        piece.updated = False
-                        valid_trackers.append(tracker)
-                        valid_pieces.append(piece)
-                    elif piece.being_processed:
-                        # Keep tracks being processed
-                        piece.updated = False
-                        valid_trackers.append(tracker)
-                        valid_pieces.append(piece)
+                elif (piece.being_processed or
+                      piece.captured or
+                      current_time - piece.last_update_time < self.track_timeout):
+                    # Keep pieces that are being processed or were recently updated
+                    piece.updated = False
+                    valid_pieces.append(piece)
 
             # Check for timed out pieces being processed
-            current_time = time.time()
-            for i, piece in enumerate(valid_pieces):
+            for piece in valid_pieces:
                 if (piece.being_processed and
                         piece.processing_start_time is not None and
                         current_time - piece.processing_start_time > self.processing_timeout):
@@ -355,50 +400,30 @@ class TrackedLegoDetector:
                     piece.being_processed = False
                     piece.processing_start_time = None
 
-            # Update trackers and pieces
-            self.trackers = valid_trackers
-            self.tracked_pieces = valid_pieces
+            # Add new tracks for unmatched contours
+            for obj in contour_objects:
+                if obj["matched"]:
+                    continue
 
-            # Process new contours to add new trackers
-            mask = self._preprocess_frame(frame)
-            new_contours = self._find_new_contours(mask)
-
-            for contour, bbox in new_contours:
-                x, y, w, h = bbox
+                x, y, w, h = obj["bbox"]
 
                 # Skip pieces that haven't entered the ROI yet
                 if x < self.entry_zone[0]:
                     continue
 
-                # Check if this contour overlaps with an existing tracked piece
-                is_new = True
-                for piece in self.tracked_pieces:
-                    px, py, pw, ph = piece.bounding_box
-                    # Calculate overlap
-                    overlap_x = max(0, min(x + w, px + pw) - max(x, px))
-                    overlap_y = max(0, min(y + h, py + ph) - max(y, py))
-                    overlap_area = overlap_x * overlap_y
-                    min_area = min(w * h, pw * ph) * 0.5  # 50% overlap threshold
+                # Create new tracked piece
+                new_piece = TrackedPiece(
+                    id=self.next_piece_id,
+                    contour=obj["contour"],
+                    bounding_box=obj["bbox"],
+                    entry_time=time.time()
+                )
 
-                    if overlap_area > min_area:
-                        is_new = False
-                        break
+                valid_pieces.append(new_piece)
+                self.next_piece_id += 1
 
-                if is_new:
-                    # Create new tracker
-                    tracker = self._create_tracker(frame, (x, y, w, h))
-
-                    # Create tracked piece object
-                    new_piece = TrackedPiece(
-                        id=self.next_piece_id,
-                        contour=contour,
-                        bounding_box=bbox,
-                        entry_time=time.time()
-                    )
-
-                    self.trackers.append(tracker)
-                    self.tracked_pieces.append(new_piece)
-                    self.next_piece_id += 1
+            # Update tracked pieces list
+            self.tracked_pieces = valid_pieces
 
     def _should_capture(self, piece):
         """Determine if the piece should be captured.
@@ -479,6 +504,13 @@ class TrackedLegoDetector:
         if self.roi is None:
             raise ValueError("Detector not calibrated. Call calibrate() first.")
 
+        # Calculate FPS
+        current_time = time.time()
+        delta_time = current_time - self.last_frame_time
+        if delta_time > 0:
+            self.frame_rate = 1.0 / delta_time
+        self.last_frame_time = current_time
+
         # Update tracking with new frame
         self._update_tracking(frame)
 
@@ -525,28 +557,54 @@ class TrackedLegoDetector:
             return frame
 
         debug_frame = frame.copy()
+        h, w = debug_frame.shape[:2]
 
         # Draw ROI - Green boundary
-        x, y, w, h = self.roi
-        cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        x, y, roi_w, roi_h = self.roi
+        cv2.rectangle(debug_frame, (x, y), (x + roi_w, y + roi_h), (0, 255, 0), 2)
 
         # Draw entry zone - Blue
         cv2.line(debug_frame,
                  (x + self.entry_zone[1] - self.roi[0], y),
-                 (x + self.entry_zone[1] - self.roi[0], y + h),
+                 (x + self.entry_zone[1] - self.roi[0], y + roi_h),
                  (255, 0, 0), 2)
 
         # Draw exit zone - Red
         cv2.line(debug_frame,
                  (x + self.exit_zone[0] - self.roi[0], y),
-                 (x + self.exit_zone[0] - self.roi[0], y + h),
+                 (x + self.exit_zone[0] - self.roi[0], y + roi_h),
                  (0, 0, 255), 2)
 
-        # Draw thread manager queue size if in async mode
-        if self.async_mode and self.thread_manager:
+        # Draw system info panel
+        panel_w = 300
+        panel_h = 120
+        panel_x = 10
+        panel_y = 10
+
+        # Panel background
+        cv2.rectangle(debug_frame, (panel_x, panel_y),
+                      (panel_x + panel_w, panel_y + panel_h), (0, 0, 0), -1)
+        cv2.rectangle(debug_frame, (panel_x, panel_y),
+                      (panel_x + panel_w, panel_y + panel_h), (255, 255, 255), 1)
+
+        # Performance metrics
+        cv2.putText(debug_frame, f"FPS: {self.frame_rate:.1f}",
+                    (panel_x + 10, panel_y + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+        if self.thread_manager:
             queue_size = self.thread_manager.get_queue_size()
-            cv2.putText(debug_frame, f"Queue: {queue_size}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            cv2.putText(debug_frame, f"Queue: {queue_size}",
+                        (panel_x + 10, panel_y + 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+        # Tracker stats
+        active_count = sum(1 for p in self.tracked_pieces if not p.captured)
+        processing_count = sum(1 for p in self.tracked_pieces if p.being_processed)
+
+        cv2.putText(debug_frame, f"Active: {active_count} Processing: {processing_count}",
+                    (panel_x + 10, panel_y + 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
         # Get current time for age calculation
         current_time = time.time()
@@ -596,6 +654,22 @@ class TrackedLegoDetector:
                 label_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
                 cv2.rectangle(debug_frame, (x, y - label_size[1] - 10), (x + label_size[0], y), (0, 0, 0), -1)
                 cv2.putText(debug_frame, label_text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, label_color, 1)
+
+        # Draw background subtraction visualization if enabled
+        if self.show_bg_subtraction:
+            # Create small window for background subtraction preview
+            mask = self._preprocess_frame(frame)
+            mask_small = cv2.resize(mask, (320, 180))
+            # Convert to color for visualization
+            mask_color = cv2.cvtColor(mask_small, cv2.COLOR_GRAY2BGR)
+
+            # Place in bottom right corner
+            bg_x = w - 330
+            bg_y = h - 190
+            debug_frame[bg_y:bg_y + 180, bg_x:bg_x + 320] = mask_color
+            cv2.rectangle(debug_frame, (bg_x, bg_y), (bg_x + 320, bg_y + 180), (255, 255, 255), 2)
+            cv2.putText(debug_frame, "Background Mask", (bg_x + 10, bg_y + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         return debug_frame
 
