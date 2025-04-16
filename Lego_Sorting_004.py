@@ -411,10 +411,14 @@ class LegoSorting004:
                 self.system_monitor.update(current_time, self.fps, self.processed_pieces)
 
                 # Process frame - using the unified process_frame method
-                tracked_pieces, piece_image = self.detector.process_frame(
+                tracked_pieces, piece_image, should_increment = self.detector.process_frame(
                     frame=frame,
                     current_count=self.camera.count
                 )
+
+                # Increment camera count if the detector signals to do so
+                if should_increment:
+                    self.camera.count += 1
 
                 # In synchronous mode, process detected pieces immediately (fallback only)
                 if not self.threading_enabled and piece_image is not None:
