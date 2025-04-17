@@ -387,10 +387,14 @@ class LegoSorting004:
                 self.system_monitor.update(current_time, self.fps, self.processed_pieces)
 
                 # Process frame - using the unified process_frame method
-                tracked_pieces, piece_image = self.detector.process_frame(
+                tracked_pieces, piece_image, increment_signal = self.detector.process_frame(
                     frame=frame,
                     current_count=self.camera.count
                 )
+
+                # Then use increment_signal appropriately (probably to increment camera.count)
+                if increment_signal:
+                    self.camera.count += 1
 
                 # Get debug visualization from detector
                 debug_frame = self.detector.draw_debug(frame)

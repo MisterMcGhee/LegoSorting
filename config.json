@@ -5,35 +5,36 @@
         "filename_prefix": "Lego"
     },
     "detector": {
-    "min_piece_area": 1000,
-    "max_piece_area": 50000,
-    "buffer_percent": 0.1,
-    "crop_padding": 50,
-    "track_timeout": 1.0,
-    "capture_min_interval": 0.5,
-    "min_updates": 5,
-    "bg_history": 500,
-    "bg_threshold": 800,
-    "learn_rate": 0.005,
-    "morph_kernel_size": 5,
-    "match_threshold": 50,
-    "gaussian_blur": 7,
-    "processing_timeout": 10.0,
-    "load_roi_from_config": true,
-    "text_margin_top": 40,
-    "default_roi_x": 125,
-    "default_roi_y": 200,
-    "default_roi_w": 1600,
-    "default_roi_h": 500,
-    "show_bg_subtraction": true
+        "min_piece_area": 1000,
+        "max_piece_area": 50000,
+        "entry_zone_percent": 0.1,
+        "exit_zone_percent": 0.15,
+        "crop_padding": 50,
+        "track_timeout": 1.0,
+        "capture_min_interval": 0.5,
+        "min_updates": 5,
+        "bg_history": 500,
+        "bg_threshold": 800,
+        "learn_rate": 0.005,
+        "morph_kernel_size": 5,
+        "match_threshold": 100,
+        "gaussian_blur": 7,
+        "processing_timeout": 10.0,
+        "load_roi_from_config": true,
+        "text_margin_top": 40,
+        "default_roi_x": 125,
+        "default_roi_y": 200,
+        "default_roi_w": 1600,
+        "default_roi_h": 500,
+        "show_bg_subtraction": true
     },
     "piece_identifier": {
         "csv_path": "Lego_Categories.csv",
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "secondary",
-        "target_primary_category": "Basic",
+        "strategy": "Secondary",
+        "target_primary_category": "Angle",
         "target_secondary_category": "",
         "max_bins": 4,
         "overflow_bin": 0
@@ -76,7 +77,14 @@
     "detector_roi": {
         "x": 125,
         "y": 200,
-        "w": 1600,
+        "w": 1700,
         "h": 500
+    },
+    "exit_zone_trigger": {
+        "enabled": true,
+        "fall_time": 1.0,
+        "priority_method": "rightmost",
+        "min_piece_spacing": 50,
+        "cooldown_time": 0.5
     }
 }

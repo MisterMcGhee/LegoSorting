@@ -346,7 +346,7 @@ class ConveyorDetector:
         return detected_pieces
 
     def update_tracking(self, detected_pieces):
-        """Update tracking with newly detected pieces
+        """Update tracking with newly detected pieces and prevent duplicates after capture.
 
         Args:
             detected_pieces: List of (contour, bounding_box) pairs
@@ -383,30 +383,51 @@ class ConveyorDetector:
                     break
 
             if not matched:
-                unmatched_detections.append((contour, bbox))
+                unmatched_detections.append((contour, bbox, center))
 
-        # Create new tracks for unmatched detections
-        for contour, bbox in unmatched_detections:
+        # Create new tracks for unmatched detections, but avoid creating duplicates of captured pieces
+        for contour, bbox, center in unmatched_detections:
             x, y, w, h = bbox
 
             # Only create tracks for pieces that have entered the ROI
-            # (This helps filter out false detections at the edges)
             if x >= self.entry_zone[0]:
-                new_piece = TrackedPiece(
-                    id=self.next_id,
-                    bbox=bbox,
-                    contour=contour,
-                    first_detected=current_time,
-                    last_updated=current_time
-                )
-                new_piece.updated = True
+                # Check if this detection is close to any captured pieces
+                # This prevents creating duplicate tracks when a piece is captured but continues moving
+                close_to_captured = False
+                for piece in self.tracked_pieces:
+                    if piece.captured:
+                        dist = np.sqrt((center[0] - piece.center[0]) ** 2 + (center[1] - piece.center[1]) ** 2)
+                        # Use a slightly larger threshold for captured pieces to ensure we catch all potential duplicates
+                        if dist < self.config["match_threshold"] * 1.5:
+                            close_to_captured = True
+                            # Update the captured piece's position since it's still moving
+                            piece.bbox = bbox
+                            piece.contour = contour
+                            piece.last_updated = current_time
+                            piece.center = center
+                            piece.updated = True
+                            # Update exit zone status for the captured piece
+                            self.update_exit_zone_status(piece, current_time)
+                            logger.debug(f"Updated captured piece ID {piece.id} instead of creating duplicate")
+                            break
 
-                # Check if the new piece is already in the exit zone
-                self.update_exit_zone_status(new_piece, current_time)
+                # Only create a new track if it's not close to any captured piece
+                if not close_to_captured:
+                    new_piece = TrackedPiece(
+                        id=self.next_id,
+                        bbox=bbox,
+                        contour=contour,
+                        first_detected=current_time,
+                        last_updated=current_time
+                    )
+                    new_piece.updated = True
 
-                self.tracked_pieces.append(new_piece)
-                self.next_id += 1
-                logger.debug(f"Created new track ID {self.next_id - 1} at position {bbox}")
+                    # Check if the new piece is already in the exit zone
+                    self.update_exit_zone_status(new_piece, current_time)
+
+                    self.tracked_pieces.append(new_piece)
+                    self.next_id += 1
+                    logger.debug(f"Created new track ID {self.next_id - 1} at position {bbox}")
 
         # Remove stale tracks
         active_tracks = []
@@ -424,6 +445,9 @@ class ConveyorDetector:
                     active_tracks.append(piece)
                 else:
                     active_tracks.append(piece)
+            # Keep captured pieces longer to prevent immediate duplicate creation
+            elif piece.captured and (current_time - piece.last_updated) < (self.config["track_timeout"] * 2):
+                active_tracks.append(piece)
 
         # Update tracked pieces list
         removed_count = len(self.tracked_pieces) - len(active_tracks)
@@ -468,9 +492,10 @@ class ConveyorDetector:
         # Clear the current list
         self.pieces_in_exit_zone = []
 
-        # Add all pieces currently in the exit zone
+        # Add all pieces currently in the exit zone that haven't been processed
+        # and haven't been captured by the traditional method
         for piece in self.tracked_pieces:
-            if piece.in_exit_zone and not piece.triggered_servo:
+            if piece.in_exit_zone and not piece.triggered_servo and not piece.captured:
                 self.pieces_in_exit_zone.append(piece)
 
         # Sort the pieces based on the priority method
@@ -489,7 +514,6 @@ class ConveyorDetector:
                 self.current_priority_piece = self.pieces_in_exit_zone[0]
             else:
                 self.current_priority_piece = None
-
     def get_priority_exit_zone_piece(self):
         """Get the highest priority piece in the exit zone
 
@@ -559,8 +583,12 @@ class ConveyorDetector:
         if not priority_piece:
             return None, False
 
-        # If the piece has already triggered the servo, skip
-        if priority_piece.triggered_servo:
+        # If the piece has already triggered the servo or has been captured by traditional method, skip
+        if priority_piece.triggered_servo or priority_piece.captured:
+            return priority_piece, False
+
+        # Check if the piece has been processed by the normal capture
+        if priority_piece.being_processed:
             return priority_piece, False
 
         # Trigger the servo for this piece
@@ -569,7 +597,6 @@ class ConveyorDetector:
         logger.info(f"Triggering servo for piece ID {priority_piece.id} in exit zone")
 
         return priority_piece, True
-
     def crop_piece_image(self, frame, piece):
         """Crop the piece from the frame with padding and added space for text
 
@@ -653,7 +680,7 @@ class ConveyorDetector:
                 priority_piece.being_processed = True
                 priority_piece.processing_start_time = current_time
 
-                # Add to processing queue with highest priority (0)
+                # Add to processing queue with the highest priority (0)
                 self.thread_manager.add_message(
                     piece_id=priority_piece.id,
                     image=cropped_image.copy(),
