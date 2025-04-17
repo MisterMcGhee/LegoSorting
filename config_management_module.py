@@ -52,6 +52,7 @@ class ConfigManager:
             else:
                 print(f"Configuration file not found at {self.config_path}")
                 self._create_default_config()
+
     def _create_default_config(self) -> None:
         """Create default configuration.
 
@@ -69,7 +70,9 @@ class ConfigManager:
                 "detector": {
                     "min_piece_area": 300,
                     "max_piece_area": 100000,
-                    "buffer_percent": 0.1,
+                    # Separate entry and exit zone percentages
+                    "entry_zone_percent": 0.1,  # Entry zone width as percentage of ROI width
+                    "exit_zone_percent": 0.1,  # Exit zone width as percentage of ROI width
                     "crop_padding": 50,
                     "history_length": 2,
                     "grid_size": [10, 10],
@@ -92,7 +95,6 @@ class ConfigManager:
                     "overflow_bin": 9
                 },
                 "threading": {
-                    "enabled": True,
                     "max_queue_size": 100,
                     "worker_count": 1,
                     "api_timeout": 30.0,
@@ -119,6 +121,15 @@ class ConfigManager:
                         "8": 180,
                         "9": 90
                     }
+                },
+                # New section for exit zone trigger configuration
+                "exit_zone_trigger": {
+                    "enabled": True,  # Enable exit zone trigger mechanism
+                    "fall_time": 1.0,  # Estimated time (seconds) for piece to fall through chute
+                    "priority_method": "rightmost",
+                    # Method for prioritizing pieces in exit zone: rightmost, first_in, etc.
+                    "min_piece_spacing": 50,  # Minimum pixel spacing between pieces
+                    "cooldown_time": 0.5  # Time to wait after piece falls before next servo movement
                 }
             }
             self.save_config()
@@ -223,7 +234,6 @@ class ConfigManager:
                 self.config["threading"] = {}
 
             threading_defaults = {
-                "enabled": True,
                 "max_queue_size": 100,
                 "worker_count": 1,
                 "api_timeout": 30.0,
@@ -237,16 +247,28 @@ class ConfigManager:
                 if key not in self.config["threading"]:
                     self.config["threading"][key] = value
 
-    def is_threading_enabled(self) -> bool:
-        """Check if threading is enabled in configuration.
+    def set_default_exit_zone_trigger_config(self) -> None:
+        """Set default exit zone trigger configuration if it doesn't exist.
 
-        Returns:
-            bool: True if threading is enabled, False otherwise
+        This method ensures that all necessary exit zone trigger configuration
+        options are present with reasonable default values.
         """
         with self._config_lock:
-            # Ensure threading config exists
-            self.set_default_threading_config()
-            return self.config["threading"].get("enabled", True)
+            if "exit_zone_trigger" not in self.config:
+                self.config["exit_zone_trigger"] = {}
+
+            trigger_defaults = {
+                "enabled": True,
+                "fall_time": 1.0,
+                "priority_method": "rightmost",
+                "min_piece_spacing": 50,
+                "cooldown_time": 0.5
+            }
+
+            # Only add missing keys, don't overwrite existing settings
+            for key, value in trigger_defaults.items():
+                if key not in self.config["exit_zone_trigger"]:
+                    self.config["exit_zone_trigger"][key] = value
 
     def create_backup(self, suffix: str = "backup") -> Optional[str]:
         """Create a backup of the current configuration file.
@@ -289,6 +311,9 @@ def create_config_manager(config_path: str = "config.json") -> ConfigManager:
     # Ensure threading configuration exists
     config_manager.set_default_threading_config()
 
+    # Ensure exit zone trigger configuration exists
+    config_manager.set_default_exit_zone_trigger_config()
+
     return config_manager
 
 
@@ -302,8 +327,6 @@ if __name__ == "__main__":
     print(f"Camera directory: {camera_dir}")
 
     # Check threading configuration
-    threading_enabled = config.is_threading_enabled()
-    print(f"Threading enabled: {threading_enabled}")
     worker_count = config.get("threading", "worker_count", 1)
     print(f"Worker count: {worker_count}")
 

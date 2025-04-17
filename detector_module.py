@@ -16,7 +16,7 @@ import os
 import json
 import threading
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict, Any
 
 # Set up module logger
@@ -37,11 +37,19 @@ class TrackedPiece:
     being_processed: bool = False  # Flag for pieces being processed by worker thread
     processing_start_time: Optional[float] = None  # When processing started
     updated: bool = True  # Whether this piece was updated in the current frame
+    in_exit_zone: bool = False  # Whether this piece is in the exit zone
+    exit_zone_entry_time: Optional[float] = None  # When the piece entered the exit zone
+    triggered_servo: bool = False  # Whether this piece has triggered servo movement
 
     def __post_init__(self):
         """Calculate derived properties"""
         x, y, w, h = self.bbox
         self.center = (x + w / 2, y + h / 2)
+
+    def get_right_edge(self) -> float:
+        """Get the x-coordinate of the right edge of the piece"""
+        x, _, w, _ = self.bbox
+        return x + w
 
 
 class ConveyorDetector:
@@ -65,7 +73,8 @@ class ConveyorDetector:
             "learn_rate": 0.005,  # Background learning rate
             "min_updates": 5,  # Minimum updates before a piece can be captured
             "track_timeout": 1.0,  # Time in seconds before removing stale tracks
-            "buffer_percent": 0.1,  # Percent of ROI width to use as entry/exit buffer
+            "entry_zone_percent": 0.1,  # Percent of ROI width to use as entry buffer
+            "exit_zone_percent": 0.1,  # Percent of ROI width to use as exit buffer
             "morph_kernel_size": 5,  # Kernel size for morphological operations
             "capture_cooldown": 0.5,  # Minimum time between captures
             "match_threshold": 50,  # Maximum distance for matching tracks
@@ -92,6 +101,20 @@ class ConveyorDetector:
                         self.config[key] = value
                         logger.info(f"Set config[{key}] = {value}")
 
+            # Load exit zone trigger configuration
+            self.exit_zone_trigger_config = config_manager.get_section("exit_zone_trigger")
+            logger.info(f"Exit zone trigger config: {self.exit_zone_trigger_config}")
+
+        else:
+            # Set default exit zone trigger config if no config manager provided
+            self.exit_zone_trigger_config = {
+                "enabled": True,
+                "fall_time": 1.0,
+                "priority_method": "rightmost",
+                "min_piece_spacing": 50,
+                "cooldown_time": 0.5
+            }
+
         # Store thread manager
         self.thread_manager = thread_manager
 
@@ -108,15 +131,16 @@ class ConveyorDetector:
         self.frame_count = 0  # Counter for processed frames
         self.latest_debug_frame = None  # Store latest debug frame
 
+        # Exit zone tracking
+        self.pieces_in_exit_zone = []  # List of pieces currently in exit zone
+        self.current_priority_piece = None  # Current priority piece in exit zone
+        self.last_servo_trigger_time = 0  # Time of last servo trigger
+        self.last_exit_zone_check_time = 0  # Time of last exit zone check
+
         # Performance tracking
         self.start_time = time.time()
         self.fps = 0
         self.last_fps_update = 0
-
-        # Async mode (always true when using thread manager)
-        self.async_mode = thread_manager is not None
-
-        logger.info(f"ConveyorDetector initialized with async_mode={self.async_mode}")
 
     def load_roi_from_config(self, frame, config_manager=None):
         """Load ROI from configuration if available, otherwise calibrate manually.
@@ -235,10 +259,12 @@ class ConveyorDetector:
         self.roi = roi
         x, y, w, h = roi
 
-        # Calculate buffer zones
-        buffer_width = int(w * self.config["buffer_percent"])
-        self.entry_zone = (x, x + buffer_width)
-        self.exit_zone = (x + w - buffer_width, x + w)
+        # Calculate buffer zones with separate entry and exit zone percentages
+        entry_buffer_width = int(w * self.config["entry_zone_percent"])
+        exit_buffer_width = int(w * self.config["exit_zone_percent"])
+
+        self.entry_zone = (x, x + entry_buffer_width)
+        self.exit_zone = (x + w - exit_buffer_width, x + w)
         self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
 
         # Initialize background subtractor with KNN
@@ -349,6 +375,10 @@ class ConveyorDetector:
                     piece.center = center
                     piece.update_count += 1
                     piece.updated = True
+
+                    # Check if the piece has entered or left the exit zone
+                    self.update_exit_zone_status(piece, current_time)
+
                     matched = True
                     break
 
@@ -370,6 +400,10 @@ class ConveyorDetector:
                     last_updated=current_time
                 )
                 new_piece.updated = True
+
+                # Check if the new piece is already in the exit zone
+                self.update_exit_zone_status(new_piece, current_time)
+
                 self.tracked_pieces.append(new_piece)
                 self.next_id += 1
                 logger.debug(f"Created new track ID {self.next_id - 1} at position {bbox}")
@@ -381,8 +415,9 @@ class ConveyorDetector:
             if piece.updated or (current_time - piece.last_updated) < self.config["track_timeout"]:
                 active_tracks.append(piece)
             # Reset processing status if timeout exceeded
-            elif piece.being_processed and piece.processing_start_time:
-                if current_time - piece.processing_start_time > self.config["processing_timeout"]:
+            elif piece.being_processed:
+                if piece.processing_start_time is not None and (
+                        current_time - piece.processing_start_time > self.config["processing_timeout"]):
                     logger.warning(f"Processing timeout for piece ID {piece.id}, resetting status")
                     piece.being_processed = False
                     piece.processing_start_time = None
@@ -396,6 +431,76 @@ class ConveyorDetector:
             logger.debug(f"Removed {removed_count} stale tracks")
 
         self.tracked_pieces = active_tracks
+
+        # Update the list of pieces in the exit zone
+        self.update_exit_zone_pieces()
+
+    def update_exit_zone_status(self, piece, current_time):
+        """Update whether a piece is in the exit zone
+
+        Args:
+            piece: The TrackedPiece to update
+            current_time: Current timestamp
+        """
+        if self.exit_zone is None:
+            return
+
+        x, y, w, h = piece.bbox
+        right_edge = x + w
+
+        # Check if piece is in exit zone
+        in_exit_zone = x >= self.exit_zone[0] and x < self.exit_zone[1]
+
+        # If piece just entered the exit zone
+        if in_exit_zone and not piece.in_exit_zone:
+            piece.in_exit_zone = True
+            piece.exit_zone_entry_time = current_time
+            logger.info(f"Piece ID {piece.id} entered exit zone")
+
+        # If piece just left the exit zone
+        elif not in_exit_zone and piece.in_exit_zone:
+            piece.in_exit_zone = False
+            piece.exit_zone_entry_time = None
+            logger.info(f"Piece ID {piece.id} left exit zone")
+
+    def update_exit_zone_pieces(self):
+        """Update the list of pieces currently in the exit zone"""
+        # Clear the current list
+        self.pieces_in_exit_zone = []
+
+        # Add all pieces currently in the exit zone
+        for piece in self.tracked_pieces:
+            if piece.in_exit_zone and not piece.triggered_servo:
+                self.pieces_in_exit_zone.append(piece)
+
+        # Sort the pieces based on the priority method
+        if self.pieces_in_exit_zone:
+            priority_method = self.exit_zone_trigger_config.get("priority_method", "rightmost")
+
+            if priority_method == "rightmost":
+                # Sort by x position (rightmost first)
+                self.pieces_in_exit_zone.sort(key=lambda p: p.get_right_edge(), reverse=True)
+            elif priority_method == "first_in":
+                # Sort by time entered exit zone (earliest first)
+                self.pieces_in_exit_zone.sort(key=lambda p: p.exit_zone_entry_time or float('inf'))
+
+            # Update the current priority piece
+            if self.pieces_in_exit_zone:
+                self.current_priority_piece = self.pieces_in_exit_zone[0]
+            else:
+                self.current_priority_piece = None
+
+    def get_priority_exit_zone_piece(self):
+        """Get the highest priority piece in the exit zone
+
+        Returns:
+            Optional[TrackedPiece]: The priority piece or None if no pieces in exit zone
+        """
+        if not self.pieces_in_exit_zone:
+            return None
+
+        # Return the highest priority piece (first in the sorted list)
+        return self.pieces_in_exit_zone[0] if self.pieces_in_exit_zone else None
 
     def check_for_capture(self):
         """Check if any piece should be captured
@@ -430,6 +535,40 @@ class ConveyorDetector:
             return piece
 
         return None
+
+    def check_for_servo_trigger(self):
+        """Check if a piece in the exit zone should trigger the servo
+
+        Returns:
+            Tuple[Optional[TrackedPiece], bool]: (Priority piece, trigger_servo flag)
+        """
+        if not self.exit_zone_trigger_config.get("enabled", True):
+            return None, False
+
+        current_time = time.time()
+
+        # Check cooldown time since last servo trigger
+        cooldown_time = self.exit_zone_trigger_config.get("cooldown_time", 0.5)
+        if current_time - self.last_servo_trigger_time < cooldown_time:
+            return self.current_priority_piece, False
+
+        # Get the piece with highest priority in the exit zone
+        priority_piece = self.get_priority_exit_zone_piece()
+
+        # If no pieces in exit zone, return None
+        if not priority_piece:
+            return None, False
+
+        # If the piece has already triggered the servo, skip
+        if priority_piece.triggered_servo:
+            return priority_piece, False
+
+        # Trigger the servo for this piece
+        priority_piece.triggered_servo = True
+        self.last_servo_trigger_time = current_time
+        logger.info(f"Triggering servo for piece ID {priority_piece.id} in exit zone")
+
+        return priority_piece, True
 
     def crop_piece_image(self, frame, piece):
         """Crop the piece from the frame with padding and added space for text
@@ -470,8 +609,8 @@ class ConveyorDetector:
             current_count: Current image counter (for filename numbering)
 
         Returns:
-            Tuple[List[TrackedPiece], Optional[np.ndarray]]:
-                List of tracked pieces and cropped image if a piece was captured
+            Tuple[List[TrackedPiece], Optional[np.ndarray], bool]:
+                List of tracked pieces, cropped image if a piece was captured, and increment signal
         """
         with self.lock:
             if self.roi is None:
@@ -493,9 +632,42 @@ class ConveyorDetector:
             # Update tracking
             self.update_tracking(detected_pieces)
 
-            # Check if any piece should be captured
+            # Check for servo trigger based on exit zone
+            priority_piece, trigger_servo = self.check_for_servo_trigger()
+
+            # If a piece should trigger the servo
+            if trigger_servo and priority_piece and self.thread_manager:
+                # Get cropped image
+                cropped_image = self.crop_piece_image(frame, priority_piece)
+
+                # Get the current image number
+                image_number = current_count
+
+                # Add the piece ID number at the top with increased margin
+                text_y = self.config["text_margin_top"] - 10  # Position for text
+                cv2.putText(cropped_image, f"{image_number}",
+                            (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.9, (0, 0, 255), 2)
+
+                # Mark as being processed
+                priority_piece.being_processed = True
+                priority_piece.processing_start_time = current_time
+
+                # Add to processing queue with highest priority (0)
+                self.thread_manager.add_message(
+                    piece_id=priority_piece.id,
+                    image=cropped_image.copy(),
+                    frame_number=image_number,
+                    position=priority_piece.bbox,
+                    priority=0  # Highest priority for exit zone pieces
+                )
+                logger.info(f"Added exit zone piece ID {priority_piece.id} to processing queue with highest priority")
+
+                # Return signal to increment camera count
+                return self.tracked_pieces, None, True
+
+            # Traditional capture method (now less important with exit zone trigger)
             piece_to_capture = self.check_for_capture()
-            captured_image = None
 
             if piece_to_capture:
                 # If using thread manager, mark as being processed
@@ -506,12 +678,9 @@ class ConveyorDetector:
                     # Get cropped image
                     cropped_image = self.crop_piece_image(frame, piece_to_capture)
 
-                    # MODIFIED: Use camera count and then immediately increase it
-                    # This ensures each piece gets a unique number
-                    image_number = current_count
-
                     # Add the piece ID number at the top with increased margin
                     text_y = self.config["text_margin_top"] - 10  # Position for text
+                    image_number = current_count
                     cv2.putText(cropped_image, f"{image_number}",
                                 (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.9, (0, 0, 255), 2)
@@ -522,24 +691,14 @@ class ConveyorDetector:
                         image=cropped_image.copy(),
                         frame_number=image_number,
                         position=piece_to_capture.bbox,
-                        priority=0
+                        priority=1  # Lower priority than exit zone pieces
                     )
                     logger.info(f"Added piece ID {piece_to_capture.id} to processing queue")
 
-                    # IMPORTANT: Return a signal to the main program to increment camera count
-                    return self.tracked_pieces, None, True  # Added third return value as increment signal
-                else:
-                    # In synchronous mode, return the cropped image with ID
-                    captured_image = self.crop_piece_image(frame, piece_to_capture)
+                    # Return signal to increment camera count
+                    return self.tracked_pieces, None, True
 
-                    # Add the piece ID number at the top with increased margin
-                    text_y = self.config["text_margin_top"] - 10  # Position for text
-                    cv2.putText(captured_image, f"{current_count}",
-                                (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                                0.9, (0, 0, 255), 2)
-
-            # Return with no increment signal (third parameter) if no piece was captured
-            return self.tracked_pieces, captured_image, False  # Added third return value
+            return self.tracked_pieces, None, False
 
     def draw_debug(self, frame):
         """Draw debug visualization on the frame
@@ -569,7 +728,15 @@ class ConveyorDetector:
             cv2.line(debug_frame,
                      (self.exit_zone[0], y),
                      (self.exit_zone[0], y + h),
-                     (0, 0, 255), 2)  # Red line for exit
+                     (0, 0, 255), 2)  # Red line for exit zone start
+
+            # Highlight exit zone with semi-transparent overlay
+            exit_zone_overlay = debug_frame.copy()
+            cv2.rectangle(exit_zone_overlay,
+                          (self.exit_zone[0], y),
+                          (self.exit_zone[1], y + h),
+                          (0, 0, 255), -1)  # Filled red rectangle
+            cv2.addWeighted(exit_zone_overlay, 0.2, debug_frame, 0.8, 0, debug_frame)
 
             # Draw tracked pieces
             for piece in self.tracked_pieces:
@@ -579,8 +746,12 @@ class ConveyorDetector:
                 py += y  # Add ROI y offset
 
                 # Different colors based on status
-                if piece.being_processed:
+                if piece == self.current_priority_piece:
+                    color = (255, 255, 0)  # Yellow for priority piece in exit zone
+                elif piece.being_processed:
                     color = (255, 0, 255)  # Purple for being processed
+                elif piece.in_exit_zone:
+                    color = (0, 165, 255)  # Orange for in exit zone but not priority
                 elif piece.captured:
                     color = (0, 255, 0)  # Green for captured
                 else:
@@ -590,7 +761,13 @@ class ConveyorDetector:
                 cv2.rectangle(debug_frame, (px, py), (px + pw, py + ph), color, 2)
 
                 # Add ID and update count
-                label = f"ID:{piece.id} U:{piece.update_count}"
+                if piece == self.current_priority_piece:
+                    label = f"ID:{piece.id} PRIORITY"
+                elif piece.in_exit_zone:
+                    label = f"ID:{piece.id} EXIT"
+                else:
+                    label = f"ID:{piece.id} U:{piece.update_count}"
+
                 cv2.putText(debug_frame, label, (px, py - 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
@@ -605,10 +782,16 @@ class ConveyorDetector:
             active_count = sum(1 for p in self.tracked_pieces if not p.captured and not p.being_processed)
             processing_count = sum(1 for p in self.tracked_pieces if p.being_processed)
             captured_count = sum(1 for p in self.tracked_pieces if p.captured and not p.being_processed)
+            exit_zone_count = len(self.pieces_in_exit_zone)
 
             cv2.putText(debug_frame,
                         f"Active: {active_count} Processing: {processing_count} Captured: {captured_count}",
                         (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+            # Add exit zone piece count
+            cv2.putText(debug_frame,
+                        f"Exit Zone: {exit_zone_count}",
+                        (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
             # Show background subtraction result in corner if enabled
             if self.config.get("show_bg_subtraction", True):
@@ -715,178 +898,3 @@ class SimpleConfigManager:
         if section not in self.config:
             self.config[section] = {}
         self.config[section][key] = value
-
-
-# Example usage as a standalone script
-if __name__ == "__main__":
-    # Set up logging
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-    # Parse command line arguments
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Lego Conveyor Detector")
-    parser.add_argument("--camera", type=int, default=0, help="Camera device ID")
-    parser.add_argument("--config", type=str, default="detector_config.json", help="Path to config JSON file")
-    parser.add_argument("--draw-roi", action="store_true", help="Force manual ROI selection")
-    parser.add_argument("--min-area", type=int, default=None, help="Minimum piece area")
-    parser.add_argument("--max-area", type=int, default=None, help="Maximum piece area")
-    args = parser.parse_args()
-
-    # Create simple config manager for standalone testing
-    config_manager = SimpleConfigManager(args.config)
-
-    # Override config with command line arguments if provided
-    if args.draw_roi:
-        config_manager.set("detector", "load_roi_from_config", False)
-        logging.info("Forcing manual ROI selection due to --draw-roi flag")
-
-    if args.min_area:
-        config_manager.set("detector", "min_piece_area", args.min_area)
-        logging.info(f"Setting min_piece_area to {args.min_area} from command line")
-
-    if args.max_area:
-        config_manager.set("detector", "max_piece_area", args.max_area)
-        logging.info(f"Setting max_piece_area to {args.max_area} from command line")
-
-        # Initialize webcam
-    logging.info(f"Opening camera device {args.camera}")
-    cap = cv2.VideoCapture(args.camera)
-
-    if not cap.isOpened():
-        logging.error("Could not open camera")
-        exit(1)
-
-    # Create detector
-    detector = ConveyorDetector(config_manager)
-
-    # Get first frame for calibration
-    ret, frame = cap.read()
-    if not ret:
-        logging.error("Could not read frame")
-        cap.release()
-        exit(1)
-
-    # Initialize ROI
-    detector.load_roi_from_config(frame)
-
-    # Captured pieces count and storage
-    captured_count = 0
-    save_dir = "captured_pieces"
-
-    # Create directory for saved images if it doesn't exist
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-
-    try:
-        print("\n=== Lego Conveyor Detector ===")
-        print("Press 'p' to pause/resume detection")
-        print("Press 'b' to toggle background subtraction view")
-        print("Press '+'/'-' to increase/decrease min piece area")
-        print("Press 's' to save current configuration")
-        print("Press 'r' to reset ROI (manual selection)")
-        print("Press ESC to exit")
-
-        # Control flags
-        paused = False
-        show_bg = detector.config.get("show_bg_subtraction", True)
-
-        # Main loop
-        while True:
-            # Read frame
-            ret, frame = cap.read()
-            if not ret:
-                logging.error("Could not read frame")
-                break
-
-            # Process frame if not paused
-            if not paused:
-                tracked_pieces, captured_image = detector.process_frame(frame, captured_count + 1)
-
-                # If a piece was captured, display and save it
-                if captured_image is not None:
-                    captured_count += 1
-
-                    # Show captured image
-                    cv2.imshow("Captured Piece", captured_image)
-
-                    # Save image
-                    save_path = os.path.join(save_dir, f"piece_{captured_count:03d}.jpg")
-                    cv2.imwrite(save_path, captured_image)
-
-                    logging.info(f"Captured piece #{captured_count} saved to {save_path}")
-
-            # Draw debug visualization
-            debug_frame = detector.draw_debug(frame)
-
-            # Add status info
-            status = "PAUSED" if paused else "RUNNING"
-            cv2.putText(debug_frame, status, (10, debug_frame.shape[0] - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-            # Add controls help
-            cv2.putText(debug_frame, "ESC: Exit | P: Pause | B: BG | +/-: Area | S: Save",
-                        (debug_frame.shape[1] - 500, debug_frame.shape[0] - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-            # Show frame
-            cv2.imshow("Lego Conveyor Detector", debug_frame)
-
-            # Check for keypress
-            key = cv2.waitKey(1) & 0xFF
-
-            # Handle key presses
-            if key == 27:  # ESC
-                break
-            elif key == ord('p') or key == ord('P'):  # Pause/resume
-                paused = not paused
-                print(f"Detection {'paused' if paused else 'resumed'}")
-            elif key == ord('b') or key == ord('B'):  # Toggle background view
-                show_bg = not show_bg
-                detector.config["show_bg_subtraction"] = show_bg
-                print(f"Background subtraction view {'enabled' if show_bg else 'disabled'}")
-            elif key == ord('+'):  # Increase min area
-                detector.config["min_piece_area"] = int(detector.config["min_piece_area"] * 1.2)
-                print(f"Min piece area increased to {detector.config['min_piece_area']}")
-            elif key == ord('-'):  # Decrease min area
-                detector.config["min_piece_area"] = max(100, int(detector.config["min_piece_area"] * 0.8))
-                print(f"Min piece area decreased to {detector.config['min_piece_area']}")
-            elif key == ord('s') or key == ord('S'):  # Save config
-                config_manager.update_section("detector", detector.config)
-                config_manager.save_config()
-                print(f"Configuration saved to {args.config}")
-            elif key == ord('r') or key == ord('R'):  # Reset ROI
-                print("Manual ROI selection requested")
-                detector.config["load_roi_from_config"] = False
-                detector.calibrate(frame)
-
-    except KeyboardInterrupt:
-        logging.info("Interrupted by user")
-    except Exception as e:
-        logging.error(f"Error: {e}")
-    finally:
-        # Clean up
-        cap.release()
-        cv2.destroyAllWindows()
-        detector.release()
-
-        # Save final configuration
-        config_manager.update_section("detector", detector.config)
-        if detector.roi:
-            config_manager.update_section("detector_roi", {
-                "x": detector.roi[0],
-                "y": detector.roi[1],
-                "w": detector.roi[2],
-                "h": detector.roi[3]
-            })
-        config_manager.save_config()
-
-        # Print summary
-        print("\n=== Detector Session Summary ===")
-        print(f"Detected {detector.next_id - 1} pieces, captured {captured_count} pieces")
-        print(f"Final ROI: {detector.roi}")
-        print(f"Final min_piece_area: {detector.config['min_piece_area']}")
-        print(f"Final max_piece_area: {detector.config['max_piece_area']}")
-        print(f"Configuration saved to {args.config}")
-        print("===============================\n")

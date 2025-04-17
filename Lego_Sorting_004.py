@@ -101,10 +101,6 @@ class LegoSorting004:
             # Initialize configuration
             self.config_manager = create_config_manager(config_path)
 
-            # Check if threading is enabled
-            self.threading_enabled = self.config_manager.is_threading_enabled()
-            logger.info(f"Threading enabled: {self.threading_enabled}")
-
             # Initialize thread manager
             self.thread_manager = create_thread_manager(self.config_manager)
 
@@ -129,13 +125,6 @@ class LegoSorting004:
             # Otherwise, these will be initialized in the worker thread
             self.api_client = None
             self.servo = None
-            if not self.threading_enabled:
-                logger.info("Initializing API client...")
-                self.api_client = create_api_client("brickognize", self.config_manager)
-
-                logger.info("Initializing servo...")
-                self.servo = create_arduino_servo_module(self.config_manager)
-                logger.info("Using Arduino-based servo control")
 
             logger.info(f"Sorting strategy: {self.sorting_manager.get_strategy_description()}")
 
@@ -253,11 +242,6 @@ class LegoSorting004:
         cv2.putText(overlay, status_text, (10, 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-        # Add threading mode
-        thread_status = "THREADED" if self.threading_enabled else "SYNCHRONOUS"
-        cv2.putText(overlay, thread_status, (w - 120, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-
         # Only show detailed metrics if enabled
         if self.show_metrics:
             # Create a semi-transparent panel for detailed metrics
@@ -270,13 +254,6 @@ class LegoSorting004:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             cv2.putText(overlay, f"Frame Count: {self.frame_count}", (w - 240, 100),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-            # Add servo info if available
-            if not self.threading_enabled and hasattr(self, 'servo') and self.servo and hasattr(self.servo,
-                                                                                                'current_bin'):
-                bin_text = f"Current Bin: {self.servo.current_bin}"
-                cv2.putText(overlay, bin_text, (w - 240, 120),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
             # Add run time
             if self.start_time:
@@ -350,10 +327,9 @@ class LegoSorting004:
 
             print("\nSetup complete!")
 
-            # Start processing thread if threading is enabled
-            if self.threading_enabled:
-                self._start_processing_thread()
-                print("Started processing thread")
+            # Always start processing thread. Previously this was conditional.
+            self._start_processing_thread()
+            print("Started processing thread")
 
             # Initialize overflow bin position in async mode
             # This will be controlled by the worker thread for specific bins
@@ -411,56 +387,10 @@ class LegoSorting004:
                 self.system_monitor.update(current_time, self.fps, self.processed_pieces)
 
                 # Process frame - using the unified process_frame method
-                tracked_pieces, piece_image, should_increment = self.detector.process_frame(
+                tracked_pieces, piece_image = self.detector.process_frame(
                     frame=frame,
                     current_count=self.camera.count
                 )
-
-                # Increment camera count if the detector signals to do so
-                if should_increment:
-                    self.camera.count += 1
-
-                # In synchronous mode, process detected pieces immediately (fallback only)
-                if not self.threading_enabled and piece_image is not None:
-                    # Save the cropped image
-                    file_path, image_number, error = self.camera.capture_image()
-
-                    if error:
-                        logger.error(f"Error capturing image: {error}")
-                        continue
-
-                    # Save the cropped piece image
-                    cv2.imwrite(file_path, piece_image)
-
-                    # Send to API for identification
-                    api_result = self.api_client.send_to_api(file_path)
-
-                    if "error" in api_result:
-                        logger.error(f"API error: {api_result['error']}")
-                        continue
-
-                    # Process with sorting manager
-                    result = self.sorting_manager.identify_piece(api_result)
-
-                    if "error" in result:
-                        logger.error(f"Sorting error: {result['error']}")
-                        # If sorting error, direct to overflow bin
-                        self.servo.move_to_bin(self.config_manager.get("sorting", "overflow_bin", 9))
-                    else:
-                        # Get bin number and move servo
-                        bin_number = result.get("bin_number", 9)
-                        self.servo.move_to_bin(bin_number)
-
-                        print(f"\nPiece #{image_number:03} identified:")
-                        print(f"Image: {os.path.basename(file_path)}")
-                        print(f"Element ID: {result.get('element_id', 'Unknown')}")
-                        print(f"Name: {result.get('name', 'Unknown')}")
-                        print(f"Primary Category: {result.get('primary_category', 'Unknown')}")
-                        print(f"Secondary Category: {result.get('secondary_category', 'Unknown')}")
-                        print(f"Bin Number: {bin_number}")
-
-                        # Update counter
-                        self.processed_pieces += 1
 
                 # Get debug visualization from detector
                 debug_frame = self.detector.draw_debug(frame)
@@ -505,10 +435,6 @@ class LegoSorting004:
         # Release camera
         if hasattr(self, 'camera') and self.camera:
             self.camera.release()
-
-        # Release servo in synchronous mode (worker thread handles it in async mode)
-        if not self.threading_enabled and hasattr(self, 'servo') and self.servo:
-            self.servo.release()
 
         # Close windows
         cv2.destroyAllWindows()
@@ -555,8 +481,6 @@ def main():
                         help='Path to configuration file')
     parser.add_argument('--calibrate-servo', action='store_true',
                         help='Run servo calibration at startup')
-    parser.add_argument('--no-threading', action='store_true',
-                        help='Disable multithreaded processing')
     parser.add_argument('--log-level', type=str, default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Set logging level')
@@ -579,12 +503,6 @@ def main():
             config_manager.save_config()
             logger.info("Servo calibration mode activated")
             print("Servo calibration mode activated")
-
-        if args.no_threading:
-            config_manager.set("threading", "enabled", False)
-            config_manager.save_config()
-            logger.info("Threading disabled via command line")
-            print("Threading disabled via command line")
 
         # Create and run application
         application = LegoSorting004(config_path=args.config)
