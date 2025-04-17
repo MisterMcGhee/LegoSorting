@@ -35,7 +35,7 @@
         "strategy": "primary",
         "target_primary_category": "",
         "target_secondary_category": "",
-        "max_bins": 9,
+        "max_bins": 4,
         "overflow_bin": 0
     },
     "threading": {

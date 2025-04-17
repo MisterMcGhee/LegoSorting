@@ -506,9 +506,13 @@ class ConveyorDetector:
                     # Get cropped image
                     cropped_image = self.crop_piece_image(frame, piece_to_capture)
 
+                    # MODIFIED: Use camera count and then immediately increase it
+                    # This ensures each piece gets a unique number
+                    image_number = current_count
+
                     # Add the piece ID number at the top with increased margin
                     text_y = self.config["text_margin_top"] - 10  # Position for text
-                    cv2.putText(cropped_image, f"{current_count}",
+                    cv2.putText(cropped_image, f"{image_number}",
                                 (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.9, (0, 0, 255), 2)
 
@@ -516,15 +520,14 @@ class ConveyorDetector:
                     self.thread_manager.add_message(
                         piece_id=piece_to_capture.id,
                         image=cropped_image.copy(),
-                        frame_number=current_count,
+                        frame_number=image_number,
                         position=piece_to_capture.bbox,
                         priority=0
                     )
                     logger.info(f"Added piece ID {piece_to_capture.id} to processing queue")
 
-                    # In threaded mode, we don't return the captured image
-                    # it's handled by the thread manager
-                    return self.tracked_pieces, None
+                    # IMPORTANT: Return a signal to the main program to increment camera count
+                    return self.tracked_pieces, None, True  # Added third return value as increment signal
                 else:
                     # In synchronous mode, return the cropped image with ID
                     captured_image = self.crop_piece_image(frame, piece_to_capture)
@@ -535,7 +538,8 @@ class ConveyorDetector:
                                 (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.9, (0, 0, 255), 2)
 
-            return self.tracked_pieces, captured_image
+            # Return with no increment signal (third parameter) if no piece was captured
+            return self.tracked_pieces, captured_image, False  # Added third return value
 
     def draw_debug(self, frame):
         """Draw debug visualization on the frame
