@@ -32,8 +32,8 @@
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "primary",
-        "target_primary_category": "",
+        "strategy": "secondary",
+        "target_primary_category": "Basic",
         "target_secondary_category": "",
         "max_bins": 4,
         "overflow_bin": 0
