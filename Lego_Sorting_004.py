@@ -255,13 +255,6 @@ class LegoSorting004:
             cv2.putText(overlay, f"Frame Count: {self.frame_count}", (w - 240, 100),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-            # Add servo info if available
-            if not self.threading_enabled and hasattr(self, 'servo') and self.servo and hasattr(self.servo,
-                                                                                                'current_bin'):
-                bin_text = f"Current Bin: {self.servo.current_bin}"
-                cv2.putText(overlay, bin_text, (w - 240, 120),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
             # Add run time
             if self.start_time:
                 run_time = time.time() - self.start_time
@@ -510,12 +503,6 @@ def main():
             config_manager.save_config()
             logger.info("Servo calibration mode activated")
             print("Servo calibration mode activated")
-
-        if args.no_threading:
-            config_manager.set("threading", "enabled", False)
-            config_manager.save_config()
-            logger.info("Threading disabled via command line")
-            print("Threading disabled via command line")
 
         # Create and run application
         application = LegoSorting004(config_path=args.config)

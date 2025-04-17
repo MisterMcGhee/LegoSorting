@@ -39,7 +39,6 @@
         "overflow_bin": 0
     },
     "threading": {
-        "enabled": true,
         "max_queue_size": 100,
         "worker_count": 1,
         "api_timeout": 5.0,

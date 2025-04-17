@@ -52,6 +52,7 @@ class ConfigManager:
             else:
                 print(f"Configuration file not found at {self.config_path}")
                 self._create_default_config()
+
     def _create_default_config(self) -> None:
         """Create default configuration.
 
@@ -92,7 +93,6 @@ class ConfigManager:
                     "overflow_bin": 9
                 },
                 "threading": {
-                    "enabled": True,
                     "max_queue_size": 100,
                     "worker_count": 1,
                     "api_timeout": 30.0,
@@ -223,7 +223,6 @@ class ConfigManager:
                 self.config["threading"] = {}
 
             threading_defaults = {
-                "enabled": True,
                 "max_queue_size": 100,
                 "worker_count": 1,
                 "api_timeout": 30.0,
@@ -236,17 +235,6 @@ class ConfigManager:
             for key, value in threading_defaults.items():
                 if key not in self.config["threading"]:
                     self.config["threading"][key] = value
-
-    def is_threading_enabled(self) -> bool:
-        """Check if threading is enabled in configuration.
-
-        Returns:
-            bool: True if threading is enabled, False otherwise
-        """
-        with self._config_lock:
-            # Ensure threading config exists
-            self.set_default_threading_config()
-            return self.config["threading"].get("enabled", True)
 
     def create_backup(self, suffix: str = "backup") -> Optional[str]:
         """Create a backup of the current configuration file.
@@ -302,8 +290,6 @@ if __name__ == "__main__":
     print(f"Camera directory: {camera_dir}")
 
     # Check threading configuration
-    threading_enabled = config.is_threading_enabled()
-    print(f"Threading enabled: {threading_enabled}")
     worker_count = config.get("threading", "worker_count", 1)
     print(f"Worker count: {worker_count}")
 

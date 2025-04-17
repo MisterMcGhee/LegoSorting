@@ -113,11 +113,6 @@ class ConveyorDetector:
         self.fps = 0
         self.last_fps_update = 0
 
-        # Async mode (always true when using thread manager)
-        self.async_mode = thread_manager is not None
-
-        logger.info(f"ConveyorDetector initialized with async_mode={self.async_mode}")
-
     def load_roi_from_config(self, frame, config_manager=None):
         """Load ROI from configuration if available, otherwise calibrate manually.
 
@@ -381,8 +376,9 @@ class ConveyorDetector:
             if piece.updated or (current_time - piece.last_updated) < self.config["track_timeout"]:
                 active_tracks.append(piece)
             # Reset processing status if timeout exceeded
-            elif piece.being_processed and piece.processing_start_time:
-                if current_time - piece.processing_start_time > self.config["processing_timeout"]:
+            elif piece.being_processed:
+                if piece.processing_start_time is not None and (
+                        current_time - piece.processing_start_time > self.config["processing_timeout"]):
                     logger.warning(f"Processing timeout for piece ID {piece.id}, resetting status")
                     piece.being_processed = False
                     piece.processing_start_time = None
@@ -495,7 +491,6 @@ class ConveyorDetector:
 
             # Check if any piece should be captured
             piece_to_capture = self.check_for_capture()
-            captured_image = None
 
             if piece_to_capture:
                 # If using thread manager, mark as being processed
@@ -528,18 +523,8 @@ class ConveyorDetector:
 
                     # IMPORTANT: Return a signal to the main program to increment camera count
                     return self.tracked_pieces, None, True  # Added third return value as increment signal
-                else:
-                    # In synchronous mode, return the cropped image with ID
-                    captured_image = self.crop_piece_image(frame, piece_to_capture)
 
-                    # Add the piece ID number at the top with increased margin
-                    text_y = self.config["text_margin_top"] - 10  # Position for text
-                    cv2.putText(captured_image, f"{current_count}",
-                                (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                                0.9, (0, 0, 255), 2)
-
-            # Return with no increment signal (third parameter) if no piece was captured
-            return self.tracked_pieces, captured_image, False  # Added third return value
+            return self.tracked_pieces, None, False
 
     def draw_debug(self, frame):
         """Draw debug visualization on the frame
@@ -715,178 +700,3 @@ class SimpleConfigManager:
         if section not in self.config:
             self.config[section] = {}
         self.config[section][key] = value
-
-
-# Example usage as a standalone script
-if __name__ == "__main__":
-    # Set up logging
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-    # Parse command line arguments
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Lego Conveyor Detector")
-    parser.add_argument("--camera", type=int, default=0, help="Camera device ID")
-    parser.add_argument("--config", type=str, default="detector_config.json", help="Path to config JSON file")
-    parser.add_argument("--draw-roi", action="store_true", help="Force manual ROI selection")
-    parser.add_argument("--min-area", type=int, default=None, help="Minimum piece area")
-    parser.add_argument("--max-area", type=int, default=None, help="Maximum piece area")
-    args = parser.parse_args()
-
-    # Create simple config manager for standalone testing
-    config_manager = SimpleConfigManager(args.config)
-
-    # Override config with command line arguments if provided
-    if args.draw_roi:
-        config_manager.set("detector", "load_roi_from_config", False)
-        logging.info("Forcing manual ROI selection due to --draw-roi flag")
-
-    if args.min_area:
-        config_manager.set("detector", "min_piece_area", args.min_area)
-        logging.info(f"Setting min_piece_area to {args.min_area} from command line")
-
-    if args.max_area:
-        config_manager.set("detector", "max_piece_area", args.max_area)
-        logging.info(f"Setting max_piece_area to {args.max_area} from command line")
-
-        # Initialize webcam
-    logging.info(f"Opening camera device {args.camera}")
-    cap = cv2.VideoCapture(args.camera)
-
-    if not cap.isOpened():
-        logging.error("Could not open camera")
-        exit(1)
-
-    # Create detector
-    detector = ConveyorDetector(config_manager)
-
-    # Get first frame for calibration
-    ret, frame = cap.read()
-    if not ret:
-        logging.error("Could not read frame")
-        cap.release()
-        exit(1)
-
-    # Initialize ROI
-    detector.load_roi_from_config(frame)
-
-    # Captured pieces count and storage
-    captured_count = 0
-    save_dir = "captured_pieces"
-
-    # Create directory for saved images if it doesn't exist
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-
-    try:
-        print("\n=== Lego Conveyor Detector ===")
-        print("Press 'p' to pause/resume detection")
-        print("Press 'b' to toggle background subtraction view")
-        print("Press '+'/'-' to increase/decrease min piece area")
-        print("Press 's' to save current configuration")
-        print("Press 'r' to reset ROI (manual selection)")
-        print("Press ESC to exit")
-
-        # Control flags
-        paused = False
-        show_bg = detector.config.get("show_bg_subtraction", True)
-
-        # Main loop
-        while True:
-            # Read frame
-            ret, frame = cap.read()
-            if not ret:
-                logging.error("Could not read frame")
-                break
-
-            # Process frame if not paused
-            if not paused:
-                tracked_pieces, captured_image = detector.process_frame(frame, captured_count + 1)
-
-                # If a piece was captured, display and save it
-                if captured_image is not None:
-                    captured_count += 1
-
-                    # Show captured image
-                    cv2.imshow("Captured Piece", captured_image)
-
-                    # Save image
-                    save_path = os.path.join(save_dir, f"piece_{captured_count:03d}.jpg")
-                    cv2.imwrite(save_path, captured_image)
-
-                    logging.info(f"Captured piece #{captured_count} saved to {save_path}")
-
-            # Draw debug visualization
-            debug_frame = detector.draw_debug(frame)
-
-            # Add status info
-            status = "PAUSED" if paused else "RUNNING"
-            cv2.putText(debug_frame, status, (10, debug_frame.shape[0] - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-            # Add controls help
-            cv2.putText(debug_frame, "ESC: Exit | P: Pause | B: BG | +/-: Area | S: Save",
-                        (debug_frame.shape[1] - 500, debug_frame.shape[0] - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-            # Show frame
-            cv2.imshow("Lego Conveyor Detector", debug_frame)
-
-            # Check for keypress
-            key = cv2.waitKey(1) & 0xFF
-
-            # Handle key presses
-            if key == 27:  # ESC
-                break
-            elif key == ord('p') or key == ord('P'):  # Pause/resume
-                paused = not paused
-                print(f"Detection {'paused' if paused else 'resumed'}")
-            elif key == ord('b') or key == ord('B'):  # Toggle background view
-                show_bg = not show_bg
-                detector.config["show_bg_subtraction"] = show_bg
-                print(f"Background subtraction view {'enabled' if show_bg else 'disabled'}")
-            elif key == ord('+'):  # Increase min area
-                detector.config["min_piece_area"] = int(detector.config["min_piece_area"] * 1.2)
-                print(f"Min piece area increased to {detector.config['min_piece_area']}")
-            elif key == ord('-'):  # Decrease min area
-                detector.config["min_piece_area"] = max(100, int(detector.config["min_piece_area"] * 0.8))
-                print(f"Min piece area decreased to {detector.config['min_piece_area']}")
-            elif key == ord('s') or key == ord('S'):  # Save config
-                config_manager.update_section("detector", detector.config)
-                config_manager.save_config()
-                print(f"Configuration saved to {args.config}")
-            elif key == ord('r') or key == ord('R'):  # Reset ROI
-                print("Manual ROI selection requested")
-                detector.config["load_roi_from_config"] = False
-                detector.calibrate(frame)
-
-    except KeyboardInterrupt:
-        logging.info("Interrupted by user")
-    except Exception as e:
-        logging.error(f"Error: {e}")
-    finally:
-        # Clean up
-        cap.release()
-        cv2.destroyAllWindows()
-        detector.release()
-
-        # Save final configuration
-        config_manager.update_section("detector", detector.config)
-        if detector.roi:
-            config_manager.update_section("detector_roi", {
-                "x": detector.roi[0],
-                "y": detector.roi[1],
-                "w": detector.roi[2],
-                "h": detector.roi[3]
-            })
-        config_manager.save_config()
-
-        # Print summary
-        print("\n=== Detector Session Summary ===")
-        print(f"Detected {detector.next_id - 1} pieces, captured {captured_count} pieces")
-        print(f"Final ROI: {detector.roi}")
-        print(f"Final min_piece_area: {detector.config['min_piece_area']}")
-        print(f"Final max_piece_area: {detector.config['max_piece_area']}")
-        print(f"Configuration saved to {args.config}")
-        print("===============================\n")
