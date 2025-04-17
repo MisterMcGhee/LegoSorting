@@ -63,10 +63,21 @@ class ProcessingWorker:
         self.processing_timeout = threading_config.get("processing_timeout", 60.0)
         self.polling_interval = threading_config.get("polling_interval", 0.01)
 
+        # Exit zone trigger configuration
+        self.exit_zone_trigger_config = config_manager.get_section("exit_zone_trigger")
+        self.exit_zone_enabled = self.exit_zone_trigger_config.get("enabled", True)
+        self.fall_time = self.exit_zone_trigger_config.get("fall_time", 1.0)
+        self.cooldown_time = self.exit_zone_trigger_config.get("cooldown_time", 0.5)
+
+        logger.info(f"Exit zone trigger enabled: {self.exit_zone_enabled}")
+        logger.info(f"Fall time: {self.fall_time} seconds")
+        logger.info(f"Cooldown time: {self.cooldown_time} seconds")
+
         # Status tracking
         self.should_exit = threading.Event()
         self.running = False
         self.current_message = None
+        self.last_servo_move_time = 0  # Track when the servo was last moved
 
         # Statistics
         self.processed_count = 0
@@ -206,22 +217,41 @@ class ProcessingWorker:
 
         return result
 
-    def _move_servo(self, bin_number: int) -> bool:
+    def _move_servo(self, bin_number: int, is_exit_zone_piece: bool = False) -> bool:
         """Move servo to the specified bin position.
 
         Args:
             bin_number: Target bin number
+            is_exit_zone_piece: Whether this is a piece from the exit zone
 
         Returns:
             bool: True if successful, False otherwise
         """
+        current_time = time.time()
+
+        # If this is an exit zone piece, apply fall time delay
+        if is_exit_zone_piece and self.exit_zone_enabled:
+            # Calculate remaining time to wait based on fall time
+            wait_time = self.cooldown_time
+            if current_time - self.last_servo_move_time < wait_time:
+                # Need to wait for cooldown from previous piece
+                wait_remaining = wait_time - (current_time - self.last_servo_move_time)
+                logger.info(
+                    f"Waiting {wait_remaining:.2f} seconds for servo cooldown before moving to bin {bin_number}")
+                time.sleep(wait_remaining)
+
         logger.debug("Moving servo to bin %d", bin_number)
 
         # Use lock to prevent conflicts in servo control
         def move():
             return self.servo.move_to_bin(bin_number)
 
-        return self.thread_manager.with_lock("servo", move)
+        result = self.thread_manager.with_lock("servo", move)
+
+        # Update last servo move time
+        self.last_servo_move_time = time.time()
+
+        return result
 
     def _process_message(self, message: PieceMessage) -> Optional[Dict[str, Any]]:
         """Process a piece message through the complete pipeline.
@@ -236,6 +266,12 @@ class ProcessingWorker:
             # Update message status
             message.status = "processing"
             self.current_message = message
+
+            # Check if this is a high-priority exit zone piece
+            is_exit_zone_piece = message.priority == 0  # Priority 0 is set for exit zone pieces
+
+            if is_exit_zone_piece:
+                logger.info(f"Processing exit zone piece (ID: {message.piece_id})")
 
             # Start timing
             start_time = time.time()
@@ -253,7 +289,9 @@ class ProcessingWorker:
             # Step 4: Move servo to bin position
             bin_number = sorting_result.get("bin_number",
                                             self.config_manager.get("sorting", "overflow_bin", 9))
-            servo_success = self._move_servo(bin_number)
+
+            # Move the servo, indicating if this is an exit zone piece
+            servo_success = self._move_servo(bin_number, is_exit_zone_piece)
 
             # Create result dictionary
             result = {
@@ -266,7 +304,8 @@ class ProcessingWorker:
                 "secondary_category": sorting_result.get("secondary_category", "Unknown"),
                 "bin_number": bin_number,
                 "servo_success": servo_success,
-                "processing_time": time.time() - start_time
+                "processing_time": time.time() - start_time,
+                "is_exit_zone_piece": is_exit_zone_piece
             }
 
             # Update message status and result
@@ -279,8 +318,9 @@ class ProcessingWorker:
             # Trigger callback
             self.thread_manager.trigger_callback("piece_processed", result=result)
 
-            logger.info("Processed piece #%d (%s) to bin %d in %.2f seconds",
-                        image_number, result["element_id"], bin_number, result["processing_time"])
+            logger.info("Processed piece #%d (%s) to bin %d in %.2f seconds%s",
+                        image_number, result["element_id"], bin_number, result["processing_time"],
+                        " (exit zone piece)" if is_exit_zone_piece else "")
 
             return result
 

@@ -16,7 +16,7 @@ import os
 import json
 import threading
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict, Any
 
 # Set up module logger
@@ -37,11 +37,19 @@ class TrackedPiece:
     being_processed: bool = False  # Flag for pieces being processed by worker thread
     processing_start_time: Optional[float] = None  # When processing started
     updated: bool = True  # Whether this piece was updated in the current frame
+    in_exit_zone: bool = False  # Whether this piece is in the exit zone
+    exit_zone_entry_time: Optional[float] = None  # When the piece entered the exit zone
+    triggered_servo: bool = False  # Whether this piece has triggered servo movement
 
     def __post_init__(self):
         """Calculate derived properties"""
         x, y, w, h = self.bbox
         self.center = (x + w / 2, y + h / 2)
+
+    def get_right_edge(self) -> float:
+        """Get the x-coordinate of the right edge of the piece"""
+        x, _, w, _ = self.bbox
+        return x + w
 
 
 class ConveyorDetector:
@@ -65,7 +73,8 @@ class ConveyorDetector:
             "learn_rate": 0.005,  # Background learning rate
             "min_updates": 5,  # Minimum updates before a piece can be captured
             "track_timeout": 1.0,  # Time in seconds before removing stale tracks
-            "buffer_percent": 0.1,  # Percent of ROI width to use as entry/exit buffer
+            "entry_zone_percent": 0.1,  # Percent of ROI width to use as entry buffer
+            "exit_zone_percent": 0.1,  # Percent of ROI width to use as exit buffer
             "morph_kernel_size": 5,  # Kernel size for morphological operations
             "capture_cooldown": 0.5,  # Minimum time between captures
             "match_threshold": 50,  # Maximum distance for matching tracks
@@ -92,6 +101,20 @@ class ConveyorDetector:
                         self.config[key] = value
                         logger.info(f"Set config[{key}] = {value}")
 
+            # Load exit zone trigger configuration
+            self.exit_zone_trigger_config = config_manager.get_section("exit_zone_trigger")
+            logger.info(f"Exit zone trigger config: {self.exit_zone_trigger_config}")
+
+        else:
+            # Set default exit zone trigger config if no config manager provided
+            self.exit_zone_trigger_config = {
+                "enabled": True,
+                "fall_time": 1.0,
+                "priority_method": "rightmost",
+                "min_piece_spacing": 50,
+                "cooldown_time": 0.5
+            }
+
         # Store thread manager
         self.thread_manager = thread_manager
 
@@ -107,6 +130,12 @@ class ConveyorDetector:
         self.last_capture_time = 0  # Time of last capture
         self.frame_count = 0  # Counter for processed frames
         self.latest_debug_frame = None  # Store latest debug frame
+
+        # Exit zone tracking
+        self.pieces_in_exit_zone = []  # List of pieces currently in exit zone
+        self.current_priority_piece = None  # Current priority piece in exit zone
+        self.last_servo_trigger_time = 0  # Time of last servo trigger
+        self.last_exit_zone_check_time = 0  # Time of last exit zone check
 
         # Performance tracking
         self.start_time = time.time()
@@ -230,10 +259,12 @@ class ConveyorDetector:
         self.roi = roi
         x, y, w, h = roi
 
-        # Calculate buffer zones
-        buffer_width = int(w * self.config["buffer_percent"])
-        self.entry_zone = (x, x + buffer_width)
-        self.exit_zone = (x + w - buffer_width, x + w)
+        # Calculate buffer zones with separate entry and exit zone percentages
+        entry_buffer_width = int(w * self.config["entry_zone_percent"])
+        exit_buffer_width = int(w * self.config["exit_zone_percent"])
+
+        self.entry_zone = (x, x + entry_buffer_width)
+        self.exit_zone = (x + w - exit_buffer_width, x + w)
         self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
 
         # Initialize background subtractor with KNN
@@ -344,6 +375,10 @@ class ConveyorDetector:
                     piece.center = center
                     piece.update_count += 1
                     piece.updated = True
+
+                    # Check if the piece has entered or left the exit zone
+                    self.update_exit_zone_status(piece, current_time)
+
                     matched = True
                     break
 
@@ -365,6 +400,10 @@ class ConveyorDetector:
                     last_updated=current_time
                 )
                 new_piece.updated = True
+
+                # Check if the new piece is already in the exit zone
+                self.update_exit_zone_status(new_piece, current_time)
+
                 self.tracked_pieces.append(new_piece)
                 self.next_id += 1
                 logger.debug(f"Created new track ID {self.next_id - 1} at position {bbox}")
@@ -392,6 +431,76 @@ class ConveyorDetector:
             logger.debug(f"Removed {removed_count} stale tracks")
 
         self.tracked_pieces = active_tracks
+
+        # Update the list of pieces in the exit zone
+        self.update_exit_zone_pieces()
+
+    def update_exit_zone_status(self, piece, current_time):
+        """Update whether a piece is in the exit zone
+
+        Args:
+            piece: The TrackedPiece to update
+            current_time: Current timestamp
+        """
+        if self.exit_zone is None:
+            return
+
+        x, y, w, h = piece.bbox
+        right_edge = x + w
+
+        # Check if piece is in exit zone
+        in_exit_zone = x >= self.exit_zone[0] and x < self.exit_zone[1]
+
+        # If piece just entered the exit zone
+        if in_exit_zone and not piece.in_exit_zone:
+            piece.in_exit_zone = True
+            piece.exit_zone_entry_time = current_time
+            logger.info(f"Piece ID {piece.id} entered exit zone")
+
+        # If piece just left the exit zone
+        elif not in_exit_zone and piece.in_exit_zone:
+            piece.in_exit_zone = False
+            piece.exit_zone_entry_time = None
+            logger.info(f"Piece ID {piece.id} left exit zone")
+
+    def update_exit_zone_pieces(self):
+        """Update the list of pieces currently in the exit zone"""
+        # Clear the current list
+        self.pieces_in_exit_zone = []
+
+        # Add all pieces currently in the exit zone
+        for piece in self.tracked_pieces:
+            if piece.in_exit_zone and not piece.triggered_servo:
+                self.pieces_in_exit_zone.append(piece)
+
+        # Sort the pieces based on the priority method
+        if self.pieces_in_exit_zone:
+            priority_method = self.exit_zone_trigger_config.get("priority_method", "rightmost")
+
+            if priority_method == "rightmost":
+                # Sort by x position (rightmost first)
+                self.pieces_in_exit_zone.sort(key=lambda p: p.get_right_edge(), reverse=True)
+            elif priority_method == "first_in":
+                # Sort by time entered exit zone (earliest first)
+                self.pieces_in_exit_zone.sort(key=lambda p: p.exit_zone_entry_time or float('inf'))
+
+            # Update the current priority piece
+            if self.pieces_in_exit_zone:
+                self.current_priority_piece = self.pieces_in_exit_zone[0]
+            else:
+                self.current_priority_piece = None
+
+    def get_priority_exit_zone_piece(self):
+        """Get the highest priority piece in the exit zone
+
+        Returns:
+            Optional[TrackedPiece]: The priority piece or None if no pieces in exit zone
+        """
+        if not self.pieces_in_exit_zone:
+            return None
+
+        # Return the highest priority piece (first in the sorted list)
+        return self.pieces_in_exit_zone[0] if self.pieces_in_exit_zone else None
 
     def check_for_capture(self):
         """Check if any piece should be captured
@@ -426,6 +535,40 @@ class ConveyorDetector:
             return piece
 
         return None
+
+    def check_for_servo_trigger(self):
+        """Check if a piece in the exit zone should trigger the servo
+
+        Returns:
+            Tuple[Optional[TrackedPiece], bool]: (Priority piece, trigger_servo flag)
+        """
+        if not self.exit_zone_trigger_config.get("enabled", True):
+            return None, False
+
+        current_time = time.time()
+
+        # Check cooldown time since last servo trigger
+        cooldown_time = self.exit_zone_trigger_config.get("cooldown_time", 0.5)
+        if current_time - self.last_servo_trigger_time < cooldown_time:
+            return self.current_priority_piece, False
+
+        # Get the piece with highest priority in the exit zone
+        priority_piece = self.get_priority_exit_zone_piece()
+
+        # If no pieces in exit zone, return None
+        if not priority_piece:
+            return None, False
+
+        # If the piece has already triggered the servo, skip
+        if priority_piece.triggered_servo:
+            return priority_piece, False
+
+        # Trigger the servo for this piece
+        priority_piece.triggered_servo = True
+        self.last_servo_trigger_time = current_time
+        logger.info(f"Triggering servo for piece ID {priority_piece.id} in exit zone")
+
+        return priority_piece, True
 
     def crop_piece_image(self, frame, piece):
         """Crop the piece from the frame with padding and added space for text
@@ -466,8 +609,8 @@ class ConveyorDetector:
             current_count: Current image counter (for filename numbering)
 
         Returns:
-            Tuple[List[TrackedPiece], Optional[np.ndarray]]:
-                List of tracked pieces and cropped image if a piece was captured
+            Tuple[List[TrackedPiece], Optional[np.ndarray], bool]:
+                List of tracked pieces, cropped image if a piece was captured, and increment signal
         """
         with self.lock:
             if self.roi is None:
@@ -489,7 +632,41 @@ class ConveyorDetector:
             # Update tracking
             self.update_tracking(detected_pieces)
 
-            # Check if any piece should be captured
+            # Check for servo trigger based on exit zone
+            priority_piece, trigger_servo = self.check_for_servo_trigger()
+
+            # If a piece should trigger the servo
+            if trigger_servo and priority_piece and self.thread_manager:
+                # Get cropped image
+                cropped_image = self.crop_piece_image(frame, priority_piece)
+
+                # Get the current image number
+                image_number = current_count
+
+                # Add the piece ID number at the top with increased margin
+                text_y = self.config["text_margin_top"] - 10  # Position for text
+                cv2.putText(cropped_image, f"{image_number}",
+                            (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.9, (0, 0, 255), 2)
+
+                # Mark as being processed
+                priority_piece.being_processed = True
+                priority_piece.processing_start_time = current_time
+
+                # Add to processing queue with highest priority (0)
+                self.thread_manager.add_message(
+                    piece_id=priority_piece.id,
+                    image=cropped_image.copy(),
+                    frame_number=image_number,
+                    position=priority_piece.bbox,
+                    priority=0  # Highest priority for exit zone pieces
+                )
+                logger.info(f"Added exit zone piece ID {priority_piece.id} to processing queue with highest priority")
+
+                # Return signal to increment camera count
+                return self.tracked_pieces, None, True
+
+            # Traditional capture method (now less important with exit zone trigger)
             piece_to_capture = self.check_for_capture()
 
             if piece_to_capture:
@@ -501,12 +678,9 @@ class ConveyorDetector:
                     # Get cropped image
                     cropped_image = self.crop_piece_image(frame, piece_to_capture)
 
-                    # MODIFIED: Use camera count and then immediately increase it
-                    # This ensures each piece gets a unique number
-                    image_number = current_count
-
                     # Add the piece ID number at the top with increased margin
                     text_y = self.config["text_margin_top"] - 10  # Position for text
+                    image_number = current_count
                     cv2.putText(cropped_image, f"{image_number}",
                                 (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.9, (0, 0, 255), 2)
@@ -517,12 +691,12 @@ class ConveyorDetector:
                         image=cropped_image.copy(),
                         frame_number=image_number,
                         position=piece_to_capture.bbox,
-                        priority=0
+                        priority=1  # Lower priority than exit zone pieces
                     )
                     logger.info(f"Added piece ID {piece_to_capture.id} to processing queue")
 
-                    # IMPORTANT: Return a signal to the main program to increment camera count
-                    return self.tracked_pieces, None, True  # Added third return value as increment signal
+                    # Return signal to increment camera count
+                    return self.tracked_pieces, None, True
 
             return self.tracked_pieces, None, False
 
@@ -554,7 +728,15 @@ class ConveyorDetector:
             cv2.line(debug_frame,
                      (self.exit_zone[0], y),
                      (self.exit_zone[0], y + h),
-                     (0, 0, 255), 2)  # Red line for exit
+                     (0, 0, 255), 2)  # Red line for exit zone start
+
+            # Highlight exit zone with semi-transparent overlay
+            exit_zone_overlay = debug_frame.copy()
+            cv2.rectangle(exit_zone_overlay,
+                          (self.exit_zone[0], y),
+                          (self.exit_zone[1], y + h),
+                          (0, 0, 255), -1)  # Filled red rectangle
+            cv2.addWeighted(exit_zone_overlay, 0.2, debug_frame, 0.8, 0, debug_frame)
 
             # Draw tracked pieces
             for piece in self.tracked_pieces:
@@ -564,8 +746,12 @@ class ConveyorDetector:
                 py += y  # Add ROI y offset
 
                 # Different colors based on status
-                if piece.being_processed:
+                if piece == self.current_priority_piece:
+                    color = (255, 255, 0)  # Yellow for priority piece in exit zone
+                elif piece.being_processed:
                     color = (255, 0, 255)  # Purple for being processed
+                elif piece.in_exit_zone:
+                    color = (0, 165, 255)  # Orange for in exit zone but not priority
                 elif piece.captured:
                     color = (0, 255, 0)  # Green for captured
                 else:
@@ -575,7 +761,13 @@ class ConveyorDetector:
                 cv2.rectangle(debug_frame, (px, py), (px + pw, py + ph), color, 2)
 
                 # Add ID and update count
-                label = f"ID:{piece.id} U:{piece.update_count}"
+                if piece == self.current_priority_piece:
+                    label = f"ID:{piece.id} PRIORITY"
+                elif piece.in_exit_zone:
+                    label = f"ID:{piece.id} EXIT"
+                else:
+                    label = f"ID:{piece.id} U:{piece.update_count}"
+
                 cv2.putText(debug_frame, label, (px, py - 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
@@ -590,10 +782,16 @@ class ConveyorDetector:
             active_count = sum(1 for p in self.tracked_pieces if not p.captured and not p.being_processed)
             processing_count = sum(1 for p in self.tracked_pieces if p.being_processed)
             captured_count = sum(1 for p in self.tracked_pieces if p.captured and not p.being_processed)
+            exit_zone_count = len(self.pieces_in_exit_zone)
 
             cv2.putText(debug_frame,
                         f"Active: {active_count} Processing: {processing_count} Captured: {captured_count}",
                         (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+            # Add exit zone piece count
+            cv2.putText(debug_frame,
+                        f"Exit Zone: {exit_zone_count}",
+                        (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
             # Show background subtraction result in corner if enabled
             if self.config.get("show_bg_subtraction", True):
