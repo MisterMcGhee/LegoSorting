@@ -269,13 +269,22 @@ class UIManager:
         Returns:
             Frame with processed piece panel added
         """
+        # Handle case where no pieces have been processed yet
+        if piece_data is None:
+            x, y, w, h = self.layout["processed"]
+            display = self._create_panel(frame, x, y, w, h, "Recently Processed")
+            cv2.putText(display, "No pieces processed yet",
+                        (x + 20, y + 100), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, self.config["colors"]["text"], 1)
+            return display
+
         x, y, w, h = self.layout["processed"]
 
         # Create panel
         display = self._create_panel(frame, x, y, w, h, "Recently Processed")
 
         # Display piece image if available
-        if "image" in piece_data:
+        if "image" in piece_data and piece_data["image"] is not None:
             img = piece_data["image"]
             # Resize image to fit in panel
             img_h, img_w = img.shape[:2]
@@ -300,20 +309,83 @@ class UIManager:
         # Add piece information
         text_y = y + 150
 
+        # Check if there was an error with this piece
+        has_error = "error" in piece_data
+        not_in_dictionary = has_error and "not found in dictionary" in piece_data.get("error", "")
+
+        # Element ID
         if "element_id" in piece_data:
-            cv2.putText(display, f"ID: {piece_data['element_id']}",
+            id_text = f"ID: {piece_data['element_id']}"
+            cv2.putText(display, id_text,
                         (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
                         0.5, self.config["colors"]["text"], 1)
             text_y += 20
 
+        # Name
         if "name" in piece_data:
-            cv2.putText(display, f"Name: {piece_data['name']}",
+            name_text = f"Name: {piece_data['name']}"
+            cv2.putText(display, name_text,
                         (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
                         0.5, self.config["colors"]["text"], 1)
             text_y += 20
 
+        # Bin assignment - always show this even for error cases
         if "bin_number" in piece_data:
-            cv2.putText(display, f"Bin: {piece_data['bin_number']}",
+            bin_text = f"Bin: {piece_data['bin_number']}"
+            if not_in_dictionary:
+                bin_text += " (Overflow)"
+            cv2.putText(display, bin_text,
+                        (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, self.config["colors"]["text"], 1)
+            text_y += 20
+
+        # Status information with color coding
+        if not_in_dictionary:
+            status_color = (0, 165, 255)  # Orange in BGR
+            status_text = "NOT IN DICTIONARY"
+        elif has_error:
+            status_color = (0, 0, 255)  # Red in BGR
+            status_text = "ERROR"
+        else:
+            status_color = (0, 255, 0)  # Green in BGR
+            status_text = "PROCESSED"
+
+        cv2.putText(display, status_text,
+                    (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5, status_color, 1)
+        text_y += 20
+
+        # Add confidence score if available
+        if "confidence" in piece_data:
+            confidence = piece_data["confidence"]
+            # Color the confidence score based on its value
+            if confidence >= 0.9:
+                conf_color = (0, 255, 0)  # Green for high confidence
+            elif confidence >= 0.7:
+                conf_color = (0, 255, 255)  # Yellow for medium confidence
+            else:
+                conf_color = (0, 0, 255)  # Red for low confidence
+
+            cv2.putText(display, f"Confidence: {confidence:.2f}",
+                        (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, conf_color, 1)
+            text_y += 20
+
+        # Add error message if there was an error (shortened version)
+        if has_error and not not_in_dictionary:
+            error_msg = piece_data.get("error", "Unknown error")
+            # Truncate long error messages
+            if len(error_msg) > 30:
+                error_msg = error_msg[:27] + "..."
+            cv2.putText(display, error_msg,
+                        (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (0, 0, 255), 1)
+            text_y += 20
+
+        # Add processing time if available
+        if "processing_time" in piece_data:
+            proc_time = piece_data["processing_time"]
+            cv2.putText(display, f"Proc time: {proc_time:.2f}s",
                         (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
                         0.5, self.config["colors"]["text"], 1)
 

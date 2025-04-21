@@ -5,7 +5,7 @@
         "filename_prefix": "Lego"
     },
     "detector": {
-        "min_piece_area": 1000,
+        "min_piece_area": 1200,
         "max_piece_area": 50000,
         "entry_zone_percent": 0.1,
         "exit_zone_percent": 0.15,
@@ -86,5 +86,24 @@
         "priority_method": "rightmost",
         "min_piece_spacing": 50,
         "cooldown_time": 0.5
+    },
+    "ui": {
+        "panels": {
+            "metrics_dashboard": true,
+            "processed_piece": true,
+            "sorting_information": true,
+            "help_overlay": true
+        }
+    },
+        "opacity": 0.7,
+        "colors": {
+            "panel_bg": [30, 30, 30],
+            "text": [255, 255, 255],
+            "roi": [0, 255, 0],
+            "entry_zone": [255, 0, 0],
+            "exit_zone": [0, 0, 255],
+            "active_piece": [0, 0, 255],
+            "captured_piece": [0, 255, 0],
+            "processing_piece": [255, 0, 255]
     }
 }

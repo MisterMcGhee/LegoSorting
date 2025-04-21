@@ -3,6 +3,7 @@ Lego_sorting_004.py - Enhanced main application for Lego piece sorting
 
 This script serves as the entry point for the improved Lego sorting application,
 integrating all modules with better coordination, error handling, and monitoring.
+Includes the new UI module for advanced visualization.
 """
 
 import os
@@ -25,6 +26,8 @@ from arduino_servo_module import create_arduino_servo_module
 from thread_management_module import create_thread_manager
 from processing_module import processing_worker_thread
 from error_module import setup_logging, get_logger, CameraError, APIError, DetectorError, ThreadingError
+# New import for UI module
+from ui_module import create_ui_manager
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -121,6 +124,10 @@ class LegoSorting004:
             logger.info("Initializing sorting manager...")
             self.sorting_manager = create_sorting_manager(self.config_manager)
 
+            # Initialize UI manager
+            logger.info("Initializing UI manager...")
+            self.ui_manager = create_ui_manager(self.config_manager)
+
             # Only initialize API client and servo in the main thread if threading is disabled
             # Otherwise, these will be initialized in the worker thread
             self.api_client = None
@@ -139,9 +146,8 @@ class LegoSorting004:
             self.last_fps_update = 0
             self.processed_pieces = 0
 
-            # Display options
-            self.show_help = True  # Show help overlay initially
-            self.show_metrics = True  # Show system metrics
+            # Store last processed piece data for UI
+            self.last_processed_piece = None
 
             # Set initialized flag
             self.initialized = True
@@ -194,6 +200,19 @@ class LegoSorting004:
         """
         self.processed_pieces += 1
 
+        # Store data about this piece for UI display
+        self.last_processed_piece = {
+            "image": self._load_piece_image(result.get('file_path')),
+            "element_id": result.get('element_id', 'Unknown'),
+            "name": result.get('name', 'Unknown'),
+            "primary_category": result.get('primary_category', 'Unknown'),
+            "secondary_category": result.get('secondary_category', 'Unknown'),
+            "bin_number": result.get('bin_number', 0),
+            "processing_time": result.get('processing_time', 0),
+            "confidence": result.get('confidence', 0),
+            "status": "not_in_dictionary" if "error" in result and "not found in dictionary" in result.get("error","") else "normal"
+        }
+
         # Log the result
         logger.info(f"Piece processed: Element {result.get('element_id', 'Unknown')} "
                     f"({result.get('name', 'Unknown')}) to bin {result.get('bin_number', 9)}")
@@ -208,102 +227,44 @@ class LegoSorting004:
         print(f"Bin Number: {result.get('bin_number', 9)}")
         print(f"Processing Time: {result.get('processing_time', 0):.2f} seconds")
 
-    def _on_piece_error(self, piece_id, error):
+    def _load_piece_image(self, file_path):
+        """Load the processed piece image from file.
+
+        Args:
+            file_path: Path to the image file
+
+        Returns:
+            The loaded image or None if loading fails
+        """
+        if file_path and os.path.exists(file_path):
+            try:
+                return cv2.imread(file_path)
+            except Exception as e:
+                logger.error(f"Error loading piece image: {str(e)}")
+        return None
+
+    def _on_piece_error(self, piece_id, error, result=None):
         """Callback for when a piece processing errors
 
         Args:
             piece_id: ID of the piece that errored
             error: Error message
+            result: Optional result dictionary with partial data
         """
         logger.error(f"Error processing piece ID {piece_id}: {error}")
         print(f"\nError processing piece ID {piece_id}: {error}")
 
-    def _add_system_overlay(self, frame):
-        """Add system information overlay to the frame
-
-        Args:
-            frame: Input frame
-
-        Returns:
-            Frame with overlay
-        """
-        # Get current metrics
-        metrics = self.system_monitor.get_metrics()
-
-        # Create a semi-transparent overlay for the metrics panel
-        h, w = frame.shape[:2]
-        overlay = frame.copy()
-
-        # Create a black rectangle for the top status bar
-        cv2.rectangle(overlay, (0, 0), (w, 30), (0, 0, 0), -1)
-
-        # Add FPS and processing status
-        status_text = f"FPS: {self.fps:.1f} | Queue: {metrics['queue_size']} | Processed: {self.processed_pieces}"
-        cv2.putText(overlay, status_text, (10, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-        # Only show detailed metrics if enabled
-        if self.show_metrics:
-            # Create a semi-transparent panel for detailed metrics
-            cv2.rectangle(overlay, (w - 250, 40), (w - 10, 160), (0, 0, 0), -1)
-
-            # Add metrics text
-            cv2.putText(overlay, f"Queue Size: {metrics['queue_size']}", (w - 240, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.putText(overlay, f"Processed: {self.processed_pieces}", (w - 240, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.putText(overlay, f"Frame Count: {self.frame_count}", (w - 240, 100),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-            # Add run time
-            if self.start_time:
-                run_time = time.time() - self.start_time
-                time_text = f"Run Time: {int(run_time // 3600):02d}:{int((run_time % 3600) // 60):02d}:{int(run_time % 60):02d}"
-                cv2.putText(overlay, time_text, (w - 240, 140),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-        # Add help overlay if enabled
-        if self.show_help:
-            # Create a semi-transparent panel for help
-            cv2.rectangle(overlay, (10, h - 110), (300, h - 10), (0, 0, 0), -1)
-
-            # Add help text
-            cv2.putText(overlay, "Controls:", (20, h - 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-            cv2.putText(overlay, "ESC - Exit Program", (20, h - 70),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.putText(overlay, "H - Toggle Help", (20, h - 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.putText(overlay, "M - Toggle Metrics", (20, h - 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-        # Blend the overlay with the original frame
-        alpha = 0.7  # Transparency factor
-        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
-
-        return frame
-
-    def _process_keyboard_input(self, key: int) -> bool:
-        """Process keyboard input
-
-        Args:
-            key: Key code
-
-        Returns:
-            True if processing should continue, False to exit
-        """
-        if key == 27:  # ESC key
-            logger.info("ESC key pressed, exiting")
-            return False
-        elif key == ord('h') or key == ord('H'):  # Toggle help
-            self.show_help = not self.show_help
-            logger.debug(f"Help overlay toggled: {self.show_help}")
-        elif key == ord('m') or key == ord('M'):  # Toggle metrics
-            self.show_metrics = not self.show_metrics
-            logger.debug(f"Metrics overlay toggled: {self.show_metrics}")
-
-        return True
-
+        # Store error data for UI display if we have partial results
+        if result and "file_path" in result:
+            self.last_processed_piece = {
+                "image": self._load_piece_image(result.get('file_path')),
+                "element_id": result.get('element_id', 'Unknown'),
+                "name": result.get('name', 'Unknown'),
+                "bin_number": result.get('bin_number', self.config_manager.get("sorting", "overflow_bin", 0)),
+                "error": error,
+                "processing_time": result.get('processing_time', 0),
+                "confidence": result.get('confidence', 0)
+            }
     def initialize_system(self):
         """Initialize the system for operation"""
         if not self.initialized:
@@ -392,22 +353,33 @@ class LegoSorting004:
                     current_count=self.camera.count
                 )
 
-                # Then use increment_signal appropriately (probably to increment camera.count)
-                if increment_signal:
-                    self.camera.count += 1
+                # Gather data for UI visualization
+                detector_data = self.detector.get_visualization_data()
 
-                # Get debug visualization from detector
-                debug_frame = self.detector.draw_debug(frame)
+                system_data = {
+                    "fps": self.fps,
+                    "queue_size": self.thread_manager.get_queue_size(),
+                    "processed_count": self.processed_pieces,
+                    "uptime": time.time() - self.start_time
+                }
 
-                # Add system information overlay
-                display_frame = self._add_system_overlay(debug_frame)
+                # Get sorting data
+                sorting_data = {
+                    "strategy": self.sorting_manager.get_strategy_description(),
+                    "bin_assignments": self.sorting_manager.get_bin_mapping()
+                }
+
+                # Create UI visualization
+                display_frame = self.ui_manager.create_display_frame(
+                    frame, detector_data, system_data, self.last_processed_piece, sorting_data
+                )
 
                 # Show frame
                 cv2.imshow("Lego Sorting System 004", display_frame)
 
                 # Check for keyboard input
                 key = cv2.waitKey(1) & 0xFF
-                if not self._process_keyboard_input(key):
+                if not self.ui_manager.handle_keyboard_input(key):
                     break
 
                 # Control loop timing if needed
