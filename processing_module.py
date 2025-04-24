@@ -335,10 +335,11 @@ class ProcessingWorker:
             message.status = "failed"
             message.result = {"error": str(e), "error_type": type(e).__name__}
 
-            # Trigger error callback
+            # Trigger error callback with result data
             self.thread_manager.trigger_callback("piece_error",
                                                  piece_id=message.piece_id,
-                                                 error=str(e))
+                                                 error=str(e),
+                                                 result=message.result)
 
             # Send to overflow bin on error
             overflow_bin = self.config_manager.get("sorting", "overflow_bin", 9)

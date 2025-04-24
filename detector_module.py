@@ -838,6 +838,38 @@ class ConveyorDetector:
 
             return debug_frame
 
+    def get_visualization_data(self):
+        """Return data needed for visualization without drawing.
+
+        Returns:
+            dict: Data for UI visualization
+        """
+        with self.lock:
+            if self.roi is None:
+                return {}
+
+            # Prepare data dictionary with all elements needed for visualization
+            visualization_data = {
+                "roi": self.roi,
+                "entry_zone": self.entry_zone,
+                "exit_zone": self.exit_zone,
+                "fps": self.fps,
+                "tracked_pieces": []
+            }
+
+            # Convert tracked pieces to serializable format
+            for piece in self.tracked_pieces:
+                piece_data = {
+                    "id": piece.id,
+                    "bbox": piece.bbox,
+                    "update_count": piece.update_count,
+                    "captured": piece.captured,
+                    "being_processed": piece.being_processed,
+                    "center": piece.center
+                }
+                visualization_data["tracked_pieces"].append(piece_data)
+
+            return visualization_data
     def release(self):
         """Release resources used by the detector"""
         logger.info("Releasing detector resources")
