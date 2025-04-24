@@ -25,6 +25,7 @@ from arduino_servo_module import create_arduino_servo_module
 from thread_management_module import create_thread_manager
 from processing_module import processing_worker_thread
 from error_module import setup_logging, get_logger, CameraError, APIError, DetectorError, ThreadingError
+from ui_module import create_ui_manager
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -121,6 +122,9 @@ class LegoSorting004:
             logger.info("Initializing sorting manager...")
             self.sorting_manager = create_sorting_manager(self.config_manager)
 
+            # Initialize UI manager
+            self.ui_manager = create_ui_manager(self.config_manager)
+            logger.info("UI manager initialized")
             # Only initialize API client and servo in the main thread if threading is disabled
             # Otherwise, these will be initialized in the worker thread
             self.api_client = None
@@ -194,7 +198,17 @@ class LegoSorting004:
         """
         self.processed_pieces += 1
 
-        # Log the result
+        # Check if bin assignments have changed
+        current_bin_mapping = self.sorting_manager.get_bin_mapping()
+        if not hasattr(self, 'sorting_data') or current_bin_mapping != self.sorting_data.get("bin_assignments", {}):
+            # Only update if different from current data
+            self.sorting_data = {
+                "strategy": self.sorting_manager.get_strategy_description(),
+                "bin_assignments": current_bin_mapping
+            }
+            logger.debug("Sorting information updated with new bin assignments")
+
+        # Log the result (existing code)
         logger.info(f"Piece processed: Element {result.get('element_id', 'Unknown')} "
                     f"({result.get('name', 'Unknown')}) to bin {result.get('bin_number', 9)}")
 
@@ -336,6 +350,13 @@ class LegoSorting004:
             overflow_bin = self.config_manager.get("sorting", "overflow_bin", 9)
             print(f"Default overflow bin: {overflow_bin}")
 
+            # Initialize sorting information for UI
+            self.sorting_data = {
+                "strategy": self.sorting_manager.get_strategy_description(),
+                "bin_assignments": self.sorting_manager.get_bin_mapping()
+            }
+            logger.info(f"Initialized sorting information: {self.sorting_data['strategy']}")
+
             print("\nSorting system ready. Press ESC to exit.")
             return True
 
@@ -401,6 +422,15 @@ class LegoSorting004:
 
                 # Add system information overlay
                 display_frame = self._add_system_overlay(debug_frame)
+
+                # Pass sorting information to UI manager
+                if hasattr(self, 'ui_manager') and hasattr(self, 'sorting_data'):
+                    # If you have a dedicated UI manager:
+                    display_frame = self.ui_manager.add_sorting_info(display_frame, self.sorting_data)
+                elif hasattr(self, 'sorting_data'):
+                    # If you're directly rendering in the system overlay function:
+                    # You'll need to modify _add_system_overlay to handle sorting_data
+                    pass
 
                 # Show frame
                 cv2.imshow("Lego Sorting System 004", display_frame)

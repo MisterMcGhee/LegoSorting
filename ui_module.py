@@ -9,7 +9,7 @@ recently processed piece display, and sorting information.
 import cv2
 import numpy as np
 import time
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Union
 
 
 class UIManager:
@@ -39,7 +39,8 @@ class UIManager:
                 "active_piece": (0, 0, 255),
                 "captured_piece": (0, 255, 0),
                 "processing_piece": (255, 0, 255),
-                "highlight": (0, 255, 255)
+                "highlight": (0, 255, 255),
+                "error": (0, 0, 255)
             }
         }
 
@@ -73,7 +74,7 @@ class UIManager:
             ord('h'): "help_overlay"
         }
 
-    def calculate_layout(self, frame_width, frame_height):
+    def calculate_layout(self, frame_width: int, frame_height: int) -> None:
         """Calculate panel positions based on frame size.
 
         Args:
@@ -84,8 +85,11 @@ class UIManager:
         self.layout["processed"] = (frame_width - 310, 10, 300, 200)
         self.layout["sorting"] = (160, frame_height - 190, frame_width - 320, 180)
 
-    def create_display_frame(self, frame, detector_data=None, system_data=None,
-                             piece_data=None, sorting_data=None):
+    def create_display_frame(self, frame: np.ndarray,
+                          detector_data: Optional[Dict[str, Any]] = None,
+                          system_data: Optional[Dict[str, Any]] = None,
+                          piece_data: Optional[Dict[str, Any]] = None,
+                          sorting_data: Optional[Dict[str, Any]] = None) -> np.ndarray:
         """Create the complete UI display frame.
 
         Args:
@@ -125,7 +129,25 @@ class UIManager:
 
         return display
 
-    def _create_panel(self, frame, x, y, width, height, title=None):
+    def add_sorting_info(self, frame: np.ndarray, sorting_data: Dict[str, Any]) -> np.ndarray:
+        """Add the sorting information panel to the frame.
+
+        Args:
+            frame: Video frame
+            sorting_data: Sorting strategy and bin assignments
+
+        Returns:
+            Frame with sorting information added
+        """
+        if self.config["panels"]["sorting_information"] and sorting_data:
+            h, w = frame.shape[:2]
+            self.calculate_layout(w, h)
+            return self._render_sorting_info(frame, sorting_data)
+        return frame
+
+    def _create_panel(self, frame: np.ndarray, x: int, y: int,
+                    width: int, height: int,
+                    title: Optional[str] = None) -> np.ndarray:
         """Create a semi-transparent panel.
 
         Args:
@@ -151,15 +173,16 @@ class UIManager:
 
         # Add title if provided
         if title:
-            cv2.putText(result, title, (x + 10, y + 25), cv2.FONT_HERSHEY_SIMPLEX,
+            cv2.putText(result, str(title), (x + 10, y + 25), cv2.FONT_HERSHEY_SIMPLEX,
                         0.7, self.config["colors"]["text"], 2)
             # Add underline
-            cv2.line(result, (x + 10, y + 30), (x + len(title) * 14, y + 30),
+            cv2.line(result, (x + 10, y + 30), (x + len(str(title)) * 14, y + 30),
                      self.config["colors"]["text"], 1)
 
         return result
 
-    def _render_main_feed(self, frame, detector_data):
+    def _render_main_feed(self, frame: np.ndarray,
+                        detector_data: Dict[str, Any]) -> np.ndarray:
         """Render the main video feed with detection visualization.
 
         Args:
@@ -213,13 +236,16 @@ class UIManager:
                 cv2.rectangle(display, (px, py), (px + pw, py + ph), color, 2)
 
                 # Add ID and update count
-                label = f"ID:{piece['id']} U:{piece.get('update_count', 0)}"
+                piece_id = piece.get('id', 0)
+                update_count = piece.get('update_count', 0)
+                label = f"ID:{piece_id} U:{update_count}"
                 cv2.putText(display, label, (px, py - 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
         return display
 
-    def _render_metrics_dashboard(self, frame, system_data):
+    def _render_metrics_dashboard(self, frame: np.ndarray,
+                                system_data: Dict[str, Any]) -> np.ndarray:
         """Render the metrics dashboard panel.
 
         Args:
@@ -236,30 +262,31 @@ class UIManager:
 
         # Add metrics text
         if "fps" in system_data:
-            cv2.putText(display, f"FPS: {system_data['fps']:.1f}",
-                        (x + 20, y + 60), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, self.config["colors"]["text"], 1)
+            fps_text = f"FPS: {system_data['fps']:.1f}"
+            cv2.putText(display, fps_text, (x + 20, y + 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
 
         if "queue_size" in system_data:
-            cv2.putText(display, f"Queue: {system_data['queue_size']}",
-                        (x + 20, y + 85), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, self.config["colors"]["text"], 1)
+            queue_text = f"Queue: {system_data['queue_size']}"
+            cv2.putText(display, queue_text, (x + 20, y + 85),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
 
         if "processed_count" in system_data:
-            cv2.putText(display, f"Processed: {system_data['processed_count']}",
-                        (x + 20, y + 110), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, self.config["colors"]["text"], 1)
+            processed_text = f"Processed: {system_data['processed_count']}"
+            cv2.putText(display, processed_text, (x + 20, y + 110),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
 
         if "uptime" in system_data:
-            uptime = system_data["uptime"]
+            uptime = float(system_data["uptime"])
             uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
-            cv2.putText(display, f"Uptime: {uptime_str}",
-                        (x + 20, y + 135), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, self.config["colors"]["text"], 1)
+            uptime_text = f"Uptime: {uptime_str}"
+            cv2.putText(display, uptime_text, (x + 20, y + 135),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
 
         return display
 
-    def _render_processed_piece(self, frame, piece_data):
+    def _render_processed_piece(self, frame: np.ndarray,
+                              piece_data: Dict[str, Any]) -> np.ndarray:
         """Render the recently processed piece panel.
 
         Args:
@@ -275,7 +302,7 @@ class UIManager:
         display = self._create_panel(frame, x, y, w, h, "Recently Processed")
 
         # Display piece image if available
-        if "image" in piece_data:
+        if "image" in piece_data and piece_data["image"] is not None:
             img = piece_data["image"]
             # Resize image to fit in panel
             img_h, img_w = img.shape[:2]
@@ -300,26 +327,43 @@ class UIManager:
         # Add piece information
         text_y = y + 150
 
-        if "element_id" in piece_data:
-            cv2.putText(display, f"ID: {piece_data['element_id']}",
-                        (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5, self.config["colors"]["text"], 1)
+        # Add error information if piece has error status
+        if piece_data.get("status") == "error":
+            error_msg = piece_data.get("error", "Unknown error")
+            cv2.putText(display, "Error:", (x + 20, text_y),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["error"], 1)
             text_y += 20
 
-        if "name" in piece_data:
-            cv2.putText(display, f"Name: {piece_data['name']}",
-                        (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5, self.config["colors"]["text"], 1)
-            text_y += 20
+            # Truncate long error messages
+            if len(str(error_msg)) > 30:
+                error_msg = str(error_msg)[:27] + "..."
 
-        if "bin_number" in piece_data:
-            cv2.putText(display, f"Bin: {piece_data['bin_number']}",
-                        (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5, self.config["colors"]["text"], 1)
+            cv2.putText(display, str(error_msg), (x + 20, text_y),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["error"], 1)
+            text_y += 20
+        else:
+            # Regular info for successful pieces
+            if "element_id" in piece_data:
+                element_text = f"ID: {piece_data['element_id']}"
+                cv2.putText(display, element_text, (x + 20, text_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["text"], 1)
+                text_y += 20
+
+            if "name" in piece_data:
+                name_text = f"Name: {piece_data['name']}"
+                cv2.putText(display, name_text, (x + 20, text_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["text"], 1)
+                text_y += 20
+
+            if "bin_number" in piece_data:
+                bin_text = f"Bin: {piece_data['bin_number']}"
+                cv2.putText(display, bin_text, (x + 20, text_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["text"], 1)
 
         return display
 
-    def _render_sorting_info(self, frame, sorting_data):
+    def _render_sorting_info(self, frame: np.ndarray,
+                           sorting_data: Dict[str, Any]) -> np.ndarray:
         """Render the sorting information panel.
 
         Args:
@@ -336,9 +380,9 @@ class UIManager:
 
         # Add sorting strategy
         if "strategy" in sorting_data:
-            cv2.putText(display, f"Strategy: {sorting_data['strategy']}",
-                        (x + 20, y + 60), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, self.config["colors"]["text"], 1)
+            strategy_text = f"Strategy: {sorting_data['strategy']}"
+            cv2.putText(display, strategy_text, (x + 20, y + 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
 
         # Add bin assignments
         if "bin_assignments" in sorting_data:
@@ -361,13 +405,13 @@ class UIManager:
                               (100, 100, 100), 1)
 
                 # Add bin label
-                cv2.putText(display, f"Bin {bin_num}: {category}",
-                            (bin_x + 5, bin_y + bin_h - 15), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.5, self.config["colors"]["text"], 1)
+                bin_text = f"Bin {bin_num}: {category}"
+                cv2.putText(display, bin_text, (bin_x + 5, bin_y + bin_h - 15),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["text"], 1)
 
         return display
 
-    def _render_help_overlay(self, frame):
+    def _render_help_overlay(self, frame: np.ndarray) -> np.ndarray:
         """Render the help overlay panel.
 
         Args:
@@ -397,14 +441,14 @@ class UIManager:
         ]
 
         for key, description in key_bindings:
-            cv2.putText(display, f"{key}: {description}",
-                        (x + 20, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5, self.config["colors"]["text"], 1)
+            binding_text = f"{key}: {description}"
+            cv2.putText(display, binding_text, (x + 20, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["text"], 1)
             text_y += 20
 
         return display
 
-    def handle_keyboard_input(self, key):
+    def handle_keyboard_input(self, key: int) -> bool:
         """Handle keyboard input for UI controls.
 
         Args:
@@ -440,7 +484,7 @@ def create_ui_manager(config_manager=None):
 
 
 # Test case
-def test_ui_module():
+if __name__ == "__main__":
     """Test the UI module with mock data."""
     # Create UI manager
     ui_manager = create_ui_manager()
@@ -491,7 +535,16 @@ def test_ui_module():
         "name": "Brick 2x4",
         "bin_number": 2,
         "primary_category": "Basic",
-        "secondary_category": "Brick"
+        "secondary_category": "Brick",
+        "status": "success"
+    }
+
+    # Error piece example
+    error_piece_data = {
+        "element_id": "Unknown",
+        "name": "Unknown Piece",
+        "error": "Low confidence score: 0.45 < 0.7",
+        "status": "error"
     }
 
     # Draw a simple brick shape on the test image
@@ -510,10 +563,18 @@ def test_ui_module():
 
     # Main loop
     running = True
+    show_error = False
     while running:
+        # Toggle between normal and error pieces every 2 seconds
+        current_time = time.time()
+        if int(current_time) % 4 < 2:
+            current_piece_data = piece_data
+        else:
+            current_piece_data = error_piece_data
+
         # Create UI
         display = ui_manager.create_display_frame(
-            frame, detector_data, system_data, piece_data, sorting_data
+            frame, detector_data, system_data, current_piece_data, sorting_data
         )
 
         # Display the result
@@ -525,7 +586,3 @@ def test_ui_module():
 
     cv2.destroyAllWindows()
     print("UI test completed")
-
-
-if __name__ == "__main__":
-    test_ui_module()
