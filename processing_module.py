@@ -28,7 +28,8 @@ class ProcessingWorker:
     """Worker that processes detected pieces asynchronously."""
 
     def __init__(self, thread_manager: ThreadManager, config_manager: Any,
-                 save_directory: str = "LegoPictures", filename_prefix: str = "Lego"):
+                 save_directory: str = "LegoPictures", filename_prefix: str = "Lego",
+                 piece_history=None):
         """Initialize processing worker.
 
         Args:
@@ -36,6 +37,7 @@ class ProcessingWorker:
             config_manager: Configuration manager
             save_directory: Directory to save piece images
             filename_prefix: Prefix for saved image filenames
+            piece_history: PieceHistory instance for tracking processed pieces
         """
         logger.info("Initializing processing worker")
 
@@ -43,6 +45,7 @@ class ProcessingWorker:
         self.config_manager = config_manager
         self.save_directory = save_directory
         self.filename_prefix = filename_prefix
+        self.piece_history = piece_history  # Store piece_history instance
 
         # Ensure save directory exists
         self.save_directory = os.path.abspath(save_directory)
@@ -308,6 +311,10 @@ class ProcessingWorker:
                 "is_exit_zone_piece": is_exit_zone_piece
             }
 
+            # Add piece to history if piece_history is available
+            if self.piece_history:
+                self.piece_history.add_piece(result)
+
             # Update message status and result
             message.status = "completed"
             message.result = result
@@ -405,12 +412,14 @@ class ProcessingWorker:
 
 
 # Factory function
-def create_processing_worker(thread_manager: ThreadManager, config_manager: Any) -> ProcessingWorker:
+def create_processing_worker(thread_manager: ThreadManager, config_manager: Any,
+                             piece_history=None) -> ProcessingWorker:
     """Create a processing worker instance.
 
     Args:
         thread_manager: Thread manager instance
         config_manager: Configuration manager instance
+        piece_history: PieceHistory instance for tracking processed pieces
 
     Returns:
         ProcessingWorker instance
@@ -419,11 +428,13 @@ def create_processing_worker(thread_manager: ThreadManager, config_manager: Any)
     save_directory = config_manager.get("camera", "directory", "LegoPictures")
     filename_prefix = config_manager.get("camera", "filename_prefix", "Lego")
 
-    return ProcessingWorker(thread_manager, config_manager, save_directory, filename_prefix)
+    return ProcessingWorker(thread_manager, config_manager, save_directory,
+                            filename_prefix, piece_history)
 
 
 # Worker thread function
-def processing_worker_thread(thread_manager: ThreadManager, config_manager: Any) -> None:
+def processing_worker_thread(thread_manager: ThreadManager, config_manager: Any,
+                             piece_history=None) -> None:
     """Worker thread function for processing pieces.
 
     This function is meant to be run in a separate thread and handles
@@ -432,9 +443,10 @@ def processing_worker_thread(thread_manager: ThreadManager, config_manager: Any)
     Args:
         thread_manager: Thread manager instance
         config_manager: Configuration manager instance
+        piece_history: PieceHistory instance for tracking processed pieces
     """
     # Create worker
-    worker = create_processing_worker(thread_manager, config_manager)
+    worker = create_processing_worker(thread_manager, config_manager, piece_history)
 
     try:
         # Start worker

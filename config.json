@@ -105,5 +105,10 @@
             "active_piece": [0, 0, 255],
             "captured_piece": [0, 255, 0],
             "processing_piece": [255, 0, 255]
+    },
+    "piece_history": {
+        "max_entries": 10,
+        "csv_path": "piece_history.csv",
+        "include_timestamp": true
     }
 }

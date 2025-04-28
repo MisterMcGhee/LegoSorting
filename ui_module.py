@@ -9,18 +9,26 @@ recently processed piece display, and sorting information.
 import cv2
 import numpy as np
 import time
+import os
 from typing import Dict, Any, List, Tuple, Optional, Union
 
 
 class UIManager:
     """Manages the user interface elements for the Lego sorting application."""
 
-    def __init__(self, config_manager=None):
+    def __init__(self, config_manager=None, piece_history=None):
         """Initialize UI manager with optional configuration.
 
         Args:
             config_manager: Optional configuration manager instance
+            piece_history: Optional piece history manager
         """
+        # Store piece history reference
+        self.piece_history = piece_history
+
+        # Add tracking for last displayed piece
+        self.last_displayed_piece_id = None
+
         # Default configuration
         self.config = {
             "panels": {
@@ -86,22 +94,11 @@ class UIManager:
         self.layout["sorting"] = (160, frame_height - 190, frame_width - 320, 180)
 
     def create_display_frame(self, frame: np.ndarray,
-                          detector_data: Optional[Dict[str, Any]] = None,
-                          system_data: Optional[Dict[str, Any]] = None,
-                          piece_data: Optional[Dict[str, Any]] = None,
-                          sorting_data: Optional[Dict[str, Any]] = None) -> np.ndarray:
-        """Create the complete UI display frame.
-
-        Args:
-            frame: Original video frame
-            detector_data: Data from detector module (ROI, zones, tracked pieces)
-            system_data: System performance metrics
-            piece_data: Recently processed piece information
-            sorting_data: Sorting strategy and bin assignments
-
-        Returns:
-            Display frame with all enabled UI elements
-        """
+                             detector_data: Optional[Dict[str, Any]] = None,
+                             system_data: Optional[Dict[str, Any]] = None,
+                             piece_data: Optional[Dict[str, Any]] = None,
+                             sorting_data: Optional[Dict[str, Any]] = None) -> np.ndarray:
+        """Create the complete UI display frame."""
         # Create a copy of the frame
         display = frame.copy()
 
@@ -117,8 +114,31 @@ class UIManager:
         if self.config["panels"]["metrics_dashboard"] and system_data:
             display = self._render_metrics_dashboard(display, system_data)
 
-        if self.config["panels"]["processed_piece"] and piece_data:
-            display = self._render_processed_piece(display, piece_data)
+        # Check for new piece from piece_history if available
+        if self.config["panels"]["processed_piece"]:
+            if self.piece_history and (self.last_displayed_piece_id is None or
+                                       self.piece_history.has_new_piece_since(self.last_displayed_piece_id)):
+                # Get the latest piece
+                latest_piece = self.piece_history.get_latest_piece()
+
+                if latest_piece:
+                    # Update our tracking
+                    self.last_displayed_piece_id = latest_piece.get('piece_id')
+
+                    # Get the image file path from the piece data
+                    if 'file_path' in latest_piece and os.path.exists(latest_piece['file_path']):
+                        # Load the image from disk
+                        img = cv2.imread(latest_piece['file_path'])
+
+                        # Add image to piece data for rendering
+                        latest_piece = latest_piece.copy()  # Make a copy to avoid modifying original
+                        latest_piece['image'] = img
+
+                    # Render with the latest piece data
+                    display = self._render_processed_piece(display, latest_piece)
+            # Fall back to direct piece_data if provided or if no piece_history
+            elif piece_data:
+                display = self._render_processed_piece(display, piece_data)
 
         if self.config["panels"]["sorting_information"] and sorting_data:
             display = self._render_sorting_info(display, sorting_data)
@@ -146,8 +166,8 @@ class UIManager:
         return frame
 
     def _create_panel(self, frame: np.ndarray, x: int, y: int,
-                    width: int, height: int,
-                    title: Optional[str] = None) -> np.ndarray:
+                      width: int, height: int,
+                      title: Optional[str] = None) -> np.ndarray:
         """Create a semi-transparent panel.
 
         Args:
@@ -182,7 +202,7 @@ class UIManager:
         return result
 
     def _render_main_feed(self, frame: np.ndarray,
-                        detector_data: Dict[str, Any]) -> np.ndarray:
+                          detector_data: Dict[str, Any]) -> np.ndarray:
         """Render the main video feed with detection visualization.
 
         Args:
@@ -245,7 +265,7 @@ class UIManager:
         return display
 
     def _render_metrics_dashboard(self, frame: np.ndarray,
-                                system_data: Dict[str, Any]) -> np.ndarray:
+                                  system_data: Dict[str, Any]) -> np.ndarray:
         """Render the metrics dashboard panel.
 
         Args:
@@ -264,29 +284,29 @@ class UIManager:
         if "fps" in system_data:
             fps_text = f"FPS: {system_data['fps']:.1f}"
             cv2.putText(display, fps_text, (x + 20, y + 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
 
         if "queue_size" in system_data:
             queue_text = f"Queue: {system_data['queue_size']}"
             cv2.putText(display, queue_text, (x + 20, y + 85),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
 
         if "processed_count" in system_data:
             processed_text = f"Processed: {system_data['processed_count']}"
             cv2.putText(display, processed_text, (x + 20, y + 110),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
 
         if "uptime" in system_data:
             uptime = float(system_data["uptime"])
             uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
             uptime_text = f"Uptime: {uptime_str}"
             cv2.putText(display, uptime_text, (x + 20, y + 135),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.config["colors"]["text"], 1)
 
         return display
 
     def _render_processed_piece(self, frame: np.ndarray,
-                              piece_data: Dict[str, Any]) -> np.ndarray:
+                                piece_data: Dict[str, Any]) -> np.ndarray:
         """Render the recently processed piece panel.
 
         Args:
@@ -331,7 +351,7 @@ class UIManager:
         if piece_data.get("status") == "error":
             error_msg = piece_data.get("error", "Unknown error")
             cv2.putText(display, "Error:", (x + 20, text_y),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["error"], 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["error"], 1)
             text_y += 20
 
             # Truncate long error messages
@@ -339,7 +359,7 @@ class UIManager:
                 error_msg = str(error_msg)[:27] + "..."
 
             cv2.putText(display, str(error_msg), (x + 20, text_y),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["error"], 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.config["colors"]["error"], 1)
             text_y += 20
         else:
             # Regular info for successful pieces
@@ -363,7 +383,7 @@ class UIManager:
         return display
 
     def _render_sorting_info(self, frame: np.ndarray,
-                           sorting_data: Dict[str, Any]) -> np.ndarray:
+                             sorting_data: Dict[str, Any]) -> np.ndarray:
         """Render the sorting information panel.
 
         Args:
@@ -455,7 +475,7 @@ class UIManager:
             key: Key code from cv2.waitKey()
 
         Returns:
-            True if program should continue, False if should exit
+            True if the program should continue, False if it should exit
         """
         # Check for ESC key
         if key == 27:  # ESC
@@ -471,16 +491,17 @@ class UIManager:
 
 
 # Factory function
-def create_ui_manager(config_manager=None):
+def create_ui_manager(config_manager=None, piece_history=None):
     """Create a UI manager instance.
 
     Args:
         config_manager: Optional configuration manager
+        piece_history: Optional piece history manager
 
     Returns:
         UIManager instance
     """
-    return UIManager(config_manager)
+    return UIManager(config_manager, piece_history)
 
 
 # Test case
