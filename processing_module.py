@@ -109,27 +109,28 @@ class ProcessingWorker:
         self.running = False
 
     def _save_image(self, message: PieceMessage) -> Tuple[str, int]:
-        """Save piece image to disk.
-
-        Args:
-            message: Message containing piece information
-
-        Returns:
-            tuple: (file_path, image_number)
-        """
+        """Save piece image to disk with correct image number label."""
         # Generate unique number for this image
         number = self._get_next_image_number()
+
+        # Create a copy of the image to modify
+        labeled_image = message.image.copy()
+
+        # Add image number text to the top left corner
+        text_y = 30  # Position for text, similar to previous margin
+        cv2.putText(labeled_image, f"{number}",
+                    (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.9, (0, 0, 255), 2)
 
         # Create filename with padded number
         filename = f"{self.filename_prefix}{number:03d}.jpg"
         file_path = os.path.join(self.save_directory, filename)
 
-        # Save image to disk
-        cv2.imwrite(file_path, message.image)
-        logger.debug("Saved image to %s", file_path)
+        # Save the labeled image to disk
+        cv2.imwrite(file_path, labeled_image)
+        logger.debug(f"Saved image to {file_path}")
 
         return file_path, number
-
     def _get_next_image_number(self) -> int:
         """Get the next available image number.
 

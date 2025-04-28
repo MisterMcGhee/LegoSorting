@@ -672,12 +672,6 @@ class ConveyorDetector:
                 # Get the current image number
                 image_number = current_count
 
-                # Add the piece ID number at the top with increased margin
-                text_y = self.config["text_margin_top"] - 10  # Position for text
-                cv2.putText(cropped_image, f"{image_number}",
-                            (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.9, (0, 0, 255), 2)
-
                 # Mark as being processed
                 priority_piece.being_processed = True
                 priority_piece.processing_start_time = current_time
@@ -707,12 +701,8 @@ class ConveyorDetector:
                     # Get cropped image
                     cropped_image = self.crop_piece_image(frame, piece_to_capture)
 
-                    # Add the piece ID number at the top with increased margin
-                    text_y = self.config["text_margin_top"] - 10  # Position for text
+                    # Get the current image number (same as for exit zone pieces)
                     image_number = current_count
-                    cv2.putText(cropped_image, f"{image_number}",
-                                (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                                0.9, (0, 0, 255), 2)
 
                     # Add to processing queue
                     self.thread_manager.add_message(
