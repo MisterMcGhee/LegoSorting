@@ -514,6 +514,7 @@ class ConveyorDetector:
                 self.current_priority_piece = self.pieces_in_exit_zone[0]
             else:
                 self.current_priority_piece = None
+
     def get_priority_exit_zone_piece(self):
         """Get the highest priority piece in the exit zone
 
@@ -597,6 +598,7 @@ class ConveyorDetector:
         logger.info(f"Triggering servo for piece ID {priority_piece.id} in exit zone")
 
         return priority_piece, True
+
     def crop_piece_image(self, frame, piece):
         """Crop the piece from the frame with padding and added space for text
 
@@ -870,6 +872,7 @@ class ConveyorDetector:
                 visualization_data["tracked_pieces"].append(piece_data)
 
             return visualization_data
+
     def release(self):
         """Release resources used by the detector"""
         logger.info("Releasing detector resources")
