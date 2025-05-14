@@ -123,37 +123,61 @@ class PieceHistory:
             piece_data: Dictionary containing piece information
         """
         try:
-            # Determine fieldnames from first row if file exists
-            fieldnames = None
-            if os.path.exists(self.csv_path) and os.path.getsize(self.csv_path) > 0:
-                with open(self.csv_path, 'r', newline='') as csvfile:
-                    reader = csv.reader(csvfile)
-                    fieldnames = next(reader, None)
+            # Log what we're trying to write
+            logger.info(f"Writing piece data to CSV: {piece_data.get('piece_id')}")
 
-            # If no fieldnames found, use default set
-            if not fieldnames:
-                fieldnames = [
-                    'piece_id',
-                    'image_number',
-                    'file_path',
-                    'element_id',
-                    'name',
-                    'primary_category',
-                    'secondary_category',
-                    'bin_number',
-                    'processing_time',
-                    'is_exit_zone_piece'
-                ]
-                if self.include_timestamp:
-                    fieldnames.append('timestamp')
+            # Define standard fieldnames directly
+            fieldnames = [
+                'piece_id',
+                'image_number',
+                'file_path',
+                'element_id',
+                'name',
+                'primary_category',
+                'secondary_category',
+                'bin_number',
+                'processing_time',
+                'is_exit_zone_piece'
+            ]
 
-            # Append to CSV
+            # Add timestamp field if configured
+            if self.include_timestamp:
+                fieldnames.append('timestamp')
+
+            # Create a clean copy of the data that we'll write to CSV
+            csv_data = {}
+
+            # Explicitly copy each expected field, converting None to empty string
+            for field in fieldnames:
+                if field in piece_data and piece_data[field] is not None:
+                    csv_data[field] = piece_data[field]
+                else:
+                    csv_data[field] = ""  # Empty string for missing or None values
+
+            logger.debug(f"CSV data prepared: {csv_data}")
+
+            # Check if file exists - if not or empty, create with headers
+            file_exists = os.path.exists(self.csv_path)
+            file_empty = not file_exists or os.path.getsize(self.csv_path) == 0
+
+            if file_empty:
+                # Create file with headers
+                with open(self.csv_path, 'w', newline='') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    logger.info(f"Created CSV file with headers: {self.csv_path}")
+
+            # Append the data
             with open(self.csv_path, 'a', newline='') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
-                writer.writerow(piece_data)
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writerow(csv_data)
+                logger.info(f"Successfully wrote piece {csv_data.get('piece_id')} to CSV")
 
         except Exception as e:
-            logger.error(f"Error appending to CSV: {e}")
+            logger.error(f"Error writing to CSV: {e}")
+            logger.error(f"CSV path: {self.csv_path}")
+            logger.error(f"Piece data: {piece_data}")
+            logger.exception("Stack trace:")
 
     def get_latest_piece(self) -> Optional[Dict[str, Any]]:
         """Get the most recently processed piece

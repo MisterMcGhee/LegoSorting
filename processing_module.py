@@ -131,6 +131,7 @@ class ProcessingWorker:
         logger.debug(f"Saved image to {file_path}")
 
         return file_path, number
+
     def _get_next_image_number(self) -> int:
         """Get the next available image number.
 
@@ -297,24 +298,39 @@ class ProcessingWorker:
             # Move the servo, indicating if this is an exit zone piece
             servo_success = self._move_servo(bin_number, is_exit_zone_piece)
 
-            # Create result dictionary
+            # This code should replace the result dictionary creation in the _process_message method
+
+            # Create result dictionary with explicit default values for all expected fields
             result = {
                 "piece_id": message.piece_id,
                 "image_number": image_number,
                 "file_path": file_path,
                 "element_id": sorting_result.get("element_id", "Unknown"),
                 "name": sorting_result.get("name", "Unknown"),
-                "primary_category": sorting_result.get("primary_category", "Unknown"),
-                "secondary_category": sorting_result.get("secondary_category", "Unknown"),
+                "primary_category": sorting_result.get("primary_category", ""),
+                "secondary_category": sorting_result.get("secondary_category", ""),
+                "tertiary_category": sorting_result.get("tertiary_category", ""),
                 "bin_number": bin_number,
                 "servo_success": servo_success,
                 "processing_time": time.time() - start_time,
                 "is_exit_zone_piece": is_exit_zone_piece
             }
 
+            # Log the result to verify data
+            logger.debug(f"Created result dictionary for piece {message.piece_id}:")
+            logger.debug(f"  Image: {image_number}, Element ID: {result['element_id']}")
+            logger.debug(f"  Name: {result['name']}, Bin: {bin_number}")
+
             # Add piece to history if piece_history is available
             if self.piece_history:
-                self.piece_history.add_piece(result)
+                try:
+                    logger.info(f"Adding piece ID {message.piece_id} to piece history")
+                    self.piece_history.add_piece(result)
+                    logger.info(f"Successfully added piece ID {message.piece_id} to piece history")
+                except Exception as e:
+                    logger.error(f"Error adding piece to history: {e}", exc_info=True)
+            else:
+                logger.warning(f"Piece history is None, not recording piece ID {message.piece_id}")
 
             # Update message status and result
             message.status = "completed"
@@ -425,6 +441,11 @@ def create_processing_worker(thread_manager: ThreadManager, config_manager: Any,
     Returns:
         ProcessingWorker instance
     """
+    # Verify piece_history parameter is being passed correctly
+    if piece_history is None:
+        logger.error("piece_history is None in processing_worker_thread!")
+    else:
+        logger.info(f"piece_history initialized in thread: {piece_history}, CSV path: {piece_history.csv_path}")
     # Get camera configuration for save directory and filename prefix
     save_directory = config_manager.get("camera", "directory", "LegoPictures")
     filename_prefix = config_manager.get("camera", "filename_prefix", "Lego")

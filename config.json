@@ -33,10 +33,10 @@
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "secondary",
-        "target_primary_category": "Curved",
+        "strategy": "primary",
+        "target_primary_category": "",
         "target_secondary_category": "",
-        "max_bins": 4,
+        "max_bins": 6,
         "overflow_bin": 0
     },
     "threading": {
@@ -53,7 +53,7 @@
         "max_pulse": 2500,
         "frequency": 50,
         "default_position": 90,
-        "calibration_mode": false,
+        "calibration_mode": true,
         "bin_positions": {
             "0": 20,
             "1": 40,

@@ -181,7 +181,7 @@ class ThreadManager:
 
             with self.queue_lock:
                 # Add to queue with priority
-                self.message_queue.put((queue_priority, message), block=False)
+                self.message_queue.put((queue_priority, message.piece_id, message), block=False)
                 # Store reference to message
                 self.messages_in_queue[piece_id] = message
 
