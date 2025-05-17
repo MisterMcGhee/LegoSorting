@@ -176,10 +176,16 @@ class ThreadManager:
                 rightmost_position=rightmost_position
             )
 
+            logger.debug(f"Creating message for piece_id={piece_id}, priority={priority}, in_exit_zone={in_exit_zone}")
+
             # Determine final queue priority based on message properties
             queue_priority = self._calculate_priority(message)
 
+            logger.debug(f"Calculated queue_priority={queue_priority} for piece_id={piece_id}")
+
             with self.queue_lock:
+                logger.debug(f"Queue size before adding piece {piece_id}: {self.message_queue.qsize()}")
+
                 # Add to queue with priority
                 self.message_queue.put((queue_priority, message.piece_id, message), block=False)
                 # Store reference to message
@@ -234,27 +240,46 @@ class ThreadManager:
         return base_priority
 
     def get_next_message(self, timeout: float = None) -> Optional[PieceMessage]:
-        """Get the next message from the queue.
-
-        Args:
-            timeout: Maximum time to wait for a message
-
-        Returns:
-            PieceMessage or None if queue is empty or timeout occurs
-        """
+        """Get the next message from the queue."""
         try:
-            with self.queue_lock:
-                # Get item from priority queue (unpack the priority, message tuple)
-                _, message = self.message_queue.get(block=True, timeout=timeout)
-                message.status = "processing"
-                # Remove from tracked messages
-                if message.piece_id in self.messages_in_queue:
-                    del self.messages_in_queue[message.piece_id]
+            # Log queue size before trying to get a message
+            logger.debug(f"Queue size before get_next_message: {self.message_queue.qsize()}")
+
+            # Try to get item from queue without lock first
+            try:
+                item = self.message_queue.get(block=True, timeout=timeout)
+                logger.debug(f"Retrieved item from queue: {type(item)}")
+
+                # Try to extract message from item
+                if isinstance(item, tuple):
+                    if len(item) >= 3:  # Changed from 2 to 3
+                        message = item[2]  # The message is the THIRD element (index 2)
+                        logger.debug(f"Extracted message from tuple, piece_id={message.piece_id}")
+                    else:
+                        logger.error(f"Tuple has wrong length: {len(item)}, tuple={item}")
+                        self.message_queue.task_done()
+                        return None
+                else:
+                    logger.error(f"Item is not a tuple: {type(item)}, item={item}")
+                    self.message_queue.task_done()
+                    return None
+
+                # Now acquire lock to update state
+                with self.queue_lock:
+                    message.status = "processing"
+                    # Remove from tracked messages
+                    if message.piece_id in self.messages_in_queue:
+                        del self.messages_in_queue[message.piece_id]
+
                 return message
 
-        except queue.Empty:
-            return None
+            except queue.Empty:
+                logger.debug("Queue is empty in get_next_message")
+                return None
 
+        except Exception as e:
+            logger.error(f"Unexpected error in get_next_message: {str(e)}")
+            return None
     def task_done(self):
         """Mark a task as done in the queue."""
         self.message_queue.task_done()

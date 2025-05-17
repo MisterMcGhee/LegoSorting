@@ -49,8 +49,15 @@ class ProcessingWorker:
 
         # Ensure save directory exists
         self.save_directory = os.path.abspath(save_directory)
+        logger.info(f"Saving images to directory: {os.path.abspath(self.save_directory)}")
         if not os.path.exists(self.save_directory):
-            os.makedirs(self.save_directory)
+            try:
+                os.makedirs(self.save_directory)
+                logger.info(f"Created directory: {self.save_directory}")
+            except Exception as e:
+                logger.error(f"Failed to create directory: {e}")
+        else:
+            logger.info(f"Directory already exists: {self.save_directory}")
 
         # Initialize components
         self.api_client = create_api_client("brickognize", config_manager)
@@ -109,15 +116,14 @@ class ProcessingWorker:
         self.running = False
 
     def _save_image(self, message: PieceMessage) -> Tuple[str, int]:
-        """Save piece image to disk with correct image number label."""
         # Generate unique number for this image
         number = self._get_next_image_number()
 
         # Create a copy of the image to modify
-        labeled_image = message.image.copy()
+        labeled_image = message.image.copy()  # Could fail if image is None or corrupted
 
         # Add image number text to the top left corner
-        text_y = 30  # Position for text, similar to previous margin
+        text_y = 30
         cv2.putText(labeled_image, f"{number}",
                     (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
                     0.9, (0, 0, 255), 2)
@@ -127,11 +133,10 @@ class ProcessingWorker:
         file_path = os.path.join(self.save_directory, filename)
 
         # Save the labeled image to disk
-        cv2.imwrite(file_path, labeled_image)
+        cv2.imwrite(file_path, labeled_image)  # This line could be failing
         logger.debug(f"Saved image to {file_path}")
 
         return file_path, number
-
     def _get_next_image_number(self) -> int:
         """Get the next available image number.
 
@@ -374,15 +379,27 @@ class ProcessingWorker:
     def run(self) -> None:
         """Main processing loop for the worker thread."""
         logger.info("Processing worker running")
+        last_empty_log_time = 0  # Track when we last logged an empty queue
 
         try:
             while self.running and not self.should_exit.is_set():
                 # Get next message from queue with timeout
                 message = self.thread_manager.get_next_message(timeout=self.polling_interval)
 
-                # Skip if no message
+                # Skip if no message, but log only periodically
                 if message is None:
+                    current_time = time.time()
+                    # Log only once every 5 seconds when queue is empty
+                    if current_time - last_empty_log_time > 5.0:
+                        logger.debug(f"Queue empty, waiting for messages (poll interval: {self.polling_interval}s)")
+                        last_empty_log_time = current_time
                     continue
+
+                # Reset the empty log timer when we get a message
+                last_empty_log_time = 0
+
+                # Log when we actually get a message
+                logger.debug(f"Processing message for piece ID {message.piece_id}")
 
                 try:
                     # Process message
