@@ -107,6 +107,16 @@ class LegoSorting005:
             # Initialize configuration
             self.config_manager = create_config_manager(config_path)
 
+            # Add this section - check if sorting calibration is needed
+            calibrate_sorting = self.config_manager.get("sorting", "calibrate_sorting_strategy", False)
+            if calibrate_sorting:
+                print("\nInitiating Sorting Strategy Calibration...")
+                self.config_manager.calibrate_sorting_strategy()
+
+                # Turn off calibration flag after completion
+                self.config_manager.set("sorting", "calibrate_sorting_strategy", False)
+                self.config_manager.save_config()
+
             # Initialize thread manager
             self.thread_manager = create_thread_manager(self.config_manager)
 
@@ -128,6 +138,7 @@ class LegoSorting005:
             logger.info("Initializing detector...")
             self.detector = create_detector("conveyor", self.config_manager, self.thread_manager)
 
+            # Initialize sorting manager
             logger.info("Initializing sorting manager...")
             self.sorting_manager = create_sorting_manager(self.config_manager)
 
@@ -437,6 +448,9 @@ def main():
                         help='Path to configuration file')
     parser.add_argument('--calibrate-servo', action='store_true',
                         help='Run servo calibration at startup')
+    # Add this argument
+    parser.add_argument('--calibrate-sorting', action='store_true',
+                        help='Run sorting strategy calibration at startup')
     parser.add_argument('--log-level', type=str, default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Set logging level')
@@ -459,6 +473,13 @@ def main():
             config_manager.save_config()
             logger.info("Servo calibration mode activated")
             print("Servo calibration mode activated")
+
+        # Add this section for sorting calibration
+        if args.calibrate_sorting:
+            config_manager.set("sorting", "calibrate_sorting_strategy", True)
+            config_manager.save_config()
+            logger.info("Sorting strategy calibration activated")
+            print("Sorting strategy calibration activated")
 
         # Create and run application
         application = LegoSorting005(config_path=args.config)
