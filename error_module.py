@@ -13,7 +13,6 @@ import time
 import os
 from typing import Optional, Dict, Any, Union, Callable
 
-
 # Thread-local storage for context information
 thread_context = threading.local()
 
@@ -255,7 +254,7 @@ def log_and_return(result: Union[Dict[str, Any], Exception],
 
 
 def retry_on_error(max_attempts: int = 3, delay: float = 1.0,
-                  exceptions: tuple = (Exception,), logger: logging.Logger = None) -> Callable:
+                   exceptions: tuple = (Exception,), logger: logging.Logger = None) -> Callable:
     """Decorator for retrying a function on specific exceptions.
 
     Args:
@@ -267,6 +266,7 @@ def retry_on_error(max_attempts: int = 3, delay: float = 1.0,
     Returns:
         Decorated function
     """
+
     def decorator(func):
         def wrapper(*args, **kwargs):
             nonlocal logger
@@ -295,6 +295,7 @@ def retry_on_error(max_attempts: int = 3, delay: float = 1.0,
                         raise
 
         return wrapper
+
     return decorator
 
 
@@ -316,12 +317,14 @@ if __name__ == "__main__":
         result = handle_error(e, logger, return_dict=True)
         print(f"Returned: {result}")
 
+
     # Example of retry decorator
     @retry_on_error(max_attempts=3, delay=0.1, logger=logger)
     def example_retry_function():
         set_thread_context(operation="example_retry")
         logger.info("Attempting operation...")
         raise APIError("Temporary API error")
+
 
     try:
         example_retry_function()

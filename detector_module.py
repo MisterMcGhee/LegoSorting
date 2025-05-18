@@ -16,8 +16,8 @@ import os
 import json
 import threading
 import logging
-from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict, Any
+from dataclasses import dataclass
+from typing import List, Tuple, Optional
 
 # Set up module logger
 logger = logging.getLogger(__name__)
@@ -397,7 +397,8 @@ class ConveyorDetector:
                 for piece in self.tracked_pieces:
                     if piece.captured:
                         dist = np.sqrt((center[0] - piece.center[0]) ** 2 + (center[1] - piece.center[1]) ** 2)
-                        # Use a slightly larger threshold for captured pieces to ensure we catch all potential duplicates
+                        # Use a slightly larger threshold for captured pieces to ensure we catch all potential
+                        # duplicates
                         if dist < self.config["match_threshold"] * 1.5:
                             close_to_captured = True
                             # Update the captured piece's position since it's still moving

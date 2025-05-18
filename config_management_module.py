@@ -368,7 +368,7 @@ def calibrate_sorting_strategy(self):
                             # Check if tertiary categories exist
                             key = (primary_category, secondary_category)
                             if key not in categories["secondary_to_tertiary"] or not \
-                            categories["secondary_to_tertiary"][key]:
+                                    categories["secondary_to_tertiary"][key]:
                                 print(f"No tertiary categories exist for {secondary_category} category.")
                                 retry = input("Try another secondary category? (y/n): ")
                                 if retry.lower() != 'y':
@@ -434,6 +434,7 @@ def _parse_categories_from_csv(self, csv_path):
     except Exception as e:
         print(f"Error parsing categories: {e}")
         return {"primary": set(), "primary_to_secondary": {}, "secondary_to_tertiary": {}}
+
 
 # Factory function
 def create_config_manager(config_path: str = "config.json") -> ConfigManager:

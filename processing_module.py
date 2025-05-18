@@ -137,6 +137,7 @@ class ProcessingWorker:
         logger.debug(f"Saved image to {file_path}")
 
         return file_path, number
+
     def _get_next_image_number(self) -> int:
         """Get the next available image number.
 
