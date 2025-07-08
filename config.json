@@ -33,10 +33,10 @@
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "secondary",
-        "target_primary_category": "Angle",
+        "strategy": "primary",
+        "target_primary_category": "",
         "target_secondary_category": "",
-        "max_bins": 6,
+        "max_bins": 7,
         "overflow_bin": 0
     },
     "threading": {
