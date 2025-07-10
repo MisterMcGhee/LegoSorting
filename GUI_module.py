@@ -8,6 +8,8 @@ import sys
 import time
 import cv2
 import json
+import csv
+import os
 from typing import Tuple
 
 # PyQt imports with fallback
@@ -800,7 +802,7 @@ class StartupScreen(QWidget):
             self.check_labels["camera"].setText("⏳ Checking camera connection...")
         if self.step >= 15:
             # Actually test camera availability using our detection function
-            available_cameras = detect_available_cameras(max_cameras=3)  # Quick scan
+            available_cameras = detect_available_cameras(max_cameras=3)
             if available_cameras:
                 self.check_labels["camera"].setText(f"✅ Camera(s) detected: {available_cameras}")
             else:
@@ -808,9 +810,44 @@ class StartupScreen(QWidget):
         if self.step >= 17:
             self.check_labels["arduino"].setText("❌ Arduino servo not detected (will run in sim mode)")
         if self.step >= 20:
-            self.check_labels["database"].setText("✅ Loading piece identification database...")
+            self.check_labels["database"].setText("⏳ Loading piece identification database...")
+        if self.step >= 22:
+            # Load category database
+            try:
+                # Import at runtime to avoid circular imports
+                import sys
+                sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+                from config_management_module import create_config_manager
+
+                config_mgr = create_config_manager()
+                categories = config_mgr.parse_categories_from_csv()
+
+                # Get the main window (traverse up from stacked widget)
+                main_window = self.window()  # This gets the top-level window
+                if main_window and hasattr(main_window, 'category_database'):
+                    main_window.category_database = categories
+                    self.check_labels["database"].setText("✅ Piece identification database loaded")
+                else:
+                    # If we can't find the main window, at least store it somewhere
+                    if hasattr(self.parent(), 'window'):
+                        self.parent().window().category_database = categories
+                    self.check_labels["database"].setText("✅ Piece identification database loaded")
+
+            except FileNotFoundError:
+                self.check_labels["database"].setText("❌ Database CSV not found - cannot continue")
+                QMessageBox.critical(self, "Critical Error",
+                                     "Lego_Categories.csv not found!\n\nThe piece identification database is required for operation.")
+                QTimer.singleShot(1000, lambda: sys.exit(1))
+            except Exception as e:
+                self.check_labels["database"].setText(f"❌ Database load error: {str(e)}")
+                import traceback
+                traceback.print_exc()  # Print the full error for debugging
+
         if self.step >= 25:
-            self.check_labels["database"].setText("✅ Piece identification database loaded")
+            parent_widget = self.parent()
+            if parent_widget and hasattr(parent_widget, 'category_database') and parent_widget.category_database:
+                count = len([p for p in parent_widget.category_database.get("primary", [])])
+                self.check_labels["database"].setText(f"✅ Database loaded ({count} primary categories)")
 
         if progress >= 100:
             self.timer.stop()
@@ -902,7 +939,6 @@ class ModeSelectionScreen(QWidget):
 
 
 class ConfigurationScreen(QWidget):
-    """Sorting configuration screen"""
 
     start_sorting = pyqtSignal(dict)  # Configuration dict
     back_requested = pyqtSignal()
@@ -911,6 +947,7 @@ class ConfigurationScreen(QWidget):
         super().__init__()
         self.available_cameras = []
         self.current_camera_index = 0
+        self.category_database = None  # Will be set by main window
 
         # Load ROI from config
         roi_tuple = load_roi_from_config()
@@ -918,22 +955,13 @@ class ConfigurationScreen(QWidget):
 
         self.init_ui()
         self.detect_cameras()
-    def detect_cameras(self):
-        """Detect available cameras and populate dropdown"""
-        print("🔍 Detecting available cameras...")
-        self.available_cameras = detect_available_cameras()
 
-        # Update camera selection dropdown
-        self.camera_combo.clear()
-        if self.available_cameras:
-            for cam_idx in self.available_cameras:
-                self.camera_combo.addItem(f"Camera {cam_idx}")
-            # Set current camera to first available
-            self.current_camera_index = self.available_cameras[0]
-            self.camera_preview.change_camera(self.current_camera_index)
-        else:
-            self.camera_combo.addItem("No cameras detected")
-            self.camera_combo.setEnabled(False)
+    def set_category_database(self, category_db):
+        """Set the category database for dropdowns"""
+        self.category_database = category_db
+        # Refresh dropdowns if UI is already initialized
+        if hasattr(self, 'strategy_combo'):
+            self.on_strategy_changed(self.strategy_combo.currentText())
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -957,20 +985,20 @@ class ConfigurationScreen(QWidget):
 
         # Sorting strategy
         strategy_row = QHBoxLayout()
-        strategy_row.addWidget(QLabel("Strategy:"))
+        strategy_row.addWidget(QLabel("Sort by:"))
         self.strategy_combo = QComboBox()
         self.strategy_combo.addItems(["Primary Categories", "Secondary Categories", "Tertiary Categories"])
         self.strategy_combo.currentTextChanged.connect(self.on_strategy_changed)
         strategy_row.addWidget(self.strategy_combo)
         strategy_layout.addLayout(strategy_row)
 
-        # Target category
-        target_row = QHBoxLayout()
-        target_row.addWidget(QLabel("Target:"))
-        self.target_combo = QComboBox()
-        self.target_combo.addItems(["All Categories"])
-        target_row.addWidget(self.target_combo)
-        strategy_layout.addLayout(target_row)
+        # Dynamic dropdowns container
+        self.dynamic_dropdowns_layout = QVBoxLayout()
+        strategy_layout.addLayout(self.dynamic_dropdowns_layout)
+
+        # Initialize with primary (no additional dropdowns needed)
+        self.primary_combo = None
+        self.secondary_combo = None
 
         top_settings_layout.addWidget(strategy_group)
 
@@ -994,13 +1022,13 @@ class ConfigurationScreen(QWidget):
         top_settings_layout.addWidget(camera_group)
         config_layout.addLayout(top_settings_layout)
 
-        # Camera preview (full width, larger)
+        # Camera preview
         preview_group = QGroupBox("Camera Preview")
         preview_layout = QVBoxLayout(preview_group)
 
         self.camera_preview = RealCameraWidget(camera_index=0, show_roi=True)
-        self.camera_preview.roi_rect = self.current_roi  # Set loaded ROI
-        self.camera_preview.setMinimumHeight(400)  # Taller for better view
+        self.camera_preview.roi_rect = self.current_roi
+        self.camera_preview.setMinimumHeight(400)
         preview_layout.addWidget(self.camera_preview)
 
         # ROI status
@@ -1008,7 +1036,6 @@ class ConfigurationScreen(QWidget):
         self.roi_status = QLabel("ROI Status: ✅ Properly configured")
         self.roi_status.setStyleSheet("color: green; font-weight: bold;")
         roi_status_layout.addWidget(self.roi_status)
-
         roi_status_layout.addStretch()
 
         adjust_roi_btn = QPushButton("Adjust ROI")
@@ -1018,37 +1045,7 @@ class ConfigurationScreen(QWidget):
         preview_layout.addLayout(roi_status_layout)
         config_layout.addWidget(preview_group)
 
-        # Bin layout preview
-        bins_group = QGroupBox("Bin Assignment Preview (Future Feature)")
-        bins_layout = QHBoxLayout(bins_group)
-
-        # Add explanatory note
-        bins_note = QLabel(
-            "Note: Bins are currently assigned dynamically as pieces are encountered.\nPre-assignment will be available in a future update.")
-        bins_note.setStyleSheet("color: #666; font-style: italic; margin: 5px;")
-        bins_note.setWordWrap(True)
-
-        bins_container = QVBoxLayout()
-        bins_container.addWidget(bins_note)
-
-        bins_row = QHBoxLayout()
-        self.bin_labels = []
-        for i in range(8):
-            if i == 0:
-                bin_label = QLabel(f"Bin {i}: Overflow")
-            else:
-                bin_label = QLabel(f"Bin {i}: Dynamic")
-            bin_label.setStyleSheet(
-                "margin: 2px; padding: 8px; background-color: #f0f0f0; border-radius: 3px; font-family: monospace; color: #666;")
-            bins_row.addWidget(bin_label)
-            self.bin_labels.append(bin_label)
-
-        bins_container.addLayout(bins_row)
-        bins_group.setLayout(bins_container)
-        config_layout.addWidget(bins_group)
-        layout.addLayout(config_layout)
-
-        # Advanced settings (collapsible)
+        # Advanced settings
         self.advanced_group = QGroupBox("Advanced Settings")
         self.advanced_group.setCheckable(True)
         self.advanced_group.setChecked(False)
@@ -1110,6 +1107,101 @@ class ConfigurationScreen(QWidget):
         layout.addLayout(buttons_layout)
         self.setLayout(layout)
 
+    def on_strategy_changed(self, strategy):
+        """Handle strategy change and update dynamic dropdowns"""
+        try:
+            # Clear existing dynamic dropdowns
+            while self.dynamic_dropdowns_layout.count():
+                child = self.dynamic_dropdowns_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+
+            # Reset combo references
+            self.primary_combo = None
+            self.secondary_combo = None
+
+            if not self.category_database:
+                print("Warning: Category database not loaded yet")
+                return
+
+            if "Secondary" in strategy:
+                # Add primary category dropdown
+                primary_row = QHBoxLayout()
+                primary_row.addWidget(QLabel("Within:"))
+                self.primary_combo = QComboBox()
+
+                # Populate with sorted primary categories
+                primary_categories = sorted(self.category_database.get("primary", []))
+                self.primary_combo.addItems(primary_categories)
+                self.primary_combo.currentTextChanged.connect(self.on_primary_changed)
+
+                primary_row.addWidget(self.primary_combo)
+                self.dynamic_dropdowns_layout.addLayout(primary_row)
+
+            elif "Tertiary" in strategy:
+                # Add primary category dropdown
+                primary_row = QHBoxLayout()
+                primary_row.addWidget(QLabel("Within Primary:"))
+                self.primary_combo = QComboBox()
+
+                # Populate with sorted primary categories
+                primary_categories = sorted(self.category_database.get("primary", []))
+                self.primary_combo.addItems(primary_categories)
+                self.primary_combo.currentTextChanged.connect(self.on_primary_changed)
+
+                primary_row.addWidget(self.primary_combo)
+                self.dynamic_dropdowns_layout.addLayout(primary_row)
+
+                # Add secondary category dropdown
+                secondary_row = QHBoxLayout()
+                secondary_row.addWidget(QLabel("Within Secondary:"))
+                self.secondary_combo = QComboBox()
+                secondary_row.addWidget(self.secondary_combo)
+                self.dynamic_dropdowns_layout.addLayout(secondary_row)
+
+                # Trigger initial population
+                if self.primary_combo.count() > 0:
+                    self.on_primary_changed(self.primary_combo.currentText())
+
+        except Exception as e:
+            print(f"Error in on_strategy_changed: {e}")
+            import traceback
+            traceback.print_exc()
+    def on_primary_changed(self, primary_category):
+        """Handle primary category selection for tertiary sorting"""
+        if not self.secondary_combo or not primary_category:
+            return
+
+        # Clear and populate secondary dropdown
+        self.secondary_combo.clear()
+
+        # Get secondaries for selected primary
+        primary_to_secondary = self.category_database.get("primary_to_secondary", {})
+        secondaries = sorted(primary_to_secondary.get(primary_category, []))
+
+        if secondaries:
+            self.secondary_combo.addItems(secondaries)
+        else:
+            self.secondary_combo.addItem("(No secondary categories)")
+            self.secondary_combo.setEnabled(False)
+
+    def detect_cameras(self):
+        """Detect available cameras and populate dropdown"""
+        print("🔍 Detecting available cameras...")
+        self.available_cameras = detect_available_cameras()
+
+        # Update camera selection dropdown
+        self.camera_combo.clear()
+        if self.available_cameras:
+            for cam_idx in self.available_cameras:
+                self.camera_combo.addItem(f"Camera {cam_idx}")
+            # Set current camera to first available
+            self.current_camera_index = self.available_cameras[0]
+            self.camera_preview.change_camera(self.current_camera_index)
+        else:
+            self.camera_combo.addItem("No cameras detected")
+            self.camera_combo.setEnabled(False)
+
     def on_camera_changed(self, camera_text):
         """Handle camera selection change"""
         if "Camera" in camera_text:
@@ -1164,17 +1256,6 @@ class ConfigurationScreen(QWidget):
 
         # Clean up dialog
         dialog.cleanup()
-    def on_strategy_changed(self, strategy):
-        """Handle strategy change"""
-        if "Secondary" in strategy:
-            self.target_combo.clear()
-            self.target_combo.addItems(["Basic", "Technic", "Curves", "Specialty"])
-        elif "Tertiary" in strategy:
-            self.target_combo.clear()
-            self.target_combo.addItems(["Bricks", "Plates", "Slopes", "Round"])
-        else:
-            self.target_combo.clear()
-            self.target_combo.addItems(["All Categories"])
 
     def save_as_default(self):
         """Save current settings as default"""
@@ -1184,22 +1265,52 @@ class ConfigurationScreen(QWidget):
         if reply == QMessageBox.StandardButton.Yes if PYQT_VERSION == "PyQt6" else QMessageBox.Yes:
             QMessageBox.information(self, "Saved", "Settings saved as default!")
 
+    def cleanup(self):
+        """Clean up camera resources"""
+        if hasattr(self, 'camera_preview'):
+            self.camera_preview.cleanup()
     def start_sorting_clicked(self):
         """Start sorting with current configuration"""
+        strategy_text = self.strategy_combo.currentText()
+
+        # Determine actual strategy and targets
+        if "Primary" in strategy_text:
+            strategy = "primary"
+            target_primary = ""
+            target_secondary = ""
+        elif "Secondary" in strategy_text:
+            strategy = "secondary"
+            target_primary = self.primary_combo.currentText() if self.primary_combo else ""
+            target_secondary = ""
+        else:  # Tertiary
+            strategy = "tertiary"
+            target_primary = self.primary_combo.currentText() if self.primary_combo else ""
+            target_secondary = self.secondary_combo.currentText() if self.secondary_combo else ""
+
         config = {
-            "strategy": self.strategy_combo.currentText(),
-            "target": self.target_combo.currentText(),
+            "strategy": strategy,
+            "target_primary": target_primary,
+            "target_secondary": target_secondary,
             "sensitivity": self.sens_slider.value(),
             "confidence": self.conf_slider.value(),
             "max_bins": self.bins_spin.value(),
             "camera_index": self.current_camera_index
         }
-        self.start_sorting.emit(config)
 
-    def cleanup(self):
-        """Clean up camera resources"""
-        if hasattr(self, 'camera_preview'):
-            self.camera_preview.cleanup()
+        # Save to actual config file
+        if hasattr(self, 'config_manager'):
+            config_manager = self.config_manager
+        else:
+            from config_management_module import create_config_manager
+            config_manager = create_config_manager()
+
+        config_manager.set("sorting", "strategy", strategy)
+        config_manager.set("sorting", "target_primary_category", target_primary)
+        config_manager.set("sorting", "target_secondary_category", target_secondary)
+        config_manager.set("sorting", "max_bins", config["max_bins"])
+        config_manager.save_config()
+
+        self.start_sorting.emit(config)
 
 
 class RealCameraWidget(QWidget):
@@ -1615,6 +1726,9 @@ class LegoSortingGUI(QMainWindow):
         self.setMinimumSize(800, 600)
         self.resize(1000, 700)
 
+        # Initialize category database
+        self.category_database = None
+
         # Create stacked widget for different screens
         self.stacked_widget = QStackedWidget()
         self.setCentralWidget(self.stacked_widget)
@@ -1655,10 +1769,12 @@ class LegoSortingGUI(QMainWindow):
     def show_configuration(self, mode):
         """Show configuration screen"""
         if mode == "sorting":
+            # Pass category database to config screen
+            if hasattr(self, 'category_database') and self.category_database:
+                self.config_screen.set_category_database(self.category_database)
             self.stacked_widget.setCurrentWidget(self.config_screen)
         else:
             QMessageBox.information(self, "Coming Soon", "Inventory mode will be available in a future update!")
-
     def start_sorting(self, config):
         """Start sorting with given configuration"""
         # Clean up configuration screen camera
