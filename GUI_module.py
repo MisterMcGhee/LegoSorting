@@ -7,6 +7,8 @@ Mock GUI for testing layout and functionality without hardware dependencies
 import sys
 import time
 import cv2
+import json
+from typing import Tuple
 
 # PyQt imports with fallback
 try:
@@ -28,6 +30,693 @@ except ImportError:
         print("ERROR: Neither PyQt5 nor PyQt6 is installed!")
         sys.exit(1)
 
+
+class InteractiveROIWidget(QWidget):
+    """Camera widget with interactive ROI selection capability"""
+
+    roi_updated = pyqtSignal(QRect)
+
+    def __init__(self, camera_index=0, parent=None):
+        super().__init__(parent)
+        self.camera_index = camera_index
+        self.current_frame = None
+        self.camera_error = False
+        self.error_message = ""
+        self.cap = None
+        self._first_frame_received = False
+
+        # ROI related
+        self.roi_rect = QRect(125, 200, 1550, 500)  # Default from config
+        self.edit_mode = False
+        self.selecting_roi = False
+        self.roi_start_point = None
+        self.temp_roi = None
+        self.dragging_handle = None
+        self.hover_handle = None
+
+        # Handle positions
+        self.handles = {}
+
+        # Constraints
+        self.min_roi_size = QSize(100, 100)
+
+        self.setMouseTracking(True)
+        self.setMinimumHeight(400)
+
+        # Initialize camera
+        self.init_camera()
+
+        # Timer for frame updates
+        self.frame_timer = QTimer()
+        self.frame_timer.timeout.connect(self.update_frame)
+        self.frame_timer.start(33)  # ~30 FPS
+
+    def init_camera(self):
+        """Initialize OpenCV camera"""
+        try:
+            if self.cap:
+                self.cap.release()
+
+            self.cap = cv2.VideoCapture(self.camera_index)
+
+            if not self.cap.isOpened():
+                raise Exception(f"Cannot open camera {self.camera_index}")
+
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+            ret, test_frame = self.cap.read()
+            if not ret or test_frame is None:
+                raise Exception("Camera opened but cannot read frames")
+
+            self.camera_error = False
+            self.error_message = ""
+
+        except Exception as e:
+            self.camera_error = True
+            self.error_message = str(e)
+            if self.cap:
+                self.cap.release()
+                self.cap = None
+
+    def update_frame(self):
+        """Capture and update frame from camera"""
+        if self.camera_error or not self.cap:
+            return
+
+        try:
+            ret, frame = self.cap.read()
+            if ret and frame is not None:
+                self.current_frame = frame.copy()
+                # Validate ROI when we get the first frame
+                if hasattr(self, '_first_frame_received'):
+                    self.validate_and_clamp_roi()
+                    self._first_frame_received = True
+                self.update()
+        except Exception as e:
+            if not self.camera_error:
+                self.camera_error = True
+                self.error_message = f"Camera error: {str(e)}"
+
+    def get_scaled_roi(self) -> QRect:
+        """Get ROI scaled to current widget size"""
+        if self.current_frame is None or self.camera_error:  # Changed from 'if not self.current_frame'
+            return self.roi_rect
+
+        # Get frame dimensions
+        h, w = self.current_frame.shape[:2]
+
+        # Calculate scale based on widget size
+        widget_aspect = self.width() / self.height()
+        frame_aspect = w / h
+
+        if widget_aspect > frame_aspect:
+            scale = self.height() / h
+            offset_x = (self.width() - w * scale) / 2
+            offset_y = 0
+        else:
+            scale = self.width() / w
+            offset_x = 0
+            offset_y = (self.height() - h * scale) / 2
+
+        # Scale ROI to display coordinates
+        scaled_roi = QRect(
+            int(self.roi_rect.x() * scale + offset_x),
+            int(self.roi_rect.y() * scale + offset_y),
+            int(self.roi_rect.width() * scale),
+            int(self.roi_rect.height() * scale)
+        )
+
+        return scaled_roi
+    def validate_and_clamp_roi(self):
+        """Ensure ROI is within frame bounds"""
+        if self.current_frame is None:
+            return
+
+        h, w = self.current_frame.shape[:2]
+
+        # Clamp ROI to frame bounds
+        x = max(0, min(self.roi_rect.x(), w - self.min_roi_size.width()))
+        y = max(0, min(self.roi_rect.y(), h - self.min_roi_size.height()))
+        width = min(self.roi_rect.width(), w - x)
+        height = min(self.roi_rect.height(), h - y)
+
+        # Ensure minimum size
+        width = max(width, self.min_roi_size.width())
+        height = max(height, self.min_roi_size.height())
+
+        # Update ROI
+        self.roi_rect = QRect(x, y, width, height)
+
+    def display_to_frame_coords(self, display_point: QPoint) -> QPoint:
+        """Convert display coordinates to frame coordinates"""
+        if self.current_frame is None:  # Changed from 'if not self.current_frame'
+            return display_point
+
+        h, w = self.current_frame.shape[:2]
+
+        # Calculate scale and offset
+        widget_aspect = self.width() / self.height()
+        frame_aspect = w / h
+
+        if widget_aspect > frame_aspect:
+            scale = self.height() / h
+            offset_x = (self.width() - w * scale) / 2
+            offset_y = 0
+        else:
+            scale = self.width() / w
+            offset_x = 0
+            offset_y = (self.height() - h * scale) / 2
+
+        # Convert to frame coordinates
+        frame_x = int((display_point.x() - offset_x) / scale)
+        frame_y = int((display_point.y() - offset_y) / scale)
+
+        # Clamp to frame bounds
+        frame_x = max(0, min(w - 1, frame_x))
+        frame_y = max(0, min(h - 1, frame_y))
+
+        return QPoint(frame_x, frame_y)
+    def update_handles(self):
+        """Update handle positions based on current ROI"""
+        scaled_roi = self.get_scaled_roi()
+
+        # Define 8 handles: corners and edge midpoints
+        self.handles = {
+            'nw': QRect(scaled_roi.left() - 5, scaled_roi.top() - 5, 10, 10),
+            'n': QRect(scaled_roi.center().x() - 5, scaled_roi.top() - 5, 10, 10),
+            'ne': QRect(scaled_roi.right() - 5, scaled_roi.top() - 5, 10, 10),
+            'e': QRect(scaled_roi.right() - 5, scaled_roi.center().y() - 5, 10, 10),
+            'se': QRect(scaled_roi.right() - 5, scaled_roi.bottom() - 5, 10, 10),
+            's': QRect(scaled_roi.center().x() - 5, scaled_roi.bottom() - 5, 10, 10),
+            'sw': QRect(scaled_roi.left() - 5, scaled_roi.bottom() - 5, 10, 10),
+            'w': QRect(scaled_roi.left() - 5, scaled_roi.center().y() - 5, 10, 10)
+        }
+
+    def get_handle_at_pos(self, pos: QPoint) -> str:
+        """Get handle at given position"""
+        for handle_name, handle_rect in self.handles.items():
+            if handle_rect.contains(pos):
+                return handle_name
+        return None
+
+    def mousePressEvent(self, event):
+        if not self.edit_mode or event.button() != Qt.LeftButton:
+            return
+        # Add safety check
+        if self.current_frame is None:
+            return
+
+        self.update_handles()
+        handle = self.get_handle_at_pos(event.pos())
+
+        if handle:
+            self.dragging_handle = handle
+        else:
+            # Start new ROI selection
+            self.selecting_roi = True
+            self.roi_start_point = self.display_to_frame_coords(event.pos())
+            self.temp_roi = QRect(self.roi_start_point, QSize(0, 0))
+
+    def mouseMoveEvent(self, event):
+        if not self.edit_mode:
+            return
+
+        if self.current_frame is None:
+            return
+
+        if self.selecting_roi and self.roi_start_point:
+            # Update temporary ROI
+            end_point = self.display_to_frame_coords(event.pos())
+            self.temp_roi = QRect(self.roi_start_point, end_point).normalized()
+            self.update()
+
+        elif self.dragging_handle:
+            # Handle dragging logic
+            self.resize_roi_with_handle(event.pos())
+            self.update()
+
+        else:
+            # Update cursor based on hover
+            self.update_handles()
+            handle = self.get_handle_at_pos(event.pos())
+            if handle != self.hover_handle:
+                self.hover_handle = handle
+                self.update_cursor()
+
+    def mouseReleaseEvent(self, event):
+        if not self.edit_mode:
+            return
+
+        if self.current_frame is None:
+            return
+
+        if self.selecting_roi and self.temp_roi:
+            # Finalize ROI selection
+            if self.temp_roi.width() >= self.min_roi_size.width() and \
+                    self.temp_roi.height() >= self.min_roi_size.height():
+                self.roi_rect = self.temp_roi
+                self.roi_updated.emit(self.roi_rect)
+            self.temp_roi = None
+
+        self.selecting_roi = False
+        self.dragging_handle = None
+        self.roi_start_point = None
+        self.update()
+
+    def resize_roi_with_handle(self, pos: QPoint):
+        """Resize ROI based on handle drag"""
+        frame_pos = self.display_to_frame_coords(pos)
+
+        # Get current ROI bounds
+        left = self.roi_rect.left()
+        top = self.roi_rect.top()
+        right = self.roi_rect.right()
+        bottom = self.roi_rect.bottom()
+
+        # Update bounds based on which handle is being dragged
+        if 'n' in self.dragging_handle:
+            top = frame_pos.y()
+        if 's' in self.dragging_handle:
+            bottom = frame_pos.y()
+        if 'w' in self.dragging_handle:
+            left = frame_pos.x()
+        if 'e' in self.dragging_handle:
+            right = frame_pos.x()
+
+        # Create new rectangle and ensure minimum size
+        new_roi = QRect(QPoint(left, top), QPoint(right, bottom)).normalized()
+
+        if new_roi.width() >= self.min_roi_size.width() and \
+                new_roi.height() >= self.min_roi_size.height():
+            self.roi_rect = new_roi
+            self.roi_updated.emit(self.roi_rect)
+
+    def update_cursor(self):
+        """Update cursor based on hover state"""
+        cursor_map = {
+            'nw': Qt.CursorShape.SizeFDiagCursor if PYQT_VERSION == "PyQt6" else Qt.SizeFDiagCursor,
+            'ne': Qt.CursorShape.SizeBDiagCursor if PYQT_VERSION == "PyQt6" else Qt.SizeBDiagCursor,
+            'sw': Qt.CursorShape.SizeBDiagCursor if PYQT_VERSION == "PyQt6" else Qt.SizeBDiagCursor,
+            'se': Qt.CursorShape.SizeFDiagCursor if PYQT_VERSION == "PyQt6" else Qt.SizeFDiagCursor,
+            'n': Qt.CursorShape.SizeVerCursor if PYQT_VERSION == "PyQt6" else Qt.SizeVerCursor,
+            's': Qt.CursorShape.SizeVerCursor if PYQT_VERSION == "PyQt6" else Qt.SizeVerCursor,
+            'e': Qt.CursorShape.SizeHorCursor if PYQT_VERSION == "PyQt6" else Qt.SizeHorCursor,
+            'w': Qt.CursorShape.SizeHorCursor if PYQT_VERSION == "PyQt6" else Qt.SizeHorCursor,
+        }
+
+        if self.hover_handle in cursor_map:
+            self.setCursor(cursor_map[self.hover_handle])
+        else:
+            self.setCursor(Qt.CursorShape.CrossCursor if PYQT_VERSION == "PyQt6" else Qt.CrossCursor)
+
+    def opencv_to_qpixmap(self, cv_img):
+        """Convert OpenCV image to QPixmap"""
+        if cv_img is None:
+            return None
+
+        rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_image.shape
+        bytes_per_line = ch * w
+
+        qt_image = QImage(rgb_image.data, w, h, bytes_per_line,
+                          QImage.Format.Format_RGB888 if PYQT_VERSION == "PyQt6" else QImage.Format_RGB888)
+
+        return QPixmap.fromImage(qt_image)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+
+        if self.camera_error:
+            # Draw error message
+            painter.fillRect(self.rect(), QColor(40, 40, 40))
+            painter.setPen(QPen(QColor(255, 100, 100), 2))
+            painter.setFont(QFont("Arial", 12))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter if PYQT_VERSION == "PyQt6" else Qt.AlignCenter,
+                             f"Camera Error: {self.error_message}")
+
+        elif self.current_frame is not None:
+            # Draw camera feed
+            pixmap = self.opencv_to_qpixmap(self.current_frame)
+            if pixmap:
+                # Scale to fit widget
+                scaled_pixmap = pixmap.scaled(self.size(),
+                                              Qt.AspectRatioMode.KeepAspectRatio if PYQT_VERSION == "PyQt6" else Qt.KeepAspectRatio,
+                                              Qt.TransformationMode.SmoothTransformation if PYQT_VERSION == "PyQt6" else Qt.SmoothTransformation)
+
+                # Center the image
+                x = (self.width() - scaled_pixmap.width()) // 2
+                y = (self.height() - scaled_pixmap.height()) // 2
+                painter.drawPixmap(x, y, scaled_pixmap)
+
+                if self.edit_mode:
+                    # Draw overlay
+                    overlay = QPixmap(self.size())
+                    overlay.fill(Qt.GlobalColor.transparent if PYQT_VERSION == "PyQt6" else Qt.transparent)
+                    overlay_painter = QPainter(overlay)
+
+                    # Semi-transparent dark overlay
+                    overlay_painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
+
+                    # Clear the ROI area
+                    roi_to_draw = self.temp_roi if self.selecting_roi and self.temp_roi else self.roi_rect
+                    if roi_to_draw == self.roi_rect:
+                        scaled_roi = self.get_scaled_roi()
+                    else:
+                        # Scale temporary ROI
+                        if self.current_frame is not None:
+                            h, w = self.current_frame.shape[:2]
+                            scale_x = scaled_pixmap.width() / w
+                            scale_y = scaled_pixmap.height() / h
+                            scaled_roi = QRect(
+                                int(roi_to_draw.x() * scale_x + x),
+                                int(roi_to_draw.y() * scale_y + y),
+                                int(roi_to_draw.width() * scale_x),
+                                int(roi_to_draw.height() * scale_y)
+                            )
+                        else:
+                            scaled_roi = QRect()
+
+                    overlay_painter.setCompositionMode(
+                        QPainter.CompositionMode.CompositionMode_Clear if PYQT_VERSION == "PyQt6" else QPainter.CompositionMode_Clear)
+                    overlay_painter.fillRect(scaled_roi,
+                                             Qt.GlobalColor.transparent if PYQT_VERSION == "PyQt6" else Qt.transparent)
+                    overlay_painter.end()
+
+                    painter.drawPixmap(0, 0, overlay)
+
+                    # Draw ROI border
+                    painter.setPen(
+                        QPen(QColor(0, 255, 0), 2, Qt.PenStyle.DashLine if PYQT_VERSION == "PyQt6" else Qt.DashLine))
+                    painter.drawRect(scaled_roi)
+
+                    # Draw dimensions
+                    dim_text = f"{roi_to_draw.width()} × {roi_to_draw.height()}"
+                    painter.setPen(QPen(QColor(255, 255, 255), 1))
+                    painter.setFont(QFont("Arial", 12))
+                    text_rect = painter.fontMetrics().boundingRect(dim_text)
+                    text_pos = scaled_roi.center() - QPoint(text_rect.width() // 2, text_rect.height() // 2)
+                    painter.fillRect(text_rect.translated(text_pos), QColor(0, 0, 0, 150))
+                    painter.drawText(text_pos, dim_text)
+
+                    # Draw handles if not selecting
+                    if not self.selecting_roi:
+                        self.update_handles()
+                        for handle_name, handle_rect in self.handles.items():
+                            if handle_name == self.hover_handle or handle_name == self.dragging_handle:
+                                painter.fillRect(handle_rect, QColor(0, 255, 0))
+                            else:
+                                painter.fillRect(handle_rect, QColor(255, 255, 255))
+                            painter.setPen(QPen(QColor(0, 0, 0), 1))
+                            painter.drawRect(handle_rect)
+
+    def cleanup(self):
+        """Clean up camera resources"""
+        if hasattr(self, 'frame_timer'):
+            self.frame_timer.stop()
+        if hasattr(self, 'cap') and self.cap:
+            self.cap.release()
+
+
+class ROIAdjustmentDialog(QDialog):
+    """Dialog for adjusting ROI with visual and numerical controls"""
+
+    def __init__(self, camera_index, current_roi, parent=None):
+        super().__init__(parent)
+        self.camera_index = camera_index
+        self.original_roi = QRect(current_roi)
+        self.current_roi = QRect(current_roi)
+
+        self.setModal(True)
+        self.setWindowTitle("Adjust ROI - Region of Interest")
+        self.resize(1000, 700)
+
+        self.init_ui()
+        self.connect_signals()
+        self.update_spinboxes()
+
+    def init_ui(self):
+        """Initialize the UI"""
+        layout = QVBoxLayout()
+
+        # Instructions
+        instructions = QLabel(
+            "Click and drag to create a new ROI, or drag the handles to adjust the existing ROI. "
+            "You can also use the number inputs below for precise control."
+        )
+        instructions.setWordWrap(True)
+        instructions.setStyleSheet("padding: 10px; background-color: #f0f0f0; border-radius: 5px;")
+        layout.addWidget(instructions)
+
+        # Camera widget
+        self.camera_widget = InteractiveROIWidget(self.camera_index)
+        self.camera_widget.edit_mode = True
+        self.camera_widget.roi_rect = self.current_roi
+        layout.addWidget(self.camera_widget, stretch=1)
+
+        # Controls section
+        controls_layout = QHBoxLayout()
+
+        # Position group
+        pos_group = QGroupBox("Position")
+        pos_layout = QFormLayout()
+
+        self.x_spin = QSpinBox()
+        self.x_spin.setRange(0, 9999)
+        self.x_spin.setSuffix(" px")
+
+        self.y_spin = QSpinBox()
+        self.y_spin.setRange(0, 9999)
+        self.y_spin.setSuffix(" px")
+
+        pos_layout.addRow("X:", self.x_spin)
+        pos_layout.addRow("Y:", self.y_spin)
+        pos_group.setLayout(pos_layout)
+        controls_layout.addWidget(pos_group)
+
+        # Size group
+        size_group = QGroupBox("Size")
+        size_layout = QFormLayout()
+
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(100, 9999)
+        self.width_spin.setSuffix(" px")
+
+        self.height_spin = QSpinBox()
+        self.height_spin.setRange(100, 9999)
+        self.height_spin.setSuffix(" px")
+
+        size_layout.addRow("Width:", self.width_spin)
+        size_layout.addRow("Height:", self.height_spin)
+        size_group.setLayout(size_layout)
+        controls_layout.addWidget(size_group)
+
+        # Quick actions
+        actions_group = QGroupBox("Quick Actions")
+        actions_layout = QVBoxLayout()
+
+        center_btn = QPushButton("Center ROI")
+        center_btn.clicked.connect(self.center_roi)
+
+        maximize_btn = QPushButton("Maximize ROI")
+        maximize_btn.clicked.connect(self.maximize_roi)
+
+        reset_btn = QPushButton("Reset to Original")
+        reset_btn.clicked.connect(self.reset_roi)
+
+        actions_layout.addWidget(center_btn)
+        actions_layout.addWidget(maximize_btn)
+        actions_layout.addWidget(reset_btn)
+        actions_group.setLayout(actions_layout)
+        controls_layout.addWidget(actions_group)
+
+        layout.addLayout(controls_layout)
+
+        # Status bar
+        self.status_label = QLabel("ROI: Ready")
+        self.status_label.setStyleSheet("padding: 5px; background-color: #e0e0e0;")
+        layout.addWidget(self.status_label)
+
+        # Dialog buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.save_btn = QPushButton("Save")
+        self.save_btn.clicked.connect(self.accept)
+        self.save_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; padding: 8px 20px; }")
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self.reject)
+        self.cancel_btn.setStyleSheet("QPushButton { padding: 8px 20px; }")
+
+        button_layout.addWidget(self.save_btn)
+        button_layout.addWidget(self.cancel_btn)
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+    def connect_signals(self):
+        """Connect widget signals"""
+        # Camera widget ROI updates
+        self.camera_widget.roi_updated.connect(self.on_roi_updated)
+
+        # Spinbox changes
+        self.x_spin.valueChanged.connect(self.on_spinbox_changed)
+        self.y_spin.valueChanged.connect(self.on_spinbox_changed)
+        self.width_spin.valueChanged.connect(self.on_spinbox_changed)
+        self.height_spin.valueChanged.connect(self.on_spinbox_changed)
+
+    def on_roi_updated(self, roi: QRect):
+        """Handle ROI updates from camera widget"""
+        self.current_roi = roi
+        self.update_spinboxes()
+        self.update_status()
+
+    def update_spinboxes(self):
+        """Update spinboxes with current ROI values"""
+        # Temporarily disconnect to avoid recursion
+        self.x_spin.blockSignals(True)
+        self.y_spin.blockSignals(True)
+        self.width_spin.blockSignals(True)
+        self.height_spin.blockSignals(True)
+
+        self.x_spin.setValue(self.current_roi.x())
+        self.y_spin.setValue(self.current_roi.y())
+        self.width_spin.setValue(self.current_roi.width())
+        self.height_spin.setValue(self.current_roi.height())
+
+        # Reconnect signals
+        self.x_spin.blockSignals(False)
+        self.y_spin.blockSignals(False)
+        self.width_spin.blockSignals(False)
+        self.height_spin.blockSignals(False)
+
+    def on_spinbox_changed(self):
+        """Handle spinbox value changes"""
+        new_roi = QRect(
+            self.x_spin.value(),
+            self.y_spin.value(),
+            self.width_spin.value(),
+            self.height_spin.value()
+        )
+
+        self.current_roi = new_roi
+        self.camera_widget.roi_rect = new_roi
+        self.camera_widget.update()
+        self.update_status()
+
+    def center_roi(self):
+        """Center ROI in frame"""
+        if self.camera_widget.current_frame is not None:
+            h, w = self.camera_widget.current_frame.shape[:2]
+            roi_w = min(self.current_roi.width(), w - 20)
+            roi_h = min(self.current_roi.height(), h - 20)
+
+            new_x = (w - roi_w) // 2
+            new_y = (h - roi_h) // 2
+
+            self.current_roi = QRect(new_x, new_y, roi_w, roi_h)
+            self.camera_widget.roi_rect = self.current_roi
+            self.camera_widget.update()
+            self.update_spinboxes()
+            self.update_status()
+
+    def maximize_roi(self):
+        """Maximize ROI to frame size with margin"""
+        if self.camera_widget.current_frame is not None:
+            h, w = self.camera_widget.current_frame.shape[:2]
+            margin = 10
+
+            self.current_roi = QRect(margin, margin, w - 2 * margin, h - 2 * margin)
+            self.camera_widget.roi_rect = self.current_roi
+            self.camera_widget.update()
+            self.update_spinboxes()
+            self.update_status()
+
+    def reset_roi(self):
+        """Reset ROI to original values"""
+        self.current_roi = QRect(self.original_roi)
+        self.camera_widget.roi_rect = self.current_roi
+        self.camera_widget.update()
+        self.update_spinboxes()
+        self.update_status()
+
+    def update_status(self):
+        """Update status label"""
+        status = f"ROI: {self.current_roi.x()}, {self.current_roi.y()}, {self.current_roi.width()}×{self.current_roi.height()}"
+        if self.current_roi != self.original_roi:
+            status += " (modified)"
+        self.status_label.setText(status)
+
+    def get_roi(self) -> Tuple[int, int, int, int]:
+        """Get current ROI as tuple"""
+        return (self.current_roi.x(), self.current_roi.y(),
+                self.current_roi.width(), self.current_roi.height())
+
+    def cleanup(self):
+        """Clean up resources"""
+        if hasattr(self, 'camera_widget'):
+            self.camera_widget.cleanup()
+
+
+def load_roi_from_config(config_path="config.json", max_width=640, max_height=480) -> Tuple[int, int, int, int]:
+    """Load ROI from config file and validate bounds"""
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+            roi_config = config.get("detector_roi", {})
+
+            # Get values from config
+            x = roi_config.get("x", 125)
+            y = roi_config.get("y", 200)
+            w = roi_config.get("w", 1550)
+            h = roi_config.get("h", 500)
+
+            # Validate and clamp to reasonable defaults
+            # This assumes a typical webcam resolution, actual validation
+            # will happen when camera frame is available
+            x = max(0, min(x, max_width - 100))
+            y = max(0, min(y, max_height - 100))
+            w = min(w, max_width - x)
+            h = min(h, max_height - y)
+
+            # Ensure minimum size
+            w = max(w, 100)
+            h = max(h, 100)
+
+            return (x, y, w, h)
+
+    except Exception as e:
+        print(f"Error loading ROI from config: {e}")
+        # Return sensible defaults for typical webcam
+        return (50, 50, 400, 300)
+
+def save_roi_to_config(x: int, y: int, w: int, h: int, config_path="config.json") -> bool:
+    """Save ROI to config file"""
+    try:
+        # Load existing config
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+
+        # Update ROI section
+        config["detector_roi"] = {
+            "x": x,
+            "y": y,
+            "w": w,
+            "h": h
+        }
+
+        # Save back to file
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=4)
+
+        print(f"ROI saved to config: {x}, {y}, {w}×{h}")
+        return True
+
+    except Exception as e:
+        print(f"Error saving ROI to config: {e}")
+        return False
 
 class StartupScreen(QWidget):
     """System startup and initialization screen"""
@@ -222,9 +911,13 @@ class ConfigurationScreen(QWidget):
         super().__init__()
         self.available_cameras = []
         self.current_camera_index = 0
+
+        # Load ROI from config
+        roi_tuple = load_roi_from_config()
+        self.current_roi = QRect(roi_tuple[0], roi_tuple[1], roi_tuple[2], roi_tuple[3])
+
         self.init_ui()
         self.detect_cameras()
-
     def detect_cameras(self):
         """Detect available cameras and populate dropdown"""
         print("🔍 Detecting available cameras...")
@@ -306,6 +999,7 @@ class ConfigurationScreen(QWidget):
         preview_layout = QVBoxLayout(preview_group)
 
         self.camera_preview = RealCameraWidget(camera_index=0, show_roi=True)
+        self.camera_preview.roi_rect = self.current_roi  # Set loaded ROI
         self.camera_preview.setMinimumHeight(400)  # Taller for better view
         preview_layout.addWidget(self.camera_preview)
 
@@ -439,10 +1133,37 @@ class ConfigurationScreen(QWidget):
             self.roi_status.setStyleSheet("color: green; font-weight: bold;")
 
     def adjust_roi(self):
-        """Adjust ROI settings (placeholder for now)"""
-        QMessageBox.information(self, "ROI Adjustment",
-                                "ROI adjustment will be available in the next update.\n\nCurrently using default ROI settings.")
+        """Launch ROI adjustment dialog"""
+        # Make sure we have a valid camera index
+        if not self.available_cameras:
+            QMessageBox.warning(self, "No Camera",
+                                "No camera available. Please connect a camera and refresh.")
+            return
 
+        # Launch ROI adjustment dialog
+        dialog = ROIAdjustmentDialog(self.current_camera_index, self.current_roi, self)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted if PYQT_VERSION == "PyQt6" else dialog.exec_() == QDialog.Accepted:
+            # Get new ROI
+            roi_tuple = dialog.get_roi()
+            self.current_roi = QRect(roi_tuple[0], roi_tuple[1], roi_tuple[2], roi_tuple[3])
+
+            # Update preview
+            self.camera_preview.roi_rect = self.current_roi
+            self.camera_preview.update()
+
+            # Save to config
+            if save_roi_to_config(roi_tuple[0], roi_tuple[1], roi_tuple[2], roi_tuple[3]):
+                self.roi_status.setText("ROI Status: ✅ Updated and saved")
+                self.roi_status.setStyleSheet("color: green; font-weight: bold;")
+                QMessageBox.information(self, "ROI Saved",
+                                        f"ROI updated to: {roi_tuple[0]}, {roi_tuple[1]}, {roi_tuple[2]}×{roi_tuple[3]}")
+            else:
+                self.roi_status.setText("ROI Status: ⚠️ Updated but not saved")
+                self.roi_status.setStyleSheet("color: orange; font-weight: bold;")
+
+        # Clean up dialog
+        dialog.cleanup()
     def on_strategy_changed(self, strategy):
         """Handle strategy change"""
         if "Secondary" in strategy:
@@ -489,7 +1210,9 @@ class RealCameraWidget(QWidget):
         self.setMinimumHeight(300)
         self.camera_index = camera_index
         self.show_roi = show_roi
-        self.roi_rect = QRect(50, 50, 500, 200)
+        # Load ROI from config
+        roi_tuple = load_roi_from_config()
+        self.roi_rect = QRect(roi_tuple[0], roi_tuple[1], roi_tuple[2], roi_tuple[3])
         self.current_frame = None
         self.camera_error = False
         self.error_message = ""

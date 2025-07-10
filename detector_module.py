@@ -212,43 +212,6 @@ class ConveyorDetector:
         # If we get here, use manual calibration
         return self.calibrate(frame)
 
-    def calibrate(self, frame):
-        """Select ROI for the conveyor belt and initialize background model
-
-        Args:
-            frame: Video frame to use for ROI selection
-
-        Returns:
-            Tuple[int, int, int, int]: Selected ROI (x, y, width, height)
-        """
-        logger.info("Starting manual ROI calibration")
-        print("\nSelect the conveyor belt region (ROI)...")
-        print("Draw a rectangle with your mouse, then press ENTER or SPACE to confirm")
-        roi = cv2.selectROI("Select Conveyor Belt ROI", frame, showCrosshair=False)
-        cv2.destroyWindow("Select Conveyor Belt ROI")
-
-        with self.lock:
-            self.set_roi(frame, roi)
-
-            # Save ROI to config if available
-            if self.config_manager:
-                roi_config = {
-                    "x": roi[0],
-                    "y": roi[1],
-                    "w": roi[2],
-                    "h": roi[3]
-                }
-                self.config_manager.update_section("detector_roi", roi_config)
-
-                # Set load_roi_from_config to True to use this ROI in the future
-                self.config["load_roi_from_config"] = True
-                self.config_manager.set("detector", "load_roi_from_config", True)
-
-                self.config_manager.save_config()
-                logger.info("ROI saved to configuration and load_roi_from_config set to True")
-
-        return roi
-
     def set_roi(self, frame, roi):
         """Set the ROI and initialize related zones and background model
 
