@@ -5,11 +5,8 @@ Mock GUI for testing layout and functionality without hardware dependencies
 """
 
 import sys
-import random
 import time
 import cv2
-import numpy as np
-from typing import Dict, List, Tuple, Optional
 
 # PyQt imports with fallback
 try:
@@ -715,6 +712,9 @@ class SortingInterface(QWidget):
         self.current_piece = None
         self.uptime_start = time.time()
 
+        # Add placeholder for pieces queue (will be populated by real detector)
+        self.pieces_queue = []
+
         self.init_ui()
         self.setup_timers()
 
@@ -790,71 +790,57 @@ class SortingInterface(QWidget):
         self.setLayout(layout)
 
     def setup_timers(self):
-        """Setup timers for simulation"""
+        """Setup timers for updates"""
         # Timer for updating status
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self.update_status)
         self.status_timer.start(1000)  # Update every second
 
-        # Timer for processing pieces (mock simulation)
-        self.process_timer = QTimer()
-        self.process_timer.timeout.connect(self.process_piece)
-        self.process_timer.start(random.randint(3000, 7000))  # Random processing
+        # Note: Real piece processing will be triggered by the detector module
+        # For now, we'll just have the status update timer
 
     def toggle_pause(self):
         """Toggle pause state"""
         self.is_paused = not self.is_paused
         if self.is_paused:
             self.pause_btn.setText("▶️ RESUME")
-            self.camera_widget.animation_timer.stop()
-            self.process_timer.stop()
+            # Pause camera updates
+            if hasattr(self.camera_widget, 'frame_timer'):
+                self.camera_widget.frame_timer.stop()
         else:
             self.pause_btn.setText("⏸️ PAUSE")
-            self.camera_widget.animation_timer.start(50)
-            self.process_timer.start(random.randint(3000, 7000))
+            # Resume camera updates
+            if hasattr(self.camera_widget, 'frame_timer'):
+                self.camera_widget.frame_timer.start(33)
 
-    def process_piece(self):
-        """Simulate processing a piece"""
-        if not self.is_paused and self.camera_widget.pieces:
-            # Find a piece to process
-            piece = random.choice(self.camera_widget.pieces)
-            piece.status = "processing"
+    def process_piece_detected(self, piece_data):
+        """Called when detector detects a piece (placeholder for integration)"""
+        # This method will be called by the real detector
+        # For now, just update the UI
+        self.current_piece = piece_data
+        self.update_recent_piece()
+        self.processed_count += 1
 
-            # Update piece info
-            self.current_piece = piece
-            self.update_recent_piece()
-
-            # Simulate processing time then assign to bin
-            QTimer.singleShot(1500, lambda: self.complete_processing(piece))
-
-        # Reset timer
-        self.process_timer.start(random.randint(3000, 7000))
-
-    def complete_processing(self, piece):
-        """Complete piece processing"""
-        if piece in self.camera_widget.pieces:
-            self.processed_count += 1
-            self.bin_counts[piece.bin_number] += 1
-            self.update_bin_counts()
-            piece.status = "captured"
+        # Simulate bin assignment (will come from real sorting module)
+        bin_number = piece_data.get('bin_number', 0)
+        self.bin_counts[bin_number] += 1
+        self.update_bin_counts()
 
     def update_recent_piece(self):
         """Update recent piece display"""
         if self.current_piece:
-            piece = self.current_piece
-            info_text = f"""🖼️ [IMG] Element ID: {piece.element_id}
-          Name: {piece.name}
-          Category: {piece.category}
-          → Bin {piece.bin_number}
-          Confidence: {piece.confidence:.0%}
-          Processing: {piece.processing_time:.1f}s"""
+            # Display placeholder info until real data is available
+            info_text = f"""Waiting for piece detection...
+
+Camera feed is active.
+Real-time detection will appear here."""
             self.recent_info.setText(info_text)
 
     def update_bin_counts(self):
         """Update bin count displays"""
         bin_assignments = [
-            "Overflow", "Basic Bricks", "Plates", "Curves",
-            "Technic", "Unassigned", "Unassigned", "Unassigned"
+            "Overflow", "Dynamic", "Dynamic", "Dynamic",
+            "Dynamic", "Dynamic", "Dynamic", "Dynamic"
         ]
 
         for i, (assignment, count) in enumerate(zip(bin_assignments, self.bin_counts)):
@@ -868,19 +854,34 @@ class SortingInterface(QWidget):
             minutes = int((uptime % 3600) // 60)
             seconds = int(uptime % 60)
 
-            queue_size = len(self.camera_widget.pieces)
-            fps = 28.5  # Mock FPS
+            # Use the placeholder queue for now
+            queue_size = len(self.pieces_queue)
+
+            # Calculate actual FPS from camera widget if available
+            fps = 30.0  # Default
+            if hasattr(self.camera_widget, 'cap') and self.camera_widget.cap:
+                try:
+                    fps = self.camera_widget.cap.get(cv2.CAP_PROP_FPS)
+                except:
+                    fps = 30.0
 
             status_text = (f"Status: {'Paused' if self.is_paused else 'Running'} | "
                            f"Processed: {self.processed_count} pieces | "
                            f"Queue: {queue_size}")
 
-            detail_text = (f"FPS: {fps} | "
+            # Check camera status
+            camera_status = "Connected" if not self.camera_widget.camera_error else "Error"
+
+            detail_text = (f"FPS: {fps:.1f} | "
                            f"Uptime: {hours:02d}:{minutes:02d}:{seconds:02d} | "
-                           f"Servo: Connected")
+                           f"Camera: {camera_status}")
 
             self.status_bar.setText(f"{status_text}\n{detail_text}")
 
+    def cleanup(self):
+        """Clean up resources when stopping"""
+        if hasattr(self, 'camera_widget'):
+            self.camera_widget.cleanup()
 
 class LegoSortingGUI(QMainWindow):
     """Main application window"""
@@ -941,9 +942,15 @@ class LegoSortingGUI(QMainWindow):
         self.config_screen.cleanup()
 
         self.sorting_screen = SortingInterface(config)
-        self.sorting_screen.stop_requested.connect(self.show_mode_selection)
+        self.sorting_screen.stop_requested.connect(lambda: self.stop_sorting())
         self.stacked_widget.addWidget(self.sorting_screen)
         self.stacked_widget.setCurrentWidget(self.sorting_screen)
+
+    def stop_sorting(self):
+        """Stop sorting and return to mode selection"""
+        if hasattr(self, 'sorting_screen'):
+            self.sorting_screen.cleanup()
+        self.show_mode_selection()
 
     def closeEvent(self, event):
         """Handle application close"""
