@@ -1044,6 +1044,7 @@ class ConfigurationScreen(QWidget):
 
         preview_layout.addLayout(roi_status_layout)
         config_layout.addWidget(preview_group)
+        layout.addLayout(config_layout)
 
         # Advanced settings
         self.advanced_group = QGroupBox("Advanced Settings")

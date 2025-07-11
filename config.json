@@ -75,10 +75,10 @@
         "retry_delay": 1.0
     },
     "detector_roi": {
-        "x": 45,
-        "y": 115,
-        "w": 550,
-        "h": 250
+        "x": 43,
+        "y": 112,
+        "w": 554,
+        "h": 255
     },
     "exit_zone_trigger": {
         "enabled": true,
