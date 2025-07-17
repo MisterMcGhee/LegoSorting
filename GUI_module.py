@@ -10,7 +10,7 @@ import cv2
 import json
 import csv
 import os
-from typing import Tuple
+from typing import Tuple, Dict, Optional, List
 
 # PyQt imports with fallback
 try:
@@ -33,6 +33,232 @@ except ImportError:
         sys.exit(1)
 
 
+class BinAssignmentWidget(QWidget):
+    """Widget for configuring bin assignments"""
+
+    def __init__(self, max_bins=7, parent=None):
+        super().__init__(parent)
+        self.max_bins = max_bins
+        self.category_database = None
+        self.current_strategy = "primary"
+        self.target_primary = ""
+        self.target_secondary = ""
+
+        # Store bin assignment dropdowns
+        self.bin_combos = {}
+
+        self.init_ui()
+
+    def init_ui(self):
+        """Initialize the bin assignment UI"""
+        layout = QVBoxLayout()
+        layout.setSpacing(5)
+
+        # Title
+        title = QLabel("Bin Assignments")
+        title.setStyleSheet("font-weight: bold; margin-bottom: 5px;")
+        layout.addWidget(title)
+
+        # Instructions
+        instructions = QLabel("Assign specific categories to bins.\nUnassigned bins will use dynamic allocation.")
+        instructions.setStyleSheet("color: #666; font-size: 10px; margin-bottom: 10px;")
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+
+        # Scroll area for bin assignments
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMaximumHeight(300)
+
+        # Container for bin assignment rows
+        self.bins_container = QWidget()
+        self.bins_layout = QVBoxLayout(self.bins_container)
+        self.bins_layout.setSpacing(3)
+
+        # Create bin assignment rows
+        self.create_bin_rows()
+
+        scroll_area.setWidget(self.bins_container)
+        layout.addWidget(scroll_area)
+
+        # Clear all button
+        clear_btn = QPushButton("Clear All Assignments")
+        clear_btn.setMaximumHeight(25)
+        clear_btn.clicked.connect(self.clear_all_assignments)
+        clear_btn.setStyleSheet("QPushButton { font-size: 10px; }")
+        layout.addWidget(clear_btn)
+
+        layout.addStretch()
+        self.setLayout(layout)
+
+    def create_bin_rows(self):
+        """Create rows for bin assignments"""
+        # Clear existing rows
+        while self.bins_layout.count():
+            child = self.bins_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        self.bin_combos = {}
+
+        # Create row for each bin (skip bin 0 which is overflow)
+        for bin_num in range(1, self.max_bins + 1):
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(5)
+
+            # Bin label
+            bin_label = QLabel(f"Bin {bin_num}:")
+            bin_label.setMinimumWidth(45)
+            bin_label.setStyleSheet("font-size: 11px;")
+            row_layout.addWidget(bin_label)
+
+            # Category dropdown
+            category_combo = QComboBox()
+            category_combo.setMinimumHeight(20)
+            category_combo.setStyleSheet("font-size: 10px;")
+            category_combo.addItem("(Unassigned)")
+            category_combo.currentTextChanged.connect(self.on_assignment_changed)
+
+            row_layout.addWidget(category_combo)
+            self.bin_combos[bin_num] = category_combo
+
+            self.bins_layout.addWidget(row_widget)
+
+        # Update available categories
+        self.update_available_categories()
+
+    def set_category_database(self, category_db):
+        """Set the category database for populating dropdowns"""
+        self.category_database = category_db
+        self.update_available_categories()
+
+    def set_strategy_context(self, strategy: str, target_primary: str = "", target_secondary: str = ""):
+        """Set the current strategy context for filtering categories
+
+        Args:
+            strategy: Current sorting strategy ("primary", "secondary", "tertiary")
+            target_primary: Target primary category for secondary/tertiary sorting
+            target_secondary: Target secondary category for tertiary sorting
+        """
+        self.current_strategy = strategy
+        self.target_primary = target_primary
+        self.target_secondary = target_secondary
+        self.update_available_categories()
+
+    def update_available_categories(self):
+        """Update available categories based on current strategy"""
+        if not self.category_database:
+            return
+
+        # Get categories based on current strategy
+        available_categories = self.get_categories_for_strategy()
+
+        # Update each dropdown
+        for bin_num, combo in self.bin_combos.items():
+            # Store current selection
+            current_selection = combo.currentText()
+
+            # Block signals during update
+            combo.blockSignals(True)
+
+            # Clear and repopulate
+            combo.clear()
+            combo.addItem("(Unassigned)")
+
+            for category in sorted(available_categories):
+                combo.addItem(category)
+
+            # Restore selection if it's still valid
+            if current_selection in available_categories:
+                combo.setCurrentText(current_selection)
+            else:
+                combo.setCurrentText("(Unassigned)")
+
+            combo.blockSignals(False)
+
+    def get_categories_for_strategy(self) -> List[str]:
+        """Get available categories for current strategy"""
+        if not self.category_database:
+            return []
+
+        categories = set()
+
+        if self.current_strategy == "primary":
+            # Get all primary categories
+            categories = self.category_database.get("primary", set())
+
+        elif self.current_strategy == "secondary" and self.target_primary:
+            # Get secondary categories within target primary
+            primary_to_secondary = self.category_database.get("primary_to_secondary", {})
+            categories = primary_to_secondary.get(self.target_primary, set())
+
+        elif self.current_strategy == "tertiary" and self.target_primary and self.target_secondary:
+            # Get tertiary categories within target primary/secondary
+            secondary_to_tertiary = self.category_database.get("secondary_to_tertiary", {})
+            key = (self.target_primary, self.target_secondary)
+            categories = secondary_to_tertiary.get(key, set())
+
+        return list(categories)
+
+    def clear_all_assignments(self):
+        """Clear all bin assignments"""
+        for combo in self.bin_combos.values():
+            combo.setCurrentText("(Unassigned)")
+
+    def on_assignment_changed(self):
+        """Handle when a bin assignment changes"""
+        # Check for duplicate assignments
+        assigned_categories = {}
+
+        for bin_num, combo in self.bin_combos.items():
+            category = combo.currentText()
+            if category != "(Unassigned)":
+                if category in assigned_categories:
+                    # Duplicate found - clear this assignment
+                    combo.blockSignals(True)
+                    combo.setCurrentText("(Unassigned)")
+                    combo.blockSignals(False)
+
+                    QMessageBox.warning(self, "Duplicate Assignment",
+                                        f"Category '{category}' is already assigned to Bin {assigned_categories[category]}.")
+                else:
+                    assigned_categories[category] = bin_num
+
+    def get_assignments(self) -> Dict[str, int]:
+        """Get current bin assignments as category->bin_number mapping
+
+        Returns:
+            Dictionary mapping category names to bin numbers
+        """
+        assignments = {}
+
+        for bin_num, combo in self.bin_combos.items():
+            category = combo.currentText()
+            if category != "(Unassigned)":
+                assignments[category] = bin_num
+
+        return assignments
+
+    def set_assignments(self, assignments: Dict[str, int]):
+        """Set bin assignments from dictionary
+
+        Args:
+            assignments: Dictionary mapping category names to bin numbers
+        """
+        # Clear all first
+        self.clear_all_assignments()
+
+        # Set assignments
+        for category, bin_num in assignments.items():
+            if bin_num in self.bin_combos:
+                combo = self.bin_combos[bin_num]
+                # Check if category is available in dropdown
+                for i in range(combo.count()):
+                    if combo.itemText(i) == category:
+                        combo.setCurrentText(category)
+                        break
 class InteractiveROIWidget(QWidget):
     """Camera widget with interactive ROI selection capability"""
 
@@ -943,6 +1169,8 @@ class ModeSelectionScreen(QWidget):
 
 
 class ConfigurationScreen(QWidget):
+    """Enhanced configuration screen with bin assignment panel"""
+
     start_sorting = pyqtSignal(dict)  # Configuration dict
     back_requested = pyqtSignal()
 
@@ -951,13 +1179,6 @@ class ConfigurationScreen(QWidget):
         self.available_cameras = []
         self.current_camera_index = 0
         self.category_database = None  # Will be set by main window
-
-        # Added this line to ensure we have a default empty structure
-        self.category_database = {
-            "primary": set(),
-            "primary_to_secondary": {},
-            "secondary_to_tertiary": {}
-        }
 
         # Load ROI from config
         roi_tuple = load_roi_from_config()
@@ -969,6 +1190,12 @@ class ConfigurationScreen(QWidget):
     def set_category_database(self, category_db):
         """Set the category database for dropdowns"""
         self.category_database = category_db
+
+        # Pass to bin assignment widget
+        if hasattr(self, 'bin_assignment_widget'):
+            self.bin_assignment_widget.set_category_database(category_db)
+
+        # Refresh dropdowns if UI is already initialized
         if hasattr(self, 'strategy_combo'):
             self.on_strategy_changed(self.strategy_combo.currentText())
 
@@ -982,13 +1209,17 @@ class ConfigurationScreen(QWidget):
         title.setStyleSheet("font-size: 20px; font-weight: bold; margin: 20px;")
         layout.addWidget(title)
 
-        # Configuration options
-        config_layout = QVBoxLayout()
+        # Main configuration area - horizontal layout
+        main_config_layout = QHBoxLayout()
+        main_config_layout.setSpacing(15)
 
-        # Top row - strategy and camera selection
-        top_settings_layout = QHBoxLayout()
+        # Left side - sorting settings and bin assignments
+        left_panel = QWidget()
+        left_panel.setMaximumWidth(280)
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Left side - strategy settings
+        # Sorting strategy settings
         strategy_group = QGroupBox("Sorting Settings")
         strategy_layout = QVBoxLayout(strategy_group)
 
@@ -1009,9 +1240,21 @@ class ConfigurationScreen(QWidget):
         self.primary_combo = None
         self.secondary_combo = None
 
-        top_settings_layout.addWidget(strategy_group)
+        left_layout.addWidget(strategy_group)
 
-        # Right side - camera selection
+        # Bin assignment widget
+        self.bin_assignment_widget = BinAssignmentWidget(max_bins=7)
+        left_layout.addWidget(self.bin_assignment_widget)
+
+        left_layout.addStretch()
+        main_config_layout.addWidget(left_panel)
+
+        # Right side - camera settings and preview
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Camera selection (smaller, at top right)
         camera_group = QGroupBox("Camera Settings")
         camera_layout = QVBoxLayout(camera_group)
 
@@ -1028,16 +1271,15 @@ class ConfigurationScreen(QWidget):
         camera_row.addWidget(refresh_btn)
         camera_layout.addLayout(camera_row)
 
-        top_settings_layout.addWidget(camera_group)
-        config_layout.addLayout(top_settings_layout)
+        right_layout.addWidget(camera_group)
 
-        # Camera preview
+        # Camera preview (takes remaining space)
         preview_group = QGroupBox("Camera Preview")
         preview_layout = QVBoxLayout(preview_group)
 
         self.camera_preview = RealCameraWidget(camera_index=0, show_roi=True)
         self.camera_preview.roi_rect = self.current_roi
-        self.camera_preview.setMinimumHeight(400)
+        self.camera_preview.setMinimumHeight(350)  # Reduced from 400
         preview_layout.addWidget(self.camera_preview)
 
         # ROI status
@@ -1052,49 +1294,67 @@ class ConfigurationScreen(QWidget):
         roi_status_layout.addWidget(adjust_roi_btn)
 
         preview_layout.addLayout(roi_status_layout)
-        config_layout.addWidget(preview_group)
-        layout.addLayout(config_layout)
+        right_layout.addWidget(preview_group)
 
-        # Advanced settings
+        main_config_layout.addWidget(right_panel)
+        layout.addLayout(main_config_layout)
+
+        # Advanced settings (full width, collapsed by default)
         self.advanced_group = QGroupBox("Advanced Settings")
         self.advanced_group.setCheckable(True)
         self.advanced_group.setChecked(False)
         advanced_layout = QVBoxLayout(self.advanced_group)
 
+        # Advanced settings in horizontal layout
+        advanced_main_layout = QHBoxLayout()
+
         # Detection sensitivity
-        sens_layout = QHBoxLayout()
-        sens_layout.addWidget(QLabel("Detection Sensitivity:"))
+        sens_group = QGroupBox("Detection")
+        sens_layout = QVBoxLayout(sens_group)
+
+        sens_row = QHBoxLayout()
+        sens_row.addWidget(QLabel("Sensitivity:"))
         self.sens_slider = QSlider(Qt.Orientation.Horizontal if PYQT_VERSION == "PyQt6" else Qt.Horizontal)
         self.sens_slider.setRange(0, 100)
         self.sens_slider.setValue(80)
         self.sens_value_label = QLabel("80%")
         self.sens_slider.valueChanged.connect(lambda v: self.sens_value_label.setText(f"{v}%"))
-        sens_layout.addWidget(self.sens_slider)
-        sens_layout.addWidget(self.sens_value_label)
-        advanced_layout.addLayout(sens_layout)
+        sens_row.addWidget(self.sens_slider)
+        sens_row.addWidget(self.sens_value_label)
+        sens_layout.addLayout(sens_row)
 
         # Confidence threshold
-        conf_layout = QHBoxLayout()
-        conf_layout.addWidget(QLabel("Confidence Threshold:"))
+        conf_row = QHBoxLayout()
+        conf_row.addWidget(QLabel("Confidence:"))
         self.conf_slider = QSlider(Qt.Orientation.Horizontal if PYQT_VERSION == "PyQt6" else Qt.Horizontal)
         self.conf_slider.setRange(0, 100)
         self.conf_slider.setValue(70)
         self.conf_value_label = QLabel("70%")
         self.conf_slider.valueChanged.connect(lambda v: self.conf_value_label.setText(f"{v}%"))
-        conf_layout.addWidget(self.conf_slider)
-        conf_layout.addWidget(self.conf_value_label)
-        advanced_layout.addLayout(conf_layout)
+        conf_row.addWidget(self.conf_slider)
+        conf_row.addWidget(self.conf_value_label)
+        sens_layout.addLayout(conf_row)
 
-        # Max bins
-        bins_layout_adv = QHBoxLayout()
-        bins_layout_adv.addWidget(QLabel("Max Processing Bins:"))
+        advanced_main_layout.addWidget(sens_group)
+
+        # System settings
+        system_group = QGroupBox("System")
+        system_layout = QVBoxLayout(system_group)
+
+        bins_row = QHBoxLayout()
+        bins_row.addWidget(QLabel("Max Processing Bins:"))
         self.bins_spin = QSpinBox()
         self.bins_spin.setRange(1, 9)
         self.bins_spin.setValue(7)
-        bins_layout_adv.addWidget(self.bins_spin)
-        bins_layout_adv.addStretch()
-        advanced_layout.addLayout(bins_layout_adv)
+        self.bins_spin.valueChanged.connect(self.on_max_bins_changed)
+        bins_row.addWidget(self.bins_spin)
+        bins_row.addStretch()
+        system_layout.addLayout(bins_row)
 
+        advanced_main_layout.addWidget(system_group)
+        advanced_main_layout.addStretch()
+
+        advanced_layout.addLayout(advanced_main_layout)
         layout.addWidget(self.advanced_group)
 
         # Buttons
@@ -1126,11 +1386,19 @@ class ConfigurationScreen(QWidget):
                 if child.widget():
                     child.widget().deleteLater()
 
+            # Reset combo references
             self.primary_combo = None
             self.secondary_combo = None
 
+            # Clear bin assignments when strategy changes
+            if hasattr(self, 'bin_assignment_widget'):
+                self.bin_assignment_widget.clear_all_assignments()
+
             if not self.category_database:
                 return
+
+            target_primary = ""
+            target_secondary = ""
 
             if "Secondary" in strategy:
                 # Add primary category dropdown
@@ -1138,12 +1406,15 @@ class ConfigurationScreen(QWidget):
                 primary_row.addWidget(QLabel("Within:"))
                 self.primary_combo = QComboBox()
 
+                # Populate with sorted primary categories
                 primary_categories = sorted(self.category_database.get("primary", []))
                 self.primary_combo.addItems(primary_categories)
                 self.primary_combo.currentTextChanged.connect(self.on_primary_changed)
 
                 primary_row.addWidget(self.primary_combo)
                 self.dynamic_dropdowns_layout.addLayout(primary_row)
+
+                target_primary = self.primary_combo.currentText() if self.primary_combo.count() > 0 else ""
 
             elif "Tertiary" in strategy:
                 # Add primary category dropdown
@@ -1154,6 +1425,7 @@ class ConfigurationScreen(QWidget):
                 # Block signals during setup
                 self.primary_combo.blockSignals(True)
 
+                # Populate with sorted primary categories
                 primary_categories = sorted(self.category_database.get("primary", []))
                 self.primary_combo.addItems(primary_categories)
                 self.primary_combo.currentTextChanged.connect(self.on_primary_changed)
@@ -1172,6 +1444,19 @@ class ConfigurationScreen(QWidget):
                 self.primary_combo.blockSignals(False)
                 if self.primary_combo.count() > 0:
                     self.on_primary_changed(self.primary_combo.currentText())
+
+                target_primary = self.primary_combo.currentText() if self.primary_combo.count() > 0 else ""
+                target_secondary = self.secondary_combo.currentText() if self.secondary_combo and self.secondary_combo.count() > 0 else ""
+
+            # Update bin assignment widget with new strategy context
+            if hasattr(self, 'bin_assignment_widget'):
+                strategy_name = "primary"
+                if "Secondary" in strategy:
+                    strategy_name = "secondary"
+                elif "Tertiary" in strategy:
+                    strategy_name = "tertiary"
+
+                self.bin_assignment_widget.set_strategy_context(strategy_name, target_primary, target_secondary)
 
         except Exception as e:
             print(f"Error in on_strategy_changed: {e}")
@@ -1198,6 +1483,54 @@ class ConfigurationScreen(QWidget):
         else:
             self.secondary_combo.addItem("(No secondary categories)")
             self.secondary_combo.setEnabled(False)
+
+        # Update bin assignment widget context
+        if hasattr(self, 'bin_assignment_widget'):
+            target_secondary = self.secondary_combo.currentText() if self.secondary_combo.isEnabled() else ""
+            self.bin_assignment_widget.set_strategy_context("tertiary", primary_category, target_secondary)
+
+    def on_max_bins_changed(self, value):
+        """Handle max bins change"""
+        if hasattr(self, 'bin_assignment_widget'):
+            # Recreate bin assignment widget with new max bins
+            # Store current assignments
+            current_assignments = self.bin_assignment_widget.get_assignments()
+
+            # Remove old widget
+            self.bin_assignment_widget.setParent(None)
+
+            # Create new widget
+            self.bin_assignment_widget = BinAssignmentWidget(max_bins=value)
+            if self.category_database:
+                self.bin_assignment_widget.set_category_database(self.category_database)
+
+            # Set strategy context
+            strategy_text = self.strategy_combo.currentText()
+            strategy_name = "primary"
+            target_primary = ""
+            target_secondary = ""
+
+            if "Secondary" in strategy_text:
+                strategy_name = "secondary"
+                target_primary = self.primary_combo.currentText() if self.primary_combo else ""
+            elif "Tertiary" in strategy_text:
+                strategy_name = "tertiary"
+                target_primary = self.primary_combo.currentText() if self.primary_combo else ""
+                target_secondary = self.secondary_combo.currentText() if self.secondary_combo else ""
+
+            self.bin_assignment_widget.set_strategy_context(strategy_name, target_primary, target_secondary)
+
+            # Restore valid assignments
+            valid_assignments = {cat: bin_num for cat, bin_num in current_assignments.items()
+                                 if bin_num <= value}
+            self.bin_assignment_widget.set_assignments(valid_assignments)
+
+            # Add widget back to layout
+            # Find the left panel and add widget
+            left_panel = self.findChild(QWidget)  # This is a bit hacky, but should work
+            if left_panel:
+                left_layout = left_panel.layout()
+                left_layout.insertWidget(1, self.bin_assignment_widget)  # Insert after strategy group
 
     def detect_cameras(self):
         """Detect available cameras and populate dropdown"""
@@ -1302,17 +1635,21 @@ class ConfigurationScreen(QWidget):
             target_primary = self.primary_combo.currentText() if self.primary_combo else ""
             target_secondary = self.secondary_combo.currentText() if self.secondary_combo else ""
 
+        # Get bin assignments
+        bin_assignments = self.bin_assignment_widget.get_assignments()
+
         config = {
             "strategy": strategy,
             "target_primary": target_primary,
             "target_secondary": target_secondary,
+            "bin_assignments": bin_assignments,  # New: bin pre-assignments
             "sensitivity": self.sens_slider.value(),
             "confidence": self.conf_slider.value(),
             "max_bins": self.bins_spin.value(),
             "camera_index": self.current_camera_index
         }
 
-        # Save to actual config file
+        # Save to actual config file (but not bin assignments as per requirements)
         if hasattr(self, 'config_manager'):
             config_manager = self.config_manager
         else:
@@ -1325,8 +1662,8 @@ class ConfigurationScreen(QWidget):
         config_manager.set("sorting", "max_bins", config["max_bins"])
         config_manager.save_config()
 
+        print(f"Starting sorting with bin assignments: {bin_assignments}")
         self.start_sorting.emit(config)
-
 
 class RealCameraWidget(QWidget):
     """Real camera feed widget using OpenCV"""
