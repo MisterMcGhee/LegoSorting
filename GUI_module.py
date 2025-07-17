@@ -949,6 +949,13 @@ class ConfigurationScreen(QWidget):
         self.current_camera_index = 0
         self.category_database = None  # Will be set by main window
 
+        # Added this line to ensure we have a default empty structure
+        self.category_database = {
+            "primary": set(),
+            "primary_to_secondary": {},
+            "secondary_to_tertiary": {}
+        }
+
         # Load ROI from config
         roi_tuple = load_roi_from_config()
         self.current_roi = QRect(roi_tuple[0], roi_tuple[1], roi_tuple[2], roi_tuple[3])
@@ -959,10 +966,8 @@ class ConfigurationScreen(QWidget):
     def set_category_database(self, category_db):
         """Set the category database for dropdowns"""
         self.category_database = category_db
-        # Refresh dropdowns if UI is already initialized
         if hasattr(self, 'strategy_combo'):
             self.on_strategy_changed(self.strategy_combo.currentText())
-
     def init_ui(self):
         layout = QVBoxLayout()
         layout.setSpacing(20)
@@ -1117,12 +1122,10 @@ class ConfigurationScreen(QWidget):
                 if child.widget():
                     child.widget().deleteLater()
 
-            # Reset combo references
             self.primary_combo = None
             self.secondary_combo = None
 
             if not self.category_database:
-                print("Warning: Category database not loaded yet")
                 return
 
             if "Secondary" in strategy:
@@ -1131,7 +1134,6 @@ class ConfigurationScreen(QWidget):
                 primary_row.addWidget(QLabel("Within:"))
                 self.primary_combo = QComboBox()
 
-                # Populate with sorted primary categories
                 primary_categories = sorted(self.category_database.get("primary", []))
                 self.primary_combo.addItems(primary_categories)
                 self.primary_combo.currentTextChanged.connect(self.on_primary_changed)
@@ -1145,7 +1147,9 @@ class ConfigurationScreen(QWidget):
                 primary_row.addWidget(QLabel("Within Primary:"))
                 self.primary_combo = QComboBox()
 
-                # Populate with sorted primary categories
+                # Block signals during setup
+                self.primary_combo.blockSignals(True)
+
                 primary_categories = sorted(self.category_database.get("primary", []))
                 self.primary_combo.addItems(primary_categories)
                 self.primary_combo.currentTextChanged.connect(self.on_primary_changed)
@@ -1160,32 +1164,36 @@ class ConfigurationScreen(QWidget):
                 secondary_row.addWidget(self.secondary_combo)
                 self.dynamic_dropdowns_layout.addLayout(secondary_row)
 
-                # Trigger initial population
+                # Unblock signals and trigger initial population
+                self.primary_combo.blockSignals(False)
                 if self.primary_combo.count() > 0:
                     self.on_primary_changed(self.primary_combo.currentText())
 
         except Exception as e:
             print(f"Error in on_strategy_changed: {e}")
-            import traceback
-            traceback.print_exc()
+
     def on_primary_changed(self, primary_category):
         """Handle primary category selection for tertiary sorting"""
-        if not self.secondary_combo or not primary_category:
+        if self.secondary_combo is None or not primary_category:
             return
 
-        # Clear and populate secondary dropdown
         self.secondary_combo.clear()
 
-        # Get secondaries for selected primary
         primary_to_secondary = self.category_database.get("primary_to_secondary", {})
-        secondaries = sorted(primary_to_secondary.get(primary_category, []))
 
-        if secondaries:
-            self.secondary_combo.addItems(secondaries)
+        if primary_category in primary_to_secondary:
+            secondaries_set = primary_to_secondary[primary_category]
+            secondaries = sorted(list(secondaries_set))
+
+            if secondaries:
+                self.secondary_combo.addItems(secondaries)
+                self.secondary_combo.setEnabled(True)
+            else:
+                self.secondary_combo.addItem("(No secondary categories)")
+                self.secondary_combo.setEnabled(False)
         else:
             self.secondary_combo.addItem("(No secondary categories)")
             self.secondary_combo.setEnabled(False)
-
     def detect_cameras(self):
         """Detect available cameras and populate dropdown"""
         print("🔍 Detecting available cameras...")

@@ -33,8 +33,8 @@
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "primary",
-        "target_primary_category": "",
+        "strategy": "tertiary",
+        "target_primary_category": "Clip",
         "target_secondary_category": "",
         "max_bins": 7,
         "overflow_bin": 0
@@ -78,7 +78,7 @@
         "x": 43,
         "y": 112,
         "w": 554,
-        "h": 255
+        "h": 300
     },
     "exit_zone_trigger": {
         "enabled": true,
