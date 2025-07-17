@@ -33,8 +33,8 @@
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "tertiary",
-        "target_primary_category": "Clip",
+        "strategy": "primary",
+        "target_primary_category": "",
         "target_secondary_category": "",
         "max_bins": 7,
         "overflow_bin": 0

@@ -151,6 +151,7 @@ class InteractiveROIWidget(QWidget):
         )
 
         return scaled_roi
+
     def validate_and_clamp_roi(self):
         """Ensure ROI is within frame bounds"""
         if self.current_frame is None:
@@ -200,6 +201,7 @@ class InteractiveROIWidget(QWidget):
         frame_y = max(0, min(h - 1, frame_y))
 
         return QPoint(frame_x, frame_y)
+
     def update_handles(self):
         """Update handle positions based on current ROI"""
         scaled_roi = self.get_scaled_roi()
@@ -694,6 +696,7 @@ def load_roi_from_config(config_path="config.json", max_width=640, max_height=48
         # Return sensible defaults for typical webcam
         return (50, 50, 400, 300)
 
+
 def save_roi_to_config(x: int, y: int, w: int, h: int, config_path="config.json") -> bool:
     """Save ROI to config file"""
     try:
@@ -719,6 +722,7 @@ def save_roi_to_config(x: int, y: int, w: int, h: int, config_path="config.json"
     except Exception as e:
         print(f"Error saving ROI to config: {e}")
         return False
+
 
 class StartupScreen(QWidget):
     """System startup and initialization screen"""
@@ -939,7 +943,6 @@ class ModeSelectionScreen(QWidget):
 
 
 class ConfigurationScreen(QWidget):
-
     start_sorting = pyqtSignal(dict)  # Configuration dict
     back_requested = pyqtSignal()
 
@@ -968,6 +971,7 @@ class ConfigurationScreen(QWidget):
         self.category_database = category_db
         if hasattr(self, 'strategy_combo'):
             self.on_strategy_changed(self.strategy_combo.currentText())
+
     def init_ui(self):
         layout = QVBoxLayout()
         layout.setSpacing(20)
@@ -1194,6 +1198,7 @@ class ConfigurationScreen(QWidget):
         else:
             self.secondary_combo.addItem("(No secondary categories)")
             self.secondary_combo.setEnabled(False)
+
     def detect_cameras(self):
         """Detect available cameras and populate dropdown"""
         print("🔍 Detecting available cameras...")
@@ -1278,6 +1283,7 @@ class ConfigurationScreen(QWidget):
         """Clean up camera resources"""
         if hasattr(self, 'camera_preview'):
             self.camera_preview.cleanup()
+
     def start_sorting_clicked(self):
         """Start sorting with current configuration"""
         strategy_text = self.strategy_combo.currentText()
@@ -1726,6 +1732,7 @@ Real-time detection will appear here."""
         if hasattr(self, 'camera_widget'):
             self.camera_widget.cleanup()
 
+
 class LegoSortingGUI(QMainWindow):
     """Main application window"""
 
@@ -1784,6 +1791,7 @@ class LegoSortingGUI(QMainWindow):
             self.stacked_widget.setCurrentWidget(self.config_screen)
         else:
             QMessageBox.information(self, "Coming Soon", "Inventory mode will be available in a future update!")
+
     def start_sorting(self, config):
         """Start sorting with given configuration"""
         # Clean up configuration screen camera
