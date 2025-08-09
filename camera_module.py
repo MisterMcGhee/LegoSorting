@@ -8,6 +8,7 @@ import time
 import numpy as np
 from typing import Optional
 from error_module import CameraError
+from enhanced_config_manager import ModuleConfig
 
 # Initialize module-specific logger
 logger = logging.getLogger(__name__)
@@ -43,8 +44,15 @@ class CameraModule:
         initialization happens in _initialize_camera() for better
         error handling and potential retry logic.
         """
-        # Get device ID from config (default to device 0)
-        self.device_id = config_manager.get("camera", "device_id", 0)
+        # NEW: Get complete camera configuration with validation
+        camera_config = config_manager.get_module_config(ModuleConfig.CAMERA.value)
+
+        # NEW: All fields guaranteed to exist with proper defaults
+        self.device_id = camera_config["device_id"]
+        self.buffer_size = camera_config.get("buffer_size", 1)  # Optional field
+
+        # Store config for potential future use
+        self.config = camera_config
 
         # Camera handle - will be set during initialization
         self.cap = None

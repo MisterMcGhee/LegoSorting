@@ -18,6 +18,7 @@ import threading
 import logging
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
+from enhanced_config_manager import ModuleConfig
 
 # Set up module logger
 logger = logging.getLogger(__name__)
@@ -55,92 +56,53 @@ class TrackedPiece:
 class ConveyorDetector:
     """Detector for Lego pieces on a moving conveyor belt"""
 
-    def __init__(self, config_manager=None, thread_manager=None):
-        """Initialize the detector with optional configuration
+    def __init__(self, config_manager=None):
+        """Initialize conveyor detector with configuration
 
         Args:
-            config_manager: Optional configuration manager
-            thread_manager: Optional thread manager for asynchronous processing
+            config_manager: Configuration manager object, or None to use defaults
         """
-        logger.info("Initializing ConveyorDetector")
-
-        # Default configuration values
-        self.config = {
-            "min_piece_area": 1000,  # Minimum contour area to be considered a piece
-            "max_piece_area": 50000,  # Maximum contour area to be considered a piece
-            "bg_history": 500,  # Background subtractor history length
-            "bg_threshold": 800,  # Background subtractor threshold
-            "learn_rate": 0.005,  # Background learning rate
-            "min_updates": 5,  # Minimum updates before a piece can be captured
-            "track_timeout": 1.0,  # Time in seconds before removing stale tracks
-            "entry_zone_percent": 0.1,  # Percent of ROI width to use as entry buffer
-            "exit_zone_percent": 0.1,  # Percent of ROI width to use as exit buffer
-            "morph_kernel_size": 5,  # Kernel size for morphological operations
-            "capture_cooldown": 0.5,  # Minimum time between captures
-            "match_threshold": 50,  # Maximum distance for matching tracks
-            "roi_padding": 20,  # Padding for piece cropping
-            "gaussian_blur": 7,  # Gaussian blur kernel size
-            "processing_timeout": 60.0,  # Timeout for piece processing
-            "load_roi_from_config": True,  # Whether to load ROI from config or use manual selection
-            "text_margin_top": 40,  # Margin for text to avoid overlapping with pieces
-            "default_roi_x": 125,  # Default ROI x position
-            "default_roi_y": 200,  # Default ROI y position
-            "default_roi_w": 1600,  # Default ROI width
-            "default_roi_h": 500,  # Default ROI height
-            "show_bg_subtraction": True,  # Whether to show background subtraction in debug view
-        }
-
-        # Update with provided config manager
-        self.config_manager = config_manager
+        # NEW: Get validated configurations with all defaults
         if config_manager:
-            detector_config = config_manager.get_section("detector")
-            logger.info(f"Detector config from config_manager: {detector_config}")
-            if detector_config:
-                for key, value in detector_config.items():
-                    if key in self.config:
-                        self.config[key] = value
-                        logger.info(f"Set config[{key}] = {value}")
-
-            # Load exit zone trigger configuration
-            self.exit_zone_trigger_config = config_manager.get_section("exit_zone_trigger")
-            logger.info(f"Exit zone trigger config: {self.exit_zone_trigger_config}")
-
+            self.detector_config = config_manager.get_module_config(ModuleConfig.DETECTOR.value)
+            self.roi_config = config_manager.get_module_config(ModuleConfig.DETECTOR_ROI.value)
         else:
-            # Set default exit zone trigger config if no config manager provided
-            self.exit_zone_trigger_config = {
-                "enabled": True,
-                "fall_time": 1.0,
-                "priority_method": "rightmost",
-                "min_piece_spacing": 50,
-                "cooldown_time": 0.5
-            }
+            # Use schema defaults if no config manager
+            from enhanced_config_manager import ConfigSchema
+            self.detector_config = ConfigSchema.get_module_schema(ModuleConfig.DETECTOR.value)
+            self.roi_config = ConfigSchema.get_module_schema(ModuleConfig.DETECTOR_ROI.value)
 
-        # Store thread manager
-        self.thread_manager = thread_manager
+        # Extract detector parameters - all guaranteed to exist
+        self.min_area = self.detector_config["min_area"]
+        self.max_area = self.detector_config["max_area"]
+        self.min_aspect_ratio = self.detector_config["min_aspect_ratio"]
+        self.max_aspect_ratio = self.detector_config["max_aspect_ratio"]
+        self.edge_margin = self.detector_config["edge_margin"]
+        self.debug_mode = self.detector_config.get("debug_mode", False)
 
-        # Initialize state with thread safety
-        self.lock = threading.RLock()
-        self.roi = None  # Region of interest (x, y, width, height)
-        self.entry_zone = None  # Entry zone x coordinates (start, end)
-        self.exit_zone = None  # Exit zone x coordinates (start, end)
-        self.valid_zone = None  # Valid zone x coordinates (start, end)
-        self.bg_subtractor = None  # Background subtractor
-        self.tracked_pieces = []  # List of currently tracked pieces
-        self.next_id = 1  # ID for the next detected piece
-        self.last_capture_time = 0  # Time of last capture
-        self.frame_count = 0  # Counter for processed frames
-        self.latest_debug_frame = None  # Store latest debug frame
+        # Extract ROI parameters - all guaranteed to exist
+        self.roi_x = self.roi_config["x"]
+        self.roi_y = self.roi_config["y"]
+        self.roi_w = self.roi_config["w"]
+        self.roi_h = self.roi_config["h"]
+        self.entry_zone_width = self.roi_config["entry_zone_width"]
+        self.exit_zone_width = self.roi_config["exit_zone_width"]
 
-        # Exit zone tracking
-        self.pieces_in_exit_zone = []  # List of pieces currently in exit zone
-        self.current_priority_piece = None  # Current priority piece in exit zone
-        self.last_servo_trigger_time = 0  # Time of last servo trigger
-        self.last_exit_zone_check_time = 0  # Time of last exit zone check
+        # Calculate zone boundaries
+        self.entry_boundary = self.roi_x + self.entry_zone_width
+        self.exit_boundary = self.roi_x + self.roi_w - self.exit_zone_width
 
-        # Performance tracking
-        self.start_time = time.time()
-        self.fps = 0
-        self.last_fps_update = 0
+        # Initialize tracking structures
+        self.tracked_pieces = {}
+        self.piece_id_counter = 0
+        self.background_subtractor = cv2.createBackgroundSubtractorMOG2(
+            detectShadows=False
+        )
+
+        # Debug settings
+        if self.debug_mode:
+            logger.info(f"ConveyorDetector initialized with ROI: "
+                        f"({self.roi_x}, {self.roi_y}, {self.roi_w}, {self.roi_h})")
 
     def load_roi_from_config(self, frame, config_manager=None):
         """Load ROI from configuration if available, otherwise calibrate manually.

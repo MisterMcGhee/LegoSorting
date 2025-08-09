@@ -10,8 +10,7 @@ import time
 import logging
 import serial
 import threading
-
-# Get module logger
+from enhanced_config_manager import ModuleConfig
 logger = logging.getLogger(__name__)
 
 
@@ -24,53 +23,50 @@ class ArduinoServoModule:
         Args:
             config_manager: Configuration manager object, or None to use defaults
         """
-        # Default configuration values
-        self.port = "/dev/ttyACM0"  # Default Arduino port on Linux
+        # Initialize with defaults first
+        self.port = "/dev/ttyACM0"
         self.baud_rate = 9600
         self.timeout = 2.0
         self.connection_retries = 3
         self.retry_delay = 1.0
-        self.min_pulse = 500  # Default pulse width for 0 degrees (in microseconds)
-        self.max_pulse = 2500  # Default pulse width for 180 degrees (in microseconds)
-        self.default_position = 90  # Center position in degrees
+        self.min_pulse = 500
+        self.max_pulse = 2500
+        self.default_position = 90
         self.calibration_mode = False
         self.simulation_mode = False
-        self.min_bin_separation = 20  # Minimum degrees between bins
+        self.min_bin_separation = 20
 
-        # Initialize bin positions dictionary (will be calculated dynamically)
+        # Initialize bin positions dictionary
         self.bin_positions = {}
-        self.current_bin = None  # Currently selected bin
+        self.current_bin = None
 
-        # Use config if provided, otherwise use defaults
+        # Use config if provided
         if config_manager:
             self.config_manager = config_manager
-            arduino_config = config_manager.get_section("arduino_servo")
 
-            if arduino_config:
-                self.port = arduino_config.get("port", self.port)
-                self.baud_rate = arduino_config.get("baud_rate", self.baud_rate)
-                self.timeout = arduino_config.get("timeout", self.timeout)
-                self.connection_retries = arduino_config.get("connection_retries", self.connection_retries)
-                self.retry_delay = arduino_config.get("retry_delay", self.retry_delay)
-                # Get simulation_mode from config
-                self.simulation_mode = arduino_config.get("simulation_mode", False)
+            # NEW: Get complete validated configurations
+            arduino_config = config_manager.get_module_config(ModuleConfig.ARDUINO_SERVO.value)
+            servo_config = config_manager.get_module_config(ModuleConfig.SERVO.value)
+            sorting_config = config_manager.get_module_config(ModuleConfig.SORTING.value)
 
-            servo_config = config_manager.get_section("servo")
-            if servo_config:
-                self.min_pulse = servo_config.get("min_pulse", self.min_pulse)
-                self.max_pulse = servo_config.get("max_pulse", self.max_pulse)
-                self.default_position = servo_config.get("default_position", self.default_position)
-                self.calibration_mode = servo_config.get("calibration_mode", False)
-                self.min_bin_separation = servo_config.get("min_bin_separation", self.min_bin_separation)
+            # Apply Arduino servo settings - all fields guaranteed
+            self.port = arduino_config["port"]
+            self.baud_rate = arduino_config["baud_rate"]
+            self.timeout = arduino_config["timeout"]
+            self.connection_retries = arduino_config["connection_retries"]
+            self.retry_delay = arduino_config["retry_delay"]
+            self.simulation_mode = arduino_config["simulation_mode"]
 
-            # Load max_bins from sorting config for bin position calculation
-            sorting_config = config_manager.get_section("sorting")
-            if sorting_config:
-                self.max_bins = sorting_config.get("max_bins", 9)
-                self.overflow_bin = sorting_config.get("overflow_bin", 0)  # Now using bin 0 as overflow
-            else:
-                self.max_bins = 9
-                self.overflow_bin = 0
+            # Apply servo settings - all fields guaranteed
+            self.min_pulse = servo_config["min_pulse"]
+            self.max_pulse = servo_config["max_pulse"]
+            self.default_position = servo_config["default_position"]
+            self.calibration_mode = servo_config["calibration_mode"]
+            self.min_bin_separation = servo_config["min_bin_separation"]
+
+            # Get bin configuration from sorting
+            self.max_bins = sorting_config["max_bins"]
+            self.overflow_bin = sorting_config["overflow_bin"]
         else:
             self.config_manager = None
             self.max_bins = 9
@@ -79,21 +75,21 @@ class ArduinoServoModule:
         # Initialize connection variables
         self.arduino = None
         self.initialized = False
-        self.lock = threading.RLock()  # For thread safety
+        self.lock = threading.RLock()
 
         # Calculate bin positions dynamically
         self._calculate_bin_positions()
 
-        # If simulation mode is enabled in config, skip Arduino connection
+        # If simulation mode is enabled, skip Arduino connection
         if self.simulation_mode:
-            logger.info("Simulation mode enabled in config. Skipping Arduino connection.")
-            print("Simulation mode enabled in config. Skipping Arduino connection.")
+            logger.info("Simulation mode enabled. Skipping Arduino connection.")
+            print("Simulation mode enabled. Skipping Arduino connection.")
             self.initialized = True
         else:
             # Connect to Arduino
             self._connect_to_arduino()
 
-        # Run initialization test sequence if connection is successful
+        # Run initialization test sequence if connection successful
         if self.initialized:
             self._run_initialization_test_sequence()
 
@@ -101,7 +97,7 @@ class ArduinoServoModule:
         if self.calibration_mode and self.initialized:
             print("Starting servo calibration mode...")
             self.calibrate()
-            # Turn off calibration mode in config after running
+            # Turn off calibration mode after running
             if self.config_manager:
                 self.config_manager.set("servo", "calibration_mode", False)
                 self.config_manager.save_config()

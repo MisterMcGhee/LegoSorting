@@ -11,6 +11,7 @@ import numpy as np
 import time
 import os
 from typing import Dict, Any, List, Tuple, Optional, Union
+from enhanced_config_manager import ModuleConfig
 
 
 class UIManager:
@@ -33,48 +34,18 @@ class UIManager:
         self.current_piece_data = None
         self.current_piece_image = None
 
-        # Default configuration
-        self.config = {
-            "panels": {
-                "metrics_dashboard": True,
-                "processed_piece": True,
-                "sorting_information": True,
-                "help_overlay": True
-            },
-            "opacity": 0.7,
-            "colors": {
-                "panel_bg": (30, 30, 30),
-                "text": (255, 255, 255),
-                "roi": (0, 255, 0),
-                "entry_zone": (255, 0, 0),
-                "exit_zone": (0, 0, 255),
-                "active_piece": (0, 0, 255),
-                "captured_piece": (0, 255, 0),
-                "processing_piece": (255, 0, 255),
-                "highlight": (0, 255, 255),
-                "error": (0, 0, 255)
-            }
-        }
-
-        # Update with provided config manager
+        # NEW: Get complete UI configuration or use defaults
         if config_manager:
-            ui_config = config_manager.get_section("ui")
-            if ui_config:
-                # Update panels configuration
-                if "panels" in ui_config:
-                    for key, value in ui_config["panels"].items():
-                        if key in self.config["panels"]:
-                            self.config["panels"][key] = value
+            self.config = config_manager.get_module_config(ModuleConfig.UI.value)
+        else:
+            # Use schema defaults if no config manager
+            from enhanced_config_manager import ConfigSchema
+            self.config = ConfigSchema.get_module_schema(ModuleConfig.UI.value)
 
-                # Update other configuration values
-                for key, value in ui_config.items():
-                    if key != "panels" and key in self.config:
-                        self.config[key] = value
-
-        # Panel layout information
+        # Panel layout information (calculated based on frame size)
         self.layout = {
             "metrics": (10, 10, 300, 150),
-            "processed": (None, 10, 300, 200),  # x will be calculated based on frame width
+            "processed": (None, 10, 300, 200),  # x will be calculated
             "sorting": (None, None, None, 200)  # x, y, width will be calculated
         }
 

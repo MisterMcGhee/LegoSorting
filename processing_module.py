@@ -19,6 +19,7 @@ from error_module import get_logger, retry_on_error, APIError, SortingError, Tim
 from api_module import create_api_client
 from sorting_module import create_sorting_manager
 from arduino_servo_module import create_arduino_servo_module
+from enhanced_config_manager import ModuleConfig
 
 # Initialize module logger
 logger = get_logger(__name__)
@@ -45,7 +46,7 @@ class ProcessingWorker:
         self.config_manager = config_manager
         self.save_directory = save_directory
         self.filename_prefix = filename_prefix
-        self.piece_history = piece_history  # Store piece_history instance
+        self.piece_history = piece_history
 
         # Ensure save directory exists
         self.save_directory = os.path.abspath(save_directory)
@@ -67,17 +68,17 @@ class ProcessingWorker:
         self.servo = create_arduino_servo_module(config_manager)
         logger.info("Processing worker using Arduino-based servo control")
 
-        # Get configuration values
-        threading_config = config_manager.get_section("threading")
-        self.api_timeout = threading_config.get("api_timeout", 30.0)
-        self.processing_timeout = threading_config.get("processing_timeout", 60.0)
-        self.polling_interval = threading_config.get("polling_interval", 0.01)
+        # NEW: Get validated configuration values
+        threading_config = config_manager.get_module_config(ModuleConfig.THREADING.value)
+        self.api_timeout = threading_config["api_timeout"]
+        self.processing_timeout = threading_config["processing_timeout"]
+        self.polling_interval = threading_config["polling_interval"]
 
-        # Exit zone trigger configuration
-        self.exit_zone_trigger_config = config_manager.get_section("exit_zone_trigger")
-        self.exit_zone_enabled = self.exit_zone_trigger_config.get("enabled", True)
-        self.fall_time = self.exit_zone_trigger_config.get("fall_time", 1.0)
-        self.cooldown_time = self.exit_zone_trigger_config.get("cooldown_time", 0.5)
+        # NEW: Get exit zone trigger configuration
+        exit_zone_config = config_manager.get_module_config(ModuleConfig.EXIT_ZONE.value)
+        self.exit_zone_enabled = exit_zone_config["enabled"]
+        self.fall_time = exit_zone_config["fall_time"]
+        self.cooldown_time = exit_zone_config["cooldown_time"]
 
         logger.info(f"Exit zone trigger enabled: {self.exit_zone_enabled}")
         logger.info(f"Fall time: {self.fall_time} seconds")
@@ -87,7 +88,7 @@ class ProcessingWorker:
         self.should_exit = threading.Event()
         self.running = False
         self.current_message = None
-        self.last_servo_move_time = 0  # Track when the servo was last moved
+        self.last_servo_move_time = 0
 
         # Statistics
         self.processed_count = 0

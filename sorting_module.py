@@ -13,8 +13,8 @@ import logging
 import os
 import time
 from typing import Dict, Any, Optional, List
-
 from error_module import SortingError, log_and_return
+from enhanced_config_manager import ModuleConfig
 
 # Set up module logger
 logger = logging.getLogger(__name__)
@@ -367,25 +367,26 @@ class UnifiedSortingStrategy:
 class SortingManager:
     """Manages piece sorting based on configured strategies."""
 
-    def __init__(self, config_manager, pre_assignments: Optional[Dict[str, int]] = None):
+    def __init__(self, config_manager):
         """Initialize sorting manager.
 
         Args:
             config_manager: Configuration manager object
-            pre_assignments: Optional dictionary of category-to-bin pre-assignments
         """
         self.config_manager = config_manager
-        self.sorting_config = config_manager.get_section("sorting")
+
+        # NEW: Get validated sorting configuration
+        self.sorting_config = config_manager.get_module_config(ModuleConfig.SORTING.value)
+
+        # NEW: Get piece identifier configuration
+        identifier_config = config_manager.get_module_config(ModuleConfig.PIECE_IDENTIFIER.value)
+        csv_path = identifier_config["csv_path"]
+
         self.categories_data = {}
-        self.pre_assignments = pre_assignments or {}
 
         logger.info("Initializing sorting manager")
-        if self.pre_assignments:
-            logger.info(f"Pre-assignments provided: {self.pre_assignments}")
 
-        # Load categories data
-        csv_path = config_manager.get("piece_identifier", "csv_path", "Lego_Categories.csv")
-
+        # Load categories data from CSV
         try:
             self._load_categories(csv_path)
         except Exception as e:
@@ -393,9 +394,9 @@ class SortingManager:
             logger.error(error_msg)
             raise SortingError(error_msg)
 
-        # Set up sorting strategy with pre-assignments
+        # Set up sorting strategy with validated config
         try:
-            self.strategy = UnifiedSortingStrategy(self.sorting_config, self.categories_data, self.pre_assignments)
+            self.strategy = UnifiedSortingStrategy(self.sorting_config, self.categories_data)
             logger.info(f"Sorting strategy configured: {self.get_strategy_description()}")
         except Exception as e:
             error_msg = f"Failed to configure sorting strategy: {str(e)}"

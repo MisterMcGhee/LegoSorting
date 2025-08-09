@@ -25,6 +25,7 @@ from processing_module import processing_worker_thread
 from error_module import setup_logging, get_logger
 from ui_module import create_ui_manager
 from piece_history_module import create_piece_history
+from enhanced_config_manager import create_config_manager, ModuleConfig
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -90,92 +91,91 @@ class LegoSorting005:
     """Enhanced controller for the Lego sorting system"""
 
     def __init__(self, config_path="config.json"):
-        """Initialize the Lego sorting application
+        """Initialize the Lego sorting application.
 
         Args:
             config_path: Path to configuration file
         """
-        logger.info("Initializing Lego Sorting Application 005")
+        logger.info("=" * 60)
+        logger.info("Initializing Lego Sorting Application v5")
+        logger.info("=" * 60)
 
-        # Flag to track initialization state
-        self.initialized = False
+        # NEW: Create enhanced configuration manager
+        self.config_manager = create_config_manager(config_path)
+
+        # NEW: Validate entire configuration
+        validation_report = self.config_manager.get_validation_report()
+        if not validation_report["valid"]:
+            logger.warning("Configuration has validation errors:")
+            for module, result in validation_report["modules"].items():
+                if not result["valid"]:
+                    for error in result["errors"]:
+                        logger.warning(f"  {module}: {error}")
+            logger.info("Using defaults for invalid configuration values")
+
+        # Initialize shutdown flag
+        self.shutdown_requested = False
+
+        # Initialize components (will be created later)
+        self.camera = None
+        self.detector = None
+        self.sorting_manager = None
+        self.thread_manager = None
+        self.processing_worker = None
+        self.ui_manager = None
+        self.piece_history = None
+        self.system_monitor = None
 
         try:
-            # Initialize configuration
-            self.config_manager = create_config_manager(config_path)
+            # Create camera
+            logger.info("Creating camera...")
+            self.camera = create_camera(config_manager=self.config_manager)
 
-            # Add this section - check if sorting calibration is needed
-            calibrate_sorting = self.config_manager.get("sorting", "calibrate_sorting_strategy", False)
-            if calibrate_sorting:
-                print("\nInitiating Sorting Strategy Calibration...")
-                self.config_manager.calibrate_sorting_strategy()
+            # Create detector
+            logger.info("Creating detector...")
+            self.detector = create_detector(self.config_manager)
 
-                # Turn off calibration flag after completion
-                self.config_manager.set("sorting", "calibrate_sorting_strategy", False)
-                self.config_manager.save_config()
+            # Create sorting manager
+            logger.info("Creating sorting manager...")
+            self.sorting_manager = create_sorting_manager(self.config_manager)
 
-            # Initialize thread manager
+            # Create piece history tracker
+            logger.info("Creating piece history tracker...")
+            self.piece_history = create_piece_history()
+
+            # Create UI manager
+            logger.info("Creating UI manager...")
+            self.ui_manager = create_ui_manager(self.config_manager, self.piece_history)
+
+            # Create thread manager
+            logger.info("Creating thread manager...")
             self.thread_manager = create_thread_manager(self.config_manager)
 
-            # Initialize piece history manager
-            self.piece_history = create_piece_history(self.config_manager)
-            logger.info("Piece history manager initialized")
-
-            # Register callbacks for processing events
-            self.thread_manager.register_callback("piece_processed", self._on_piece_processed)
-            self.thread_manager.register_callback("piece_error", self._on_piece_error)
+            # Create processing worker
+            logger.info("Creating processing worker...")
+            self.processing_worker = ProcessingWorker(
+                self.thread_manager,
+                self.config_manager,
+                piece_history=self.piece_history
+            )
 
             # Create system monitor
             self.system_monitor = SystemMonitor(self.thread_manager)
 
-            # Initialize components with config
-            logger.info("Initializing camera...")
-            self.camera = create_camera("webcam", self.config_manager)
+            # NEW: Register for config changes (optional)
+            self.config_manager.register_observer(self.on_config_changed)
 
-            logger.info("Initializing detector...")
-            self.detector = create_detector("conveyor", self.config_manager, self.thread_manager)
-
-            # Initialize sorting manager
-            logger.info("Initializing sorting manager...")
-            self.sorting_manager = create_sorting_manager(self.config_manager)
-
-            # Initialize UI manager
-            self.ui_manager = create_ui_manager(self.config_manager, self.piece_history)
-            logger.info("UI manager initialized")
-
-            # Only initialize API client and servo in the main thread if threading is disabled
-            # Otherwise, these will be initialized in the worker thread
-            self.api_client = None
-            self.servo = None
-
-            logger.info(f"Sorting strategy: {self.sorting_manager.get_strategy_description()}")
-
-            # Status flags
-            self.running = False
-            self.processing_threads = []
-
-            # Performance tracking
-            self.frame_count = 0
-            self.start_time = None
-            self.fps = 0
-            self.last_fps_update = 0
-            self.processed_pieces = 0
-
-            # Set initialized flag
-            self.initialized = True
-
-            # Register signal handlers for graceful shutdown
-            signal.signal(signal.SIGINT, self._signal_handler)
-            signal.signal(signal.SIGTERM, self._signal_handler)
-
-            logger.info("Initialization complete")
+            logger.info("All components initialized successfully")
 
         except Exception as e:
-            logger.exception(f"Initialization failed: {str(e)}")
-            print(f"Error during initialization: {str(e)}")
+            logger.error(f"Failed to initialize application: {e}")
             self.cleanup()
             raise
 
+    def on_config_changed(self, module_name: str, changes: dict):
+        """Handle configuration changes at runtime"""
+        logger.info(f"Configuration changed for {module_name}: {changes}")
+        
     def _signal_handler(self, sig, frame):
         """Handle termination signals
 
