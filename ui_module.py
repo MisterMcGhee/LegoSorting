@@ -29,6 +29,10 @@ class UIManager:
         # Add tracking for last displayed piece
         self.last_displayed_piece_id = None
 
+        # Store the last displayed piece data and image
+        self.current_piece_data = None
+        self.current_piece_image = None
+
         # Default configuration
         self.config = {
             "panels": {
@@ -116,29 +120,42 @@ class UIManager:
 
         # Check for new piece from piece_history if available
         if self.config["panels"]["processed_piece"]:
-            if self.piece_history and (self.last_displayed_piece_id is None or
-                                       self.piece_history.has_new_piece_since(self.last_displayed_piece_id)):
-                # Get the latest piece
+            new_piece_available = False
+
+            if self.piece_history:
+                # Check if there's a new piece available
                 latest_piece = self.piece_history.get_latest_piece()
 
-                if latest_piece:
-                    # Update our tracking
+                if latest_piece and (
+                    self.last_displayed_piece_id is None or
+                    latest_piece.get('piece_id') != self.last_displayed_piece_id
+                ):
+                    new_piece_available = True
                     self.last_displayed_piece_id = latest_piece.get('piece_id')
+                    self.current_piece_data = latest_piece
 
-                    # Get the image file path from the piece data
+                    # Load the image if available
                     if 'file_path' in latest_piece and os.path.exists(latest_piece['file_path']):
-                        # Load the image from disk
-                        img = cv2.imread(latest_piece['file_path'])
+                        self.current_piece_image = cv2.imread(latest_piece['file_path'])
+                    else:
+                        self.current_piece_image = None
 
-                        # Add image to piece data for rendering
-                        latest_piece = latest_piece.copy()  # Make a copy to avoid modifying original
-                        latest_piece['image'] = img
-
-                    # Render with the latest piece data
-                    display = self._render_processed_piece(display, latest_piece)
-            # Fall back to direct piece_data if provided or if no piece_history
+            # Use direct piece_data if provided and no piece_history is available
             elif piece_data:
-                display = self._render_processed_piece(display, piece_data)
+                new_piece_available = True
+                self.current_piece_data = piece_data
+                self.current_piece_image = piece_data.get('image')
+
+            # Always render the current piece data if available
+            if self.current_piece_data:
+                # Make a copy of the current piece data to add the image for rendering
+                piece_to_render = self.current_piece_data.copy() if self.current_piece_data else None
+
+                if piece_to_render and self.current_piece_image is not None:
+                    piece_to_render['image'] = self.current_piece_image
+
+                if piece_to_render:
+                    display = self._render_processed_piece(display, piece_to_render)
 
         if self.config["panels"]["sorting_information"] and sorting_data:
             display = self._render_sorting_info(display, sorting_data)
@@ -502,108 +519,3 @@ def create_ui_manager(config_manager=None, piece_history=None):
         UIManager instance
     """
     return UIManager(config_manager, piece_history)
-
-
-# Test case
-if __name__ == "__main__":
-    """Test the UI module with mock data."""
-    # Create UI manager
-    ui_manager = create_ui_manager()
-
-    # Create a test frame (black canvas)
-    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
-
-    # Create mock data
-    detector_data = {
-        "roi": (200, 100, 880, 400),
-        "entry_zone": (200, 280),
-        "exit_zone": (1000, 1080),
-        "tracked_pieces": [
-            {
-                "id": 1,
-                "bbox": (250, 150, 80, 60),
-                "update_count": 7,
-                "captured": False,
-                "being_processed": False
-            },
-            {
-                "id": 2,
-                "bbox": (400, 200, 70, 50),
-                "update_count": 12,
-                "captured": True,
-                "being_processed": False
-            },
-            {
-                "id": 3,
-                "bbox": (600, 300, 90, 70),
-                "update_count": 5,
-                "captured": False,
-                "being_processed": True
-            }
-        ]
-    }
-
-    system_data = {
-        "fps": 29.7,
-        "queue_size": 2,
-        "processed_count": 42,
-        "uptime": 305  # seconds
-    }
-
-    piece_data = {
-        "image": np.ones((120, 160, 3), dtype=np.uint8) * 150,  # Gray test image
-        "element_id": "3001",
-        "name": "Brick 2x4",
-        "bin_number": 2,
-        "primary_category": "Basic",
-        "secondary_category": "Brick",
-        "status": "success"
-    }
-
-    # Error piece example
-    error_piece_data = {
-        "element_id": "Unknown",
-        "name": "Unknown Piece",
-        "error": "Low confidence score: 0.45 < 0.7",
-        "status": "error"
-    }
-
-    # Draw a simple brick shape on the test image
-    brick_img = piece_data["image"]
-    cv2.rectangle(brick_img, (20, 40), (140, 80), (0, 0, 200), -1)
-
-    sorting_data = {
-        "strategy": "Sorting by primary category",
-        "bin_assignments": {
-            "1": "Basic",
-            "2": "Technic",
-            "3": "Angle",
-            "4": "Plate"
-        }
-    }
-
-    # Main loop
-    running = True
-    show_error = False
-    while running:
-        # Toggle between normal and error pieces every 2 seconds
-        current_time = time.time()
-        if int(current_time) % 4 < 2:
-            current_piece_data = piece_data
-        else:
-            current_piece_data = error_piece_data
-
-        # Create UI
-        display = ui_manager.create_display_frame(
-            frame, detector_data, system_data, current_piece_data, sorting_data
-        )
-
-        # Display the result
-        cv2.imshow("Lego Sorting UI Test", display)
-
-        # Wait for keyboard input
-        key = cv2.waitKey(100) & 0xFF
-        running = ui_manager.handle_keyboard_input(key)
-
-    cv2.destroyAllWindows()
-    print("UI test completed")

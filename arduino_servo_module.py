@@ -10,7 +10,6 @@ import time
 import logging
 import serial
 import threading
-from typing import Dict, Any, Optional
 
 # Get module logger
 logger = logging.getLogger(__name__)
@@ -124,9 +123,9 @@ class ArduinoServoModule:
 
         if remaining_bins > max_possible_bins:
             logger.warning(f"Warning: Requested {remaining_bins} bins, but only {max_possible_bins} " +
-                         f"possible with minimum separation of {self.min_bin_separation} degrees")
+                           f"possible with minimum separation of {self.min_bin_separation} degrees")
             print(f"Warning: Requested {remaining_bins} bins, but only {max_possible_bins} " +
-                 f"possible with minimum separation of {self.min_bin_separation} degrees")
+                  f"possible with minimum separation of {self.min_bin_separation} degrees")
             remaining_bins = max_possible_bins
 
         if remaining_bins > 0:
@@ -150,7 +149,8 @@ class ArduinoServoModule:
                 current_angle += step
                 assigned_bins += 1
 
-        logger.info(f"Dynamically calculated bin positions with min separation of {self.min_bin_separation} degrees: {self.bin_positions}")
+        logger.info(
+            f"Dynamically calculated bin positions with min separation of {self.min_bin_separation} degrees: {self.bin_positions}")
         print(f"Bin positions: {self.bin_positions}")
 
     def _connect_to_arduino(self):
@@ -201,7 +201,8 @@ class ArduinoServoModule:
 
             # Prompt user to retry or switch to simulation mode
             while True:
-                user_input = input("Would you like to retry connection (r), switch to simulation mode (s), or quit (q)? ").lower()
+                user_input = input(
+                    "Would you like to retry connection (r), switch to simulation mode (s), or quit (q)? ").lower()
 
                 if user_input == 'r':
                     print("Retrying Arduino connection...")

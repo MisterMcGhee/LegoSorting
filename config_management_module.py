@@ -92,7 +92,8 @@ class ConfigManager:
                     "target_primary_category": "",
                     "target_secondary_category": "",
                     "max_bins": 9,
-                    "overflow_bin": 9
+                    "overflow_bin": 9,
+                    "calibrate_sorting_strategy": False
                 },
                 "threading": {
                     "max_queue_size": 100,
@@ -291,6 +292,155 @@ class ConfigManager:
             except Exception as e:
                 print(f"Error creating backup: {e}")
                 return None
+    def parse_categories_from_csv(self, csv_path=None):
+        """
+        Parse the Lego categories CSV file to build category hierarchy.
+
+        Args:
+            csv_path: Path to CSV file (uses default from config if not provided)
+
+        Returns:
+            dict: Category hierarchy with primary, secondary, and tertiary mappings
+        """
+        if csv_path is None:
+            csv_path = self.get("piece_identifier", "csv_path", "Lego_Categories.csv")
+
+        import csv
+        categories = {
+            "primary": set(),
+            "primary_to_secondary": {},
+            "secondary_to_tertiary": {}
+        }
+
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"Categories CSV not found at: {csv_path}")
+
+        try:
+            with open(csv_path, 'r') as file:
+                csv_reader = csv.DictReader(file)
+                for row in csv_reader:
+                    primary = row['primary_category']
+                    secondary = row['secondary_category']
+                    tertiary = row.get('tertiary_category', '')
+
+                    categories["primary"].add(primary)
+
+                    if primary not in categories["primary_to_secondary"]:
+                        categories["primary_to_secondary"][primary] = set()
+                    if secondary:
+                        categories["primary_to_secondary"][primary].add(secondary)
+
+                    key = (primary, secondary)
+                    if key not in categories["secondary_to_tertiary"]:
+                        categories["secondary_to_tertiary"][key] = set()
+                    if tertiary:
+                        categories["secondary_to_tertiary"][key].add(tertiary)
+
+            return categories
+        except Exception as e:
+            raise Exception(f"Error parsing categories CSV: {e}")
+
+    def calibrate_sorting_strategy(self):
+        """
+        Guide the user through selecting a sorting strategy and update configuration.
+        This function runs directly in the terminal and updates the config file.
+        """
+        print("\n=== SORTING STRATEGY CALIBRATION ===")
+        print("1. Primary (sort by main categories)")
+        print("2. Secondary (sort by subcategories within one main category)")
+        print("3. Tertiary (sort by sub-subcategories)")
+
+        # Get strategy level selection
+        strategy_choice = 0
+        while strategy_choice not in [1, 2, 3]:
+            try:
+                strategy_choice = int(input("Select strategy (1-3): "))
+            except ValueError:
+                print("Please enter a number between 1 and 3")
+
+        # Convert to strategy name
+        strategy_names = {1: "primary", 2: "secondary", 3: "tertiary"}
+        strategy = strategy_names[strategy_choice]
+
+        # Set initial values
+        primary_category = ""
+        secondary_category = ""
+
+        # If secondary or tertiary, need primary category
+        if strategy_choice in [2, 3]:
+            # Parse CSV once to get categories
+            csv_path = self.get("piece_identifier", "csv_path", "Lego_Categories.csv")
+            categories = self._parse_categories_from_csv(csv_path)
+
+            # Show primary options
+            print("\nSelect primary category:")
+            primary_options = sorted(list(categories["primary"]))
+            for idx, category in enumerate(primary_options, 1):
+                print(f"{idx}. {category}")
+
+            # Get primary selection
+            primary_idx = 0
+            while primary_idx < 1 or primary_idx > len(primary_options):
+                try:
+                    primary_idx = int(input(f"Enter selection (1-{len(primary_options)}): "))
+                except ValueError:
+                    print("Please enter a valid number")
+
+            primary_category = primary_options[primary_idx - 1]
+
+            # If tertiary, also need secondary category
+            if strategy_choice == 3:
+                # Get secondary options for this primary
+                secondary_options = sorted(list(categories["primary_to_secondary"].get(primary_category, [])))
+
+                if not secondary_options:
+                    print(f"No secondary categories exist for {primary_category}")
+                    print("Falling back to primary sorting")
+                    strategy = "primary"
+                    primary_category = ""
+                else:
+                    # Show secondary options
+                    print(f"\nSelect secondary category within {primary_category}:")
+                    for idx, category in enumerate(secondary_options, 1):
+                        print(f"{idx}. {category}")
+
+                    # Get secondary selection
+                    while True:
+                        try:
+                            secondary_idx = int(input(f"Enter selection (1-{len(secondary_options)}): "))
+                            if 1 <= secondary_idx <= len(secondary_options):
+                                secondary_category = secondary_options[secondary_idx - 1]
+
+                                # Check if tertiary categories exist
+                                key = (primary_category, secondary_category)
+                                if key not in categories["secondary_to_tertiary"] or not \
+                                        categories["secondary_to_tertiary"][key]:
+                                    print(f"No tertiary categories exist for {secondary_category} category.")
+                                    retry = input("Try another secondary category? (y/n): ")
+                                    if retry.lower() != 'y':
+                                        # Fall back to secondary
+                                        strategy = "secondary"
+                                        secondary_category = ""
+                                        break
+                                else:
+                                    break  # Valid selection
+                            else:
+                                print(f"Please enter a number between 1 and {len(secondary_options)}")
+                        except ValueError:
+                            print("Please enter a valid number")
+
+        # Update configuration
+        self.set("sorting", "strategy", strategy)
+        self.set("sorting", "target_primary_category", primary_category)
+        self.set("sorting", "target_secondary_category", secondary_category)
+        self.save_config()
+
+        print(f"\nSorting configuration updated:")
+        print(f"Strategy: {strategy}")
+        if primary_category:
+            print(f"Target primary category: {primary_category}")
+        if secondary_category:
+            print(f"Target secondary category: {secondary_category}")
 
 
 # Factory function

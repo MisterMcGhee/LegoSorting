@@ -1,9 +1,11 @@
 """
-sorting_module.py - Module for sorting Lego pieces into bins by category
+Enhanced sorting_module.py - Added support for pre-assigned bin allocations
 
-This module handles the sorting logic for identified Lego pieces,
-determining which bin each piece should go into based on various
-sorting strategies and configuration.
+Key Changes:
+1. Added pre_assignments parameter to UnifiedSortingStrategy
+2. Added validation for pre-assigned categories
+3. Updated bin allocation logic to skip pre-assigned bins
+4. Added helper methods for bin management
 """
 
 import csv
@@ -19,14 +21,17 @@ logger = logging.getLogger(__name__)
 
 
 class UnifiedSortingStrategy:
-    """Unified strategy for Lego piece sorting with dynamic bin assignment."""
+    """Unified strategy for Lego piece sorting with dynamic bin assignment and pre-assignments."""
 
-    def __init__(self, config: Dict[str, Any], categories_data: Dict[str, Dict[str, str]]):
+    def __init__(self, config: Dict[str, Any], categories_data: Dict[str, Dict[str, str]],
+                 pre_assignments: Optional[Dict[str, int]] = None):
         """Initialize sorting strategy.
 
         Args:
             config: Configuration dictionary
             categories_data: Dictionary mapping element_ids to category information
+            pre_assignments: Optional dictionary mapping category names to bin numbers
+                           Format: {"Basic": 2, "Technic": 3, ...}
         """
         self.config = config
         self.categories_data = categories_data
@@ -51,14 +56,93 @@ class UnifiedSortingStrategy:
             logger.error(error_msg)
             raise SortingError(error_msg)
 
-        # For dynamic bin assignment
+        # Initialize bin assignment tracking
         self.category_to_bin = {}  # Maps category keys to bin numbers
-        self.next_available_bin = 1  # Start at 1 since 0 is the overflow bin
         self.max_bins = config.get("max_bins", 9)  # Maximum number of bins (excluding overflow)
+        self.used_bins = {self.overflow_bin}  # Track which bins are unavailable for dynamic assignment
+
+        # Process pre-assignments first
+        if pre_assignments:
+            self._apply_pre_assignments(pre_assignments)
+
+        # Find next available bin for dynamic assignment
+        self.next_available_bin = self._find_next_available_bin()
 
         logger.debug(f"Sorting strategy initialized: max_bins={self.max_bins}, overflow_bin={self.overflow_bin}")
+        logger.debug(f"Pre-assigned bins: {dict(self.category_to_bin)}")
+        logger.debug(f"Next available bin for dynamic assignment: {self.next_available_bin}")
+
         if self.strategy_type != "primary":
             logger.debug(f"Target categories: primary='{self.target_primary}', secondary='{self.target_secondary}'")
+
+    def _apply_pre_assignments(self, pre_assignments: Dict[str, int]) -> None:
+        """Apply pre-assigned category-to-bin mappings.
+
+        Args:
+            pre_assignments: Dictionary mapping category names to bin numbers
+        """
+        logger.info(f"Applying pre-assignments: {pre_assignments}")
+
+        for category, bin_number in pre_assignments.items():
+            # Validate bin number
+            if not (1 <= bin_number <= self.max_bins):
+                logger.warning(f"Invalid bin number {bin_number} for category '{category}', skipping")
+                continue
+
+            # Validate category for current strategy
+            if not self._is_valid_category_for_strategy(category):
+                logger.warning(f"Category '{category}' is not valid for {self.strategy_type} strategy, skipping")
+                continue
+
+            # Check if bin is already assigned
+            if bin_number in self.used_bins:
+                logger.warning(f"Bin {bin_number} already assigned, skipping category '{category}'")
+                continue
+
+            # Apply the assignment
+            self.category_to_bin[category] = bin_number
+            self.used_bins.add(bin_number)
+            logger.info(f"Pre-assigned category '{category}' to bin {bin_number}")
+
+    def _is_valid_category_for_strategy(self, category: str) -> bool:
+        """Check if a category is valid for the current sorting strategy.
+
+        Args:
+            category: Category name to validate
+
+        Returns:
+            bool: True if category is valid for current strategy
+        """
+        if self.strategy_type == "primary":
+            # For primary sorting, check if category exists in any piece's primary_category
+            return any(piece_data.get("primary_category") == category
+                       for piece_data in self.categories_data.values())
+
+        elif self.strategy_type == "secondary":
+            # For secondary sorting, check if category exists as secondary within target primary
+            return any(piece_data.get("primary_category") == self.target_primary and
+                       piece_data.get("secondary_category") == category
+                       for piece_data in self.categories_data.values())
+
+        elif self.strategy_type == "tertiary":
+            # For tertiary sorting, check if category exists as tertiary within target primary/secondary
+            return any(piece_data.get("primary_category") == self.target_primary and
+                       piece_data.get("secondary_category") == self.target_secondary and
+                       piece_data.get("tertiary_category") == category
+                       for piece_data in self.categories_data.values())
+
+        return False
+
+    def _find_next_available_bin(self) -> Optional[int]:
+        """Find the next available bin number for dynamic assignment.
+
+        Returns:
+            int: Next available bin number, or None if all bins are used
+        """
+        for bin_num in range(1, self.max_bins + 1):
+            if bin_num not in self.used_bins:
+                return bin_num
+        return None
 
     def get_bin(self, element_id: str, confidence: float) -> int:
         """Determine bin for a piece using the configured sorting strategy.
@@ -101,17 +185,21 @@ class UnifiedSortingStrategy:
             logger.warning("Piece has no primary category, using overflow bin")
             return self.overflow_bin
 
-        # If we've already assigned a bin to this category, use it
+        # Check if this category has a pre-assigned bin
         if category_key in self.category_to_bin:
             bin_number = self.category_to_bin[category_key]
-            logger.debug(f"Using existing bin {bin_number} for primary category '{category_key}'")
+            logger.debug(f"Using pre-assigned bin {bin_number} for primary category '{category_key}'")
             return bin_number
 
         # If we have room for a new bin, assign the next available one
-        if self.next_available_bin <= self.max_bins:
+        if self.next_available_bin is not None and self.next_available_bin <= self.max_bins:
             bin_number = self.next_available_bin
             self.category_to_bin[category_key] = bin_number
-            self.next_available_bin += 1
+            self.used_bins.add(bin_number)
+
+            # Find next available bin
+            self.next_available_bin = self._find_next_available_bin()
+
             logger.info(f"Assigned new bin {bin_number} to primary category '{category_key}'")
             return bin_number
 
@@ -141,17 +229,21 @@ class UnifiedSortingStrategy:
             logger.warning("Piece has no secondary category, using overflow bin")
             return self.overflow_bin
 
-        # If we've already assigned a bin to this category, use it
+        # Check if this category has a pre-assigned bin
         if category_key in self.category_to_bin:
             bin_number = self.category_to_bin[category_key]
-            logger.debug(f"Using existing bin {bin_number} for secondary category '{category_key}'")
+            logger.debug(f"Using pre-assigned bin {bin_number} for secondary category '{category_key}'")
             return bin_number
 
         # If we have room for a new bin, assign the next available one
-        if self.next_available_bin <= self.max_bins:
+        if self.next_available_bin is not None and self.next_available_bin <= self.max_bins:
             bin_number = self.next_available_bin
             self.category_to_bin[category_key] = bin_number
-            self.next_available_bin += 1
+            self.used_bins.add(bin_number)
+
+            # Find next available bin
+            self.next_available_bin = self._find_next_available_bin()
+
             logger.info(f"Assigned new bin {bin_number} to secondary category '{category_key}'")
             return bin_number
 
@@ -181,17 +273,21 @@ class UnifiedSortingStrategy:
             logger.debug("Piece has no tertiary category, using overflow bin")
             return self.overflow_bin
 
-        # If we've already assigned a bin to this category, use it
+        # Check if this category has a pre-assigned bin
         if category_key in self.category_to_bin:
             bin_number = self.category_to_bin[category_key]
-            logger.debug(f"Using existing bin {bin_number} for tertiary category '{category_key}'")
+            logger.debug(f"Using pre-assigned bin {bin_number} for tertiary category '{category_key}'")
             return bin_number
 
         # If we have room for a new bin, assign the next available one
-        if self.next_available_bin <= self.max_bins:
+        if self.next_available_bin is not None and self.next_available_bin <= self.max_bins:
             bin_number = self.next_available_bin
             self.category_to_bin[category_key] = bin_number
-            self.next_available_bin += 1
+            self.used_bins.add(bin_number)
+
+            # Find next available bin
+            self.next_available_bin = self._find_next_available_bin()
+
             logger.info(f"Assigned new bin {bin_number} to tertiary category '{category_key}'")
             return bin_number
 
@@ -206,30 +302,86 @@ class UnifiedSortingStrategy:
         Returns:
             Human-readable description
         """
+        desc = ""
         if self.strategy_type == "primary":
-            return "Sorting by primary category"
+            desc = "Sorting by primary category"
         elif self.strategy_type == "secondary":
-            return f"Sorting by secondary category within primary category '{self.target_primary}'"
+            desc = f"Sorting by secondary category within primary category '{self.target_primary}'"
         elif self.strategy_type == "tertiary":
-            return f"Sorting by tertiary category within '{self.target_primary}/{self.target_secondary}'"
+            desc = f"Sorting by tertiary category within '{self.target_primary}/{self.target_secondary}'"
         else:
-            return "Unknown sorting strategy"
+            desc = "Unknown sorting strategy"
 
+        # Add pre-assignment info
+        if self.category_to_bin:
+            pre_assigned_count = len([bin_num for bin_num in self.category_to_bin.values()
+                                      if bin_num != self.overflow_bin])
+            if pre_assigned_count > 0:
+                desc += f" (with {pre_assigned_count} pre-assigned bins)"
+
+        return desc
+
+    def get_available_categories(self) -> List[str]:
+        """Get list of categories available for the current sorting strategy.
+
+        Returns:
+            List of category names that can be used with current strategy
+        """
+        categories = set()
+
+        if self.strategy_type == "primary":
+            # Get all primary categories
+            for piece_data in self.categories_data.values():
+                primary = piece_data.get("primary_category")
+                if primary:
+                    categories.add(primary)
+
+        elif self.strategy_type == "secondary":
+            # Get secondary categories within target primary
+            for piece_data in self.categories_data.values():
+                if piece_data.get("primary_category") == self.target_primary:
+                    secondary = piece_data.get("secondary_category")
+                    if secondary:
+                        categories.add(secondary)
+
+        elif self.strategy_type == "tertiary":
+            # Get tertiary categories within target primary/secondary
+            for piece_data in self.categories_data.values():
+                if (piece_data.get("primary_category") == self.target_primary and
+                        piece_data.get("secondary_category") == self.target_secondary):
+                    tertiary = piece_data.get("tertiary_category")
+                    if tertiary:
+                        categories.add(tertiary)
+
+        return sorted(list(categories))
+
+    def get_pre_assigned_bins(self) -> Dict[str, int]:
+        """Get dictionary of pre-assigned category-to-bin mappings.
+
+        Returns:
+            Dictionary mapping category names to bin numbers (excluding overflow assignments)
+        """
+        return {category: bin_num for category, bin_num in self.category_to_bin.items()
+                if bin_num != self.overflow_bin}
 
 class SortingManager:
     """Manages piece sorting based on configured strategies."""
 
-    def __init__(self, config_manager):
+    def __init__(self, config_manager, pre_assignments: Optional[Dict[str, int]] = None):
         """Initialize sorting manager.
 
         Args:
             config_manager: Configuration manager object
+            pre_assignments: Optional dictionary of category-to-bin pre-assignments
         """
         self.config_manager = config_manager
         self.sorting_config = config_manager.get_section("sorting")
         self.categories_data = {}
+        self.pre_assignments = pre_assignments or {}
 
         logger.info("Initializing sorting manager")
+        if self.pre_assignments:
+            logger.info(f"Pre-assignments provided: {self.pre_assignments}")
 
         # Load categories data
         csv_path = config_manager.get("piece_identifier", "csv_path", "Lego_Categories.csv")
@@ -241,9 +393,9 @@ class SortingManager:
             logger.error(error_msg)
             raise SortingError(error_msg)
 
-        # Set up sorting strategy
+        # Set up sorting strategy with pre-assignments
         try:
-            self.strategy = UnifiedSortingStrategy(self.sorting_config, self.categories_data)
+            self.strategy = UnifiedSortingStrategy(self.sorting_config, self.categories_data, self.pre_assignments)
             logger.info(f"Sorting strategy configured: {self.get_strategy_description()}")
         except Exception as e:
             error_msg = f"Failed to configure sorting strategy: {str(e)}"
@@ -404,17 +556,34 @@ class SortingManager:
         """
         return self.strategy.category_to_bin.copy()
 
+    def get_available_categories(self) -> List[str]:
+        """Get list of categories available for pre-assignment with current strategy.
+
+        Returns:
+            List of category names that can be pre-assigned
+        """
+        return self.strategy.get_available_categories()
+
+    def get_pre_assigned_bins(self) -> Dict[str, int]:
+        """Get current pre-assigned bin mappings.
+
+        Returns:
+            Dictionary mapping category names to pre-assigned bin numbers
+        """
+        return self.strategy.get_pre_assigned_bins()
+
     def release(self) -> None:
         """Release any resources used by the sorting manager"""
         logger.info("Releasing sorting manager resources")
         # Currently no resources to release, but adding for API consistency
 
 
-def create_sorting_manager(config_manager):
+def create_sorting_manager(config_manager, pre_assignments: Optional[Dict[str, int]] = None):
     """Factory function to create a sorting manager.
 
     Args:
         config_manager: Configuration manager object
+        pre_assignments: Optional dictionary of category-to-bin pre-assignments
 
     Returns:
         SortingManager instance
@@ -423,9 +592,11 @@ def create_sorting_manager(config_manager):
         SortingError: If manager creation fails
     """
     logger.info("Creating sorting manager")
+    if pre_assignments:
+        logger.info(f"With pre-assignments: {pre_assignments}")
 
     try:
-        return SortingManager(config_manager)
+        return SortingManager(config_manager, pre_assignments)
     except Exception as e:
         if isinstance(e, SortingError):
             raise

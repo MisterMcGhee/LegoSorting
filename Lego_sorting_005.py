@@ -11,21 +11,18 @@ import argparse
 import cv2
 import time
 import logging
-import threading
 import signal
 import sys
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any
 
 # Import modules
 from camera_module import create_camera
 from detector_module import create_detector
 from sorting_module import create_sorting_manager
 from config_management_module import create_config_manager
-from api_module import create_api_client
-from arduino_servo_module import create_arduino_servo_module
 from thread_management_module import create_thread_manager
 from processing_module import processing_worker_thread
-from error_module import setup_logging, get_logger, CameraError, APIError, DetectorError, ThreadingError
+from error_module import setup_logging, get_logger
 from ui_module import create_ui_manager
 from piece_history_module import create_piece_history
 
@@ -107,6 +104,16 @@ class LegoSorting005:
             # Initialize configuration
             self.config_manager = create_config_manager(config_path)
 
+            # Add this section - check if sorting calibration is needed
+            calibrate_sorting = self.config_manager.get("sorting", "calibrate_sorting_strategy", False)
+            if calibrate_sorting:
+                print("\nInitiating Sorting Strategy Calibration...")
+                self.config_manager.calibrate_sorting_strategy()
+
+                # Turn off calibration flag after completion
+                self.config_manager.set("sorting", "calibrate_sorting_strategy", False)
+                self.config_manager.save_config()
+
             # Initialize thread manager
             self.thread_manager = create_thread_manager(self.config_manager)
 
@@ -128,6 +135,7 @@ class LegoSorting005:
             logger.info("Initializing detector...")
             self.detector = create_detector("conveyor", self.config_manager, self.thread_manager)
 
+            # Initialize sorting manager
             logger.info("Initializing sorting manager...")
             self.sorting_manager = create_sorting_manager(self.config_manager)
 
@@ -437,6 +445,9 @@ def main():
                         help='Path to configuration file')
     parser.add_argument('--calibrate-servo', action='store_true',
                         help='Run servo calibration at startup')
+    # Add this argument
+    parser.add_argument('--calibrate-sorting', action='store_true',
+                        help='Run sorting strategy calibration at startup')
     parser.add_argument('--log-level', type=str, default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Set logging level')
@@ -460,6 +471,13 @@ def main():
             logger.info("Servo calibration mode activated")
             print("Servo calibration mode activated")
 
+        # Add this section for sorting calibration
+        if args.calibrate_sorting:
+            config_manager.set("sorting", "calibrate_sorting_strategy", True)
+            config_manager.save_config()
+            logger.info("Sorting strategy calibration activated")
+            print("Sorting strategy calibration activated")
+
         # Create and run application
         application = LegoSorting005(config_path=args.config)
         application.run()
@@ -474,4 +492,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())``
+    sys.exit(main())

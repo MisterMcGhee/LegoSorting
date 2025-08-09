@@ -1,6 +1,6 @@
 {
     "camera": {
-        "device_id": 0,
+        "device_id": 1,
         "directory": "LegoPictures",
         "filename_prefix": "Lego"
     },
@@ -24,7 +24,7 @@
         "text_margin_top": 40,
         "default_roi_x": 125,
         "default_roi_y": 200,
-        "default_roi_w": 1600,
+        "default_roi_w": 1550,
         "default_roi_h": 500,
         "show_bg_subtraction": true
     },
@@ -33,10 +33,10 @@
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "Secondary",
-        "target_primary_category": "Angle",
+        "strategy": "primary",
+        "target_primary_category": "",
         "target_secondary_category": "",
-        "max_bins": 4,
+        "max_bins": 7,
         "overflow_bin": 0
     },
     "threading": {
@@ -75,10 +75,10 @@
         "retry_delay": 1.0
     },
     "detector_roi": {
-        "x": 125,
-        "y": 200,
-        "w": 1700,
-        "h": 500
+        "x": 43,
+        "y": 112,
+        "w": 554,
+        "h": 300
     },
     "exit_zone_trigger": {
         "enabled": true,
@@ -95,16 +95,48 @@
             "help_overlay": true
         }
     },
-        "opacity": 0.7,
-        "colors": {
-            "panel_bg": [30, 30, 30],
-            "text": [255, 255, 255],
-            "roi": [0, 255, 0],
-            "entry_zone": [255, 0, 0],
-            "exit_zone": [0, 0, 255],
-            "active_piece": [0, 0, 255],
-            "captured_piece": [0, 255, 0],
-            "processing_piece": [255, 0, 255]
+    "opacity": 0.7,
+    "colors": {
+        "panel_bg": [
+            30,
+            30,
+            30
+        ],
+        "text": [
+            255,
+            255,
+            255
+        ],
+        "roi": [
+            0,
+            255,
+            0
+        ],
+        "entry_zone": [
+            255,
+            0,
+            0
+        ],
+        "exit_zone": [
+            0,
+            0,
+            255
+        ],
+        "active_piece": [
+            0,
+            0,
+            255
+        ],
+        "captured_piece": [
+            0,
+            255,
+            0
+        ],
+        "processing_piece": [
+            255,
+            0,
+            255
+        ]
     },
     "piece_history": {
         "max_entries": 10,

@@ -49,8 +49,15 @@ class ProcessingWorker:
 
         # Ensure save directory exists
         self.save_directory = os.path.abspath(save_directory)
+        logger.info(f"Saving images to directory: {os.path.abspath(self.save_directory)}")
         if not os.path.exists(self.save_directory):
-            os.makedirs(self.save_directory)
+            try:
+                os.makedirs(self.save_directory)
+                logger.info(f"Created directory: {self.save_directory}")
+            except Exception as e:
+                logger.error(f"Failed to create directory: {e}")
+        else:
+            logger.info(f"Directory already exists: {self.save_directory}")
 
         # Initialize components
         self.api_client = create_api_client("brickognize", config_manager)
@@ -109,24 +116,25 @@ class ProcessingWorker:
         self.running = False
 
     def _save_image(self, message: PieceMessage) -> Tuple[str, int]:
-        """Save piece image to disk.
-
-        Args:
-            message: Message containing piece information
-
-        Returns:
-            tuple: (file_path, image_number)
-        """
         # Generate unique number for this image
         number = self._get_next_image_number()
+
+        # Create a copy of the image to modify
+        labeled_image = message.image.copy()  # Could fail if image is None or corrupted
+
+        # Add image number text to the top left corner
+        text_y = 30
+        cv2.putText(labeled_image, f"{number}",
+                    (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.9, (0, 0, 255), 2)
 
         # Create filename with padded number
         filename = f"{self.filename_prefix}{number:03d}.jpg"
         file_path = os.path.join(self.save_directory, filename)
 
-        # Save image to disk
-        cv2.imwrite(file_path, message.image)
-        logger.debug("Saved image to %s", file_path)
+        # Save the labeled image to disk
+        cv2.imwrite(file_path, labeled_image)  # This line could be failing
+        logger.debug(f"Saved image to {file_path}")
 
         return file_path, number
 
@@ -296,24 +304,39 @@ class ProcessingWorker:
             # Move the servo, indicating if this is an exit zone piece
             servo_success = self._move_servo(bin_number, is_exit_zone_piece)
 
-            # Create result dictionary
+            # This code should replace the result dictionary creation in the _process_message method
+
+            # Create result dictionary with explicit default values for all expected fields
             result = {
                 "piece_id": message.piece_id,
                 "image_number": image_number,
                 "file_path": file_path,
                 "element_id": sorting_result.get("element_id", "Unknown"),
                 "name": sorting_result.get("name", "Unknown"),
-                "primary_category": sorting_result.get("primary_category", "Unknown"),
-                "secondary_category": sorting_result.get("secondary_category", "Unknown"),
+                "primary_category": sorting_result.get("primary_category", ""),
+                "secondary_category": sorting_result.get("secondary_category", ""),
+                "tertiary_category": sorting_result.get("tertiary_category", ""),
                 "bin_number": bin_number,
                 "servo_success": servo_success,
                 "processing_time": time.time() - start_time,
                 "is_exit_zone_piece": is_exit_zone_piece
             }
 
+            # Log the result to verify data
+            logger.debug(f"Created result dictionary for piece {message.piece_id}:")
+            logger.debug(f"  Image: {image_number}, Element ID: {result['element_id']}")
+            logger.debug(f"  Name: {result['name']}, Bin: {bin_number}")
+
             # Add piece to history if piece_history is available
             if self.piece_history:
-                self.piece_history.add_piece(result)
+                try:
+                    logger.info(f"Adding piece ID {message.piece_id} to piece history")
+                    self.piece_history.add_piece(result)
+                    logger.info(f"Successfully added piece ID {message.piece_id} to piece history")
+                except Exception as e:
+                    logger.error(f"Error adding piece to history: {e}", exc_info=True)
+            else:
+                logger.warning(f"Piece history is None, not recording piece ID {message.piece_id}")
 
             # Update message status and result
             message.status = "completed"
@@ -357,15 +380,27 @@ class ProcessingWorker:
     def run(self) -> None:
         """Main processing loop for the worker thread."""
         logger.info("Processing worker running")
+        last_empty_log_time = 0  # Track when we last logged an empty queue
 
         try:
             while self.running and not self.should_exit.is_set():
                 # Get next message from queue with timeout
                 message = self.thread_manager.get_next_message(timeout=self.polling_interval)
 
-                # Skip if no message
+                # Skip if no message, but log only periodically
                 if message is None:
+                    current_time = time.time()
+                    # Log only once every 5 seconds when queue is empty
+                    if current_time - last_empty_log_time > 5.0:
+                        logger.debug(f"Queue empty, waiting for messages (poll interval: {self.polling_interval}s)")
+                        last_empty_log_time = current_time
                     continue
+
+                # Reset the empty log timer when we get a message
+                last_empty_log_time = 0
+
+                # Log when we actually get a message
+                logger.debug(f"Processing message for piece ID {message.piece_id}")
 
                 try:
                     # Process message
@@ -424,6 +459,11 @@ def create_processing_worker(thread_manager: ThreadManager, config_manager: Any,
     Returns:
         ProcessingWorker instance
     """
+    # Verify piece_history parameter is being passed correctly
+    if piece_history is None:
+        logger.error("piece_history is None in processing_worker_thread!")
+    else:
+        logger.info(f"piece_history initialized in thread: {piece_history}, CSV path: {piece_history.csv_path}")
     # Get camera configuration for save directory and filename prefix
     save_directory = config_manager.get("camera", "directory", "LegoPictures")
     filename_prefix = config_manager.get("camera", "filename_prefix", "Lego")

@@ -16,8 +16,8 @@ import os
 import json
 import threading
 import logging
-from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict, Any
+from dataclasses import dataclass
+from typing import List, Tuple, Optional
 
 # Set up module logger
 logger = logging.getLogger(__name__)
@@ -212,43 +212,6 @@ class ConveyorDetector:
         # If we get here, use manual calibration
         return self.calibrate(frame)
 
-    def calibrate(self, frame):
-        """Select ROI for the conveyor belt and initialize background model
-
-        Args:
-            frame: Video frame to use for ROI selection
-
-        Returns:
-            Tuple[int, int, int, int]: Selected ROI (x, y, width, height)
-        """
-        logger.info("Starting manual ROI calibration")
-        print("\nSelect the conveyor belt region (ROI)...")
-        print("Draw a rectangle with your mouse, then press ENTER or SPACE to confirm")
-        roi = cv2.selectROI("Select Conveyor Belt ROI", frame, showCrosshair=False)
-        cv2.destroyWindow("Select Conveyor Belt ROI")
-
-        with self.lock:
-            self.set_roi(frame, roi)
-
-            # Save ROI to config if available
-            if self.config_manager:
-                roi_config = {
-                    "x": roi[0],
-                    "y": roi[1],
-                    "w": roi[2],
-                    "h": roi[3]
-                }
-                self.config_manager.update_section("detector_roi", roi_config)
-
-                # Set load_roi_from_config to True to use this ROI in the future
-                self.config["load_roi_from_config"] = True
-                self.config_manager.set("detector", "load_roi_from_config", True)
-
-                self.config_manager.save_config()
-                logger.info("ROI saved to configuration and load_roi_from_config set to True")
-
-        return roi
-
     def set_roi(self, frame, roi):
         """Set the ROI and initialize related zones and background model
 
@@ -397,7 +360,8 @@ class ConveyorDetector:
                 for piece in self.tracked_pieces:
                     if piece.captured:
                         dist = np.sqrt((center[0] - piece.center[0]) ** 2 + (center[1] - piece.center[1]) ** 2)
-                        # Use a slightly larger threshold for captured pieces to ensure we catch all potential duplicates
+                        # Use a slightly larger threshold for captured pieces to ensure we catch all potential
+                        # duplicates
                         if dist < self.config["match_threshold"] * 1.5:
                             close_to_captured = True
                             # Update the captured piece's position since it's still moving
@@ -672,12 +636,6 @@ class ConveyorDetector:
                 # Get the current image number
                 image_number = current_count
 
-                # Add the piece ID number at the top with increased margin
-                text_y = self.config["text_margin_top"] - 10  # Position for text
-                cv2.putText(cropped_image, f"{image_number}",
-                            (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.9, (0, 0, 255), 2)
-
                 # Mark as being processed
                 priority_piece.being_processed = True
                 priority_piece.processing_start_time = current_time
@@ -707,12 +665,8 @@ class ConveyorDetector:
                     # Get cropped image
                     cropped_image = self.crop_piece_image(frame, piece_to_capture)
 
-                    # Add the piece ID number at the top with increased margin
-                    text_y = self.config["text_margin_top"] - 10  # Position for text
+                    # Get the current image number (same as for exit zone pieces)
                     image_number = current_count
-                    cv2.putText(cropped_image, f"{image_number}",
-                                (10, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                                0.9, (0, 0, 255), 2)
 
                     # Add to processing queue
                     self.thread_manager.add_message(

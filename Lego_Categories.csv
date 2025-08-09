@@ -1,1147 +1,1183 @@
 element_id,name,primary_category,secondary_category,tertiary_category
-3005,1x1 Brick,Basic,Brick,1x1
-3004,1x2 Brick,Basic,Brick,1x2
-3622,1x3 Brick,Basic,Brick,1x
-3010,1x4 Brick,Basic,Brick,1x
-3009,1x6 Brick,Basic,Brick,1x
-3008,1x8 Brick,Basic,Brick,1x
-6111,1x10 Brick,Basic,Brick,1x
-6112,1x12 Brick,Basic,Brick,1x
+4515,10° 6x8 Slope,Angle,Slope-10-18-30,
+4599,10° 6x1 Slope,Angle,Slope-10-18-30,
+30363,18° 4x2 Slope,Angle,Slope-10-18-30,
+48919,25° 8x1x3 Slope,Angle,Slope-10-18-30,
+54200,30° 1x1 Cheese,Angle,Slope-10-18-30,
+60477,18° 4x1 Slope,Angle,Slope-10-18-30,
+61409,18° 2x1 Cheese Grater,Angle,Slope-10-18-30,
+99384,30° 1x2 Cheese,Angle,Slope-10-18-30,
+3297,33° 3x4 Slope,Angle,Slope-33,
+3298,33° 3x2 Slope,Angle,Slope-33,
+3299,33° 2x4 Dbl. Slope,Angle,Slope-33,
+3300,33° 2x2 Dbl. Slope,Angle,Slope-33,
+3675,33° 3x3 Corner Slope,Angle,Slope-33,
+4161,33° 3x3 Slope,Angle,Slope-33,
+4286,33° 3x1 Slope,Angle,Slope-33,
+58181,33° 3x6 Slope,Angle,Slope-33,
+99301,33° 3x3 Inside Corner Slope,Angle,Slope-33,
+2752,"Slope, Inverted 33 3 x 2 with Hollow Round Bottom Tube",Angle,Slope-33,
+4089,"Slope, Inverted 33 3 x 2 Hollow with Tow Ball (Arm Piece)",Angle,Slope-33,
+4228,"Slope, Inverted 33 5 x 6 x 2",Angle,Slope-33,
+4287,"Slope, Inverted 33 3 x 1",Angle,Slope-33,
+3747a,"Slope, Inverted 33 3 x 2 with Flat Bottom Pin without Connections between Studs",Angle,Slope-33,
+3747b,"Slope, Inverted 33 3 x 2 with Flat Bottom Pin and Connections between Studs",Angle,Slope-33,
+3037,45° 2x4 Slope,Angle,Slope-45,
+3038,45° 2x3 Slope,Angle,Slope-45,
+3039,45° 2x2 Slope,Angle,Slope-45,
+3040,45° 2x1 Slope,Angle,Slope-45,
+3041,45° 2x4 Dbl. Slope,Angle,Slope-45,
+3042,45° 2x3 Dbl. Slope,Angle,Slope-45,
+3043,45° 2x2 Dbl. Slope,Angle,Slope-45,
+3044,45° 2x1 Dbl. Slope,Angle,Slope-45,
+3045,45° 2x2 Corner Slope,Angle,Slope-45,
+3046,45° 2x2 Inside Corner Slope,Angle,Slope-45,
+3049,45° 1x2 Dbl. Slope Inv.,Angle,Slope-45,
+4445,45° 2x8 Slope,Angle,Slope-45,
+13269,45° 6x4 45° / 33°,Angle,Slope-45,
+15571,45° 2x1 Triple Slope,Angle,Slope-45,
+22388,45° 1x1¾ Pyramid,Angle,Slope-45,
+23949,45° 2x6 Slope,Angle,Slope-45,
+28192,45° 2x1 Cutout w/out stud,Angle,Slope-45,
+32083,45° 6x4 Train Roof,Angle,Slope-45,
+35464,45° 1x1 Dbl. Slope,Angle,Slope-45,
+92946,45° 2x1 Cutout,Angle,Slope-45,
+2310,"Slope, Inverted 45 2 x 1 with 2/3 Cutout",Angle,Slope-45,
+2341,"Slope, Inverted 45 3 x 1 Double",Angle,Slope-45,
+3660,"Slope, Inverted 45 2 x 2 with Flat Bottom Pin",Angle,Slope-45,
+3665,"Slope, Inverted 45 2 x 1",Angle,Slope-45,
+3676,"Slope, Inverted 45 2 x 2 Double Convex",Angle,Slope-45,
+4854,"Slope, Inverted 45 4 x 4 Double",Angle,Slope-45,
+4871,"Slope, Inverted 45 4 x 2 Double with 2 x 2 Cutout",Angle,Slope-45,
+5117,"Slope, Inverted 45 6 x 8 Double with 4 Holes and 4 Pin Holes",Angle,Slope-45,
+5119,"Slope, Inverted 45 6 x 8 Double with Open Middle and 4 Pin Holes",Angle,Slope-45,
+7261,"Slope, Inverted 45 2 x 2 without Bottom Tube",Angle,Slope-45,
+22889,"Slope, Inverted 45 6 x 2 Double with 2 x 4 Cutout",Angle,Slope-45,
+30183,"Slope, Inverted 45 6 x 4 Double with Recessed Center",Angle,Slope-45,
+30283,"Slope, Inverted 45 6 x 4 Double with 4 x 4 Cutout",Angle,Slope-45,
+30390,"Slope, Inverted 45 4 x 2 Double with Pins",Angle,Slope-45,
+32802,"Slope, Inverted 45 4 x 1 Double",Angle,Slope-45,
+52501,"Slope, Inverted 45 6 x 1 Double with 1 x 4 Cutout",Angle,Slope-45,
+60219,"Slope, Inverted 45 6 x 4 Double with 4 x 4 Cutout and 3 Holes",Angle,Slope-45,
+72454,"Slope, Inverted 45 4 x 4 Double with 2 Holes",Angle,Slope-45,
+76959,"Slope, Inverted 45 2 x 2 with Hollow Round Bottom Tube",Angle,Slope-45,
+3660old,"Slope, Inverted 45 2 x 2 with Solid Round Bottom Tube",Angle,Slope-45,
+3678,65° 2x2x2 Slope,Angle,Slope-55-65-75,
+3684,75° 2x2x3 Slope,Angle,Slope-55-65-75,
+3685,75° 2x2x3 Corner Slope,Angle,Slope-55-65-75,
+3688,75° 2x2x2 Square Cone,Angle,Slope-55-65-75,
+4460b,75° 2x1x3 Slope,Angle,Slope-55-65-75,
+4460,75° 2x1x3 Slope,Angle,Slope-55-65-75,
+30249,55° 6x1x5 Slope,Angle,Slope-55-65-75,
+60481,65° 2x1x2 Slope,Angle,Slope-55-65-75,
+2449,"Slope, Inverted 75 2 x 1 x 3",Angle,Slope-55-65-75,
+30373,"Slope, Inverted 65 6 x 6 x 2 Quad with Cutouts",Angle,Slope-55-65-75,
+67440,"Slope, Inverted 60 4 x 1 x 3",Angle,Slope-55-65-75,
+2462,3x3 Corner Facet,Angle,Wedge-brick,
+6564,3x2 Wedge R.,Angle,Wedge-brick,
+6565,3x2 Wedge L.,Angle,Wedge-brick,
+14413,4x4 Corner Facet,Angle,Wedge-brick,
+30505,3x3 Corner,Angle,Wedge-brick,
+41765,4x2 Wedge L.,Angle,Wedge-brick,
+41767,4x2 Wedge R.,Angle,Wedge-brick,
+50373,3x4 Wedge,Angle,Wedge-brick,
+87620,2x2 Corner Facet,Angle,Wedge-brick,
+1762,33° 2x2 Double Wedge Curved,Angle,Wedge-nose,
+4855,6x4 Wedge Slope Inv.,Angle,Wedge-nose,
+4861,3x4 Corner Slope,Angle,Wedge-nose,
+6153,6x4 Wedge Slope Cutout,Angle,Wedge-nose,
+13349,4x4 Wedge Slope Inv.,Angle,Wedge-nose,
+13548,2x2 Wedge Slope,Angle,Wedge-nose,
+22350,6x8 Wedge Slope w/ cutout,Angle,Wedge-nose,
+22391,4x4 Wedge Pointed,Angle,Wedge-nose,
+41764,6x2 Wedge Curve Inv. R.,Angle,Wedge-nose,
+41765,6x2 Wedge Curve Inv. L.,Angle,Wedge-nose,
+42862,3x3 Wedge Slope L.,Angle,Wedge-nose,
+43710,4x2 Wedge Slope L.,Angle,Wedge-nose,
+43711,4x2 Wedge Slope R.,Angle,Wedge-nose,
+43713,6x4 Wedge Slope Inv.,Angle,Wedge-nose,
+47757,4x4 Wedge Pyramid,Angle,Wedge-nose,
+47759,2x4 Wedge Slope,Angle,Wedge-nose,
+48165,3x3 Wedge Slope R.,Angle,Wedge-nose,
+48934,4x4 Wedge Slope,Angle,Wedge-nose,
+48961,4x4 Wedge Slope,Angle,Wedge-nose,
+64867,4x4 Wedge Fractured,Angle,Wedge-nose,
+93348,4x4 Wedge Taper,Angle,Wedge-nose,
+2419,45° 3x6 Wedge,Angle,Wedge-plate,
+2450,45° 3x3 Corner,Angle,Wedge-plate,
+6063,45° 10x10 Octagonal w/ cutout,Angle,Wedge-plate,
+6106,45° 6x6 Corner,Angle,Wedge-plate,
+26601,45° 2x2 Corner,Angle,Wedge-plate,
+30503,45° 4x4 Corner,Angle,Wedge-plate,
+30504,45° 8x8 Cut Corner,Angle,Wedge-plate,
+60297,45° 4x8 Wedge,Angle,Wedge-plate,
+89523,45° 10x10 Octagonal,Angle,Wedge-plate,
+92584,45° 10x10 Corner w/ edge studs,Angle,Wedge-plate,
+22385,2x3 Tile Pentagonal,Angle,Wedge-tile,
+27263,2x2 Tile Corner,Angle,Wedge-tile,
+27928,2x2 Wedge w/ Jumper,Angle,Wedge-tile,
+35787,2x2 Tile Triangular,Angle,Wedge-tile,1x
 2465,1x16 Brick,Basic,Brick,1x
-2357,2x2 Corner Brick,Basic,Brick,2x2
-3003,2x2 Brick,Basic,Brick,2x2
-3002,2x3 Brick,Basic,Brick,2x
-3001,2x4 Brick,Basic,Brick,2x
-2456,2x6 Brick,Basic,Brick,2x
-3007,2x8 Brick,Basic,Brick,2x
-3006,2x10 Brick,Basic,Brick,2x
-14716,1x1x3 Brick,Basic,Brick,Tall
-2453,1x1x5 Brick,Basic,Brick,Tall
-43888,1x1x6 Round Brick,Basic,Brick,Tall
-3245,1x2x2 Brick,Basic,Brick,Tall
-22886,1x2x3 Brick,Basic,Brick,Tall
-49311,1x4x3 Brick,Basic,Brick,Tall
-2454,1x2x5 Brick,Basic,Brick,Tall
-30145,2x2x3 Brick,Basic,Brick,Tall
-30144,2x4x3 Brick,Basic,Brick,Tall
-86996,1x1⅔ Brick (Shorty),Basic,Brick,1x1
-3065,1x2 w/out Bottom Tube,Basic,Brick,1x2
+3008,1x8 Brick,Basic,Brick,1x
+3009,1x6 Brick,Basic,Brick,1x
+3010,1x4 Brick,Basic,Brick,1x
 3066,1x4 w/out Bottom Tubes,Basic,Brick,1x
+3622,1x3 Brick,Basic,Brick,1x
+6111,1x10 Brick,Basic,Brick,1x
+6112,1x12 Brick,Basic,Brick,1x1
+3005,1x1 Brick,Basic,Brick,1x1
+86996,1x1⅔ Brick (Shorty),Basic,Brick,1x2
+3004,1x2 Brick,Basic,Brick,1x2
+3065,1x2 w/out Bottom Tube,Basic,Brick,2x
+2456,2x6 Brick,Basic,Brick,2x
+3001,2x4 Brick,Basic,Brick,2x
+3002,2x3 Brick,Basic,Brick,2x
+3006,2x10 Brick,Basic,Brick,2x
+3007,2x8 Brick,Basic,Brick,2x2
+2357,2x2 Corner Brick,Basic,Brick,2x2
+3003,2x2 Brick,Basic,Brick,Tall
+2453,1x1x5 Brick,Basic,Brick,Tall
+2454,1x2x5 Brick,Basic,Brick,Tall
+3245,1x2x2 Brick,Basic,Brick,Tall
+14716,1x1x3 Brick,Basic,Brick,Tall
+22886,1x2x3 Brick,Basic,Brick,Tall
+30144,2x4x3 Brick,Basic,Brick,Tall
+30145,2x2x3 Brick,Basic,Brick,Tall
+43888,1x1x6 Round Brick,Basic,Brick,Tall
 46212,1x2x5 w/out Support,Basic,Brick,Tall
-3024,1x1 Plate,Basic,Plate,1x1
-3023,1x2 Plate,Basic,Plate,1x2
-3623,1x3 Plate,Basic,Plate,1x
-3710,1x4 Plate,Basic,Plate,1x
-78329,1x5 Plate,Basic,Plate,1x
-3666,1x6 Plate,Basic,Plate,1x
+49311,1x4x3 Brick,Basic,Brick,1x
 3460,1x8 Plate,Basic,Plate,1x
+3623,1x3 Plate,Basic,Plate,1x
+3666,1x6 Plate,Basic,Plate,1x
+3710,1x4 Plate,Basic,Plate,1x
 4477,1x10 Plate,Basic,Plate,1x
 60479,1x12 Plate,Basic,Plate,1x
-3022,2x2 Plate,Basic,Plate,2x
-3021,2x3 Plate,Basic,Plate,2x
-3020,2x4 Plate,Basic,Plate,2x
-3795,2x6 Plate,Basic,Plate,2x
-3034,2x8 Plate,Basic,Plate,2x
-3832,2x10 Plate,Basic,Plate,2x
+78329,1x5 Plate,Basic,Plate,1x1
+3024,1x1 Plate,Basic,Plate,1x2
+3023,1x2 Plate,Basic,Plate,2x
 2445,2x12 Plate,Basic,Plate,2x
-91988,2x14 Plate,Basic,Plate,2x
+3020,2x4 Plate,Basic,Plate,2x
+3021,2x3 Plate,Basic,Plate,2x
+3022,2x2 Plate,Basic,Plate,2x
+3034,2x8 Plate,Basic,Plate,2x
+3795,2x6 Plate,Basic,Plate,2x
+3832,2x10 Plate,Basic,Plate,2x
 4282,2x16 Plate,Basic,Plate,2x
-11212,3x3 Plate,Basic,Plate,3x
+91988,2x14 Plate,Basic,Plate,3x
+11212,3x3 Plate,Basic,Plate,4x
+3029,4x12 Plate,Basic,Plate,4x
+3030,4x10 Plate,Basic,Plate,4x
 3031,4x4 Plate,Basic,Plate,4x
 3032,4x6 Plate,Basic,Plate,4x
-3035,4x8 Plate,Basic,Plate,4x
-3030,4x10 Plate,Basic,Plate,4x
-3029,4x12 Plate,Basic,Plate,4x
-3958,6x6 Plate,Basic,Plate,6x
-3036,6x8 Plate,Basic,Plate,6x
-3033,6x10 Plate,Basic,Plate,6x
-3028,6x12 Plate,Basic,Plate,6x
-3456,6x14 Plate,Basic,Plate,6x
+3035,4x8 Plate,Basic,Plate,6x
 3027,6x16 Plate,Basic,Plate,6x
+3028,6x12 Plate,Basic,Plate,6x
+3033,6x10 Plate,Basic,Plate,6x
+3036,6x8 Plate,Basic,Plate,6x
+3456,6x14 Plate,Basic,Plate,6x
+3958,6x6 Plate,Basic,Plate,8x
 41539,8x8 Plate,Basic,Plate,8x
-92438,8x16 Plate,Basic,Plate,8x
 91405,16x16 Plate,Basic,Plate,8x
-2420,2x2 Corner Plate,Basic,Plate,Corner
-77844,3x3 Corner Plate,Basic,Plate,Corner
-15397,3x3 Cross Plate,Basic,Plate,Corner
-73831,2x3 Plate w/ Cutout,Basic,Plate,Corner
-2639,4x4 Corner Plate,Basic,Plate,Corner
-64799,4x4 w/ 2x2 cutout,Basic,Plate,Corner
-92593,1x4 w/ 2 studs,Basic,Plate,Edges
-41740,1x4 w/ Groove,Basic,Plate,Edges
-33909,2x2 w/ studs edge,Basic,Plate,Edges
-6179,4x4 w/ studs edge,Basic,Plate,Edges
-6180,4x6 w/ studs edges,Basic,Plate,Edges
-6178,6x12 w/ studs edges,Basic,Plate,Edges
-6205,6x16 w/ studs edges,Basic,Plate,Edges
-88646,3x4 w/ studs center,Basic,Plate,Edges
-4151,8x8 w/ Grille,Basic,Plate,Edges
-3867,16x16 Baseplate,Basic,Plate,Baseplate
-3811,32x32 Baseplate,Basic,Plate,Baseplate
+92438,8x16 Plate,Basic,Plate,Baseplate
 2628,8x8x⅔ w/ Studs,Basic,Plate,Baseplate
 2629,8x16x⅔ w/ Studs,Basic,Plate,Baseplate
+3811,32x32 Baseplate,Basic,Plate,Baseplate
+3867,16x16 Baseplate,Basic,Plate,Baseplate
 15624,8x8x⅔ w/ Studs,Basic,Plate,Baseplate
 18922,8x16x⅔ w/ Studs,Basic,Plate,Baseplate
-71772,8x16x⅔ w/ Recessed Studs,Basic,Plate,Baseplate
 69958,16x16x⅔ w/ Recessed Studs,Basic,Plate,Baseplate
-3070,1x1 Tile,Basic,Tile,1x1
-3069,1x2 Tile,Basic,Tile,1x2
-63864,1x3 Tile,Basic,Tile,1x
+71772,8x16x⅔ w/ Recessed Studs,Basic,Plate,Corner
+2420,2x2 Corner Plate,Basic,Plate,Corner
+2639,4x4 Corner Plate,Basic,Plate,Corner
+15397,3x3 Cross Plate,Basic,Plate,Corner
+64799,4x4 w/ 2x2 cutout,Basic,Plate,Corner
+73831,2x3 Plate w/ Cutout,Basic,Plate,Corner
+77844,3x3 Corner Plate,Basic,Plate,Edges
+4151,8x8 w/ Grille,Basic,Plate,Edges
+6178,6x12 w/ studs edges,Basic,Plate,Edges
+6179,4x4 w/ studs edge,Basic,Plate,Edges
+6180,4x6 w/ studs edges,Basic,Plate,Edges
+6205,6x16 w/ studs edges,Basic,Plate,Edges
+33909,2x2 w/ studs edge,Basic,Plate,Edges
+41740,1x4 w/ Groove,Basic,Plate,Edges
+88646,3x4 w/ studs center,Basic,Plate,Edges
+92593,1x4 w/ 2 studs,Basic,Plate,1x
 2431,1x4 Tile,Basic,Tile,1x
-6636,1x6 Tile,Basic,Tile,1x
 4162,1x8 Tile,Basic,Tile,1x
-14719,2x2 Corner Tile,Basic,Tile,2x
+6636,1x6 Tile,Basic,Tile,1x
+63864,1x3 Tile,Basic,Tile,1x1
+3070,1x1 Tile,Basic,Tile,1x2
+3069,1x2 Tile,Basic,Tile,2x
 3068,2x2 Tile,Basic,Tile,2x
-87079,2x4 Tile,Basic,Tile,2x
+14719,2x2 Corner Tile,Basic,Tile,2x
 26603,2x3 Tile,Basic,Tile,2x
 69729,2x6 Tile,Basic,Tile,2x
-10202,6x6 Tile,Basic,Tile,Large
-1751,4x4 Tile,Basic,Tile,Large
-90498,8x16 Tile,Basic,Tile,Large
+87079,2x4 Tile,Basic,Tile,Inverted
+3395,2x4 Tile Inverted,Basic,Tile,Inverted
 11203,2x2 Tile Inverted,Basic,Tile,Inverted
 35459,1x3 Tile Inv. w/ Hole,Basic,Tile,Inverted
-3395,2x4 Tile Inverted,Basic,Tile,Inverted
-63496,4x8 Tile Inverted,Basic,Tile,Inverted
-2877,1x2 Grille Brick,Wall,Decorative,
-71752,2x2x⅔ Brick Ribbed,Wall,Decorative,
-98283,1x2 Masonry,Wall,Decorative,
-15533,1x4 Masonry,Wall,Decorative,
-30136,1x2 Log (Palisade),Wall,Decorative,
-30137,1x4 Log (Palisade),Wall,Decorative,
-20310,1x1 Round w/ scroll,Wall,Decorative,
-2412,1x2 Grille Tile,Wall,Decorative,
-32028,1x2 door rail,Wall,Groove_Rail,
-4510,1x8 door rail,Wall,Groove_Rail,
-30586,2x8 door rail,Wall,Groove_Rail,
-4216,1x2 w/ Groove,Wall,Groove_Rail,
-88393,1x2x5 w/ Groove,Wall,Groove_Rail,
-4217,1x14 w/ Groove,Wall,Groove_Rail,
-2653,1x4 w/ groove,Wall,Groove_Rail,
-6231,1x1 Corner Panel,Wall,Panel,
-48651,1x2 Panel Sq. Corners,Wall,Panel,
-15714,1x2 Panel Rnd. Corners,Wall,Panel,
-23969,1x2 Panel w/ 2 sides,Wall,Panel,
-93095,1x2 Panel w/ Divider,Wall,Panel,
-23950,1x3 Panel,Wall,Panel,
-30413,1x4 Panel,Wall,Panel,
-91501,2x2 Corner Panel,Wall,Panel,
-87552,1x2x2 Panel,Wall,Panel,
-14718,1x4x2 Panel,Wall,Panel,
-87544,1x2x3 Panel,Wall,Panel,
-60581,1x4x3 Panel,Wall,Panel,
-59349,1x6x5 Panel,Wall,Panel,
-23405,1x6x5 Panel Corrugated,Wall,Panel,
-98280,1x6x3 Panel Studs on Sides,Wall,Panel,
-30022,Tipper End Panel,Wall,Panel,
-87421,3x3x6 Corner,Wall,Panel,
-47847,2x4x6 Rock Panel,Wall,Panel,
-6082,4x10x6 Rock Panel (BURP),Wall,Panel,
-64453,1x6x3 Windscreen,Wall,Panel,
-65735,1x10x4 Windscreen,Wall,Panel,
-60592,1x2x2 Window,Wall,Window,
-73878,3x3x2 Curved Window,Wall,Window,
-60601,2x2 Glass,Wall,Window,
-38320,2x2 Pane Lattice,Wall,Window,
-60593,1x2x3 Window,Wall,Window,
-60602,2x3 Glass,Wall,Window,
-51239,1x3x3 Window,Wall,Window,
-51266,3x3 Glass,Wall,Window,
-60594,1x4x3 Window,Wall,Window,
-4132,2x4x3 Frame,Wall,Window,
-2529,2x3 Pane Lattice,Wall,Window,
-60600,2x3 Shutter,Wall,Window,
-86210,4x3 Glass,Wall,Window,
-62113,4x3 Grille,Wall,Window,
-6154,1x4x4 Window,Wall,Window,
-60621,4x6 Door Barred,Wall,Door,
-60032,1x2x2 Door,Wall,Door,
-61345,1x2x4 Dbl. Plane,Wall,Door,
-4035,1x2x3 Train,Wall,Door,
-4033,1x4x3 Train,Wall,Door,
-30179,1x4x6 Door Frame,Wall,Door,
-57894,1x4x6 3 Panes,Wall,Door,
-60599,2x4x6 Door Frame,Wall,Door,
-57895,4x6 Glass,Wall,Door,
-60623,4x6 Door Frames,Wall,Door,
-60616,4x6 Door,Wall,Door,
-92589,4x6 Grille,Wall,Door,
-42205,1x6x6 Window,Wall,Door,
-42509,6x6 Glass,Wall,Door,
-80683,3x6 Door,Wall,Door,
-4447,4x4x3 Roof Window,Wall,Door,
-28327,4x4x6 Corner Door Frame,Wall,Door,
-90195,1x2x2 Round,Wall,Door,
-30044,1x2x2⅔ Round Top,Wall,Door,
-30046,2x2⅔ Round Pane Lattice,Wall,Door,
-30045,2x2⅔ Round Bar,Wall,Door,
-20309,1x4x1½ Arch Window,Wall,Door,
-60808,1x4x5 w/ Window,Wall,Door,
-40066,1x4x6 w/ Arch + Pillars,Wall,Door,
-35565,2x6x6 w/ Gothic Arch,Wall,Door,
-4218,Garage Roller Door Section,Wall,Door,
-30134,7x4x6 Stairs Open,Wall,Stairs,
-40243,Staircase Spiral,Wall,Stairs,
-4175,1x2 Ladder,Wall,Stairs,
-3633,1x4x1 Fence,Wall,Fence,
-3185,1x4x2 Fence,Wall,Fence,
-30055,1x4x2 Spindled,Wall,Fence,
-3224,1x2x1⅔ Frame w/ Diagonal Bar,Wall,Fence,
-21229,4x4x2 Quarter Round,Wall,Fence,
-19121,1x4x2 Ornamented,Wall,Fence,
-41823,3x3x2 Ø6 Ornamented,Wall,Fence,
-32932,1x4x2 Asian Lattice,Wall,Fence,
-33303,1x4x2 Picket,Wall,Fence,
-36841,1x1 Bracket,SNOT,Bracket,1x
-98281,1x2 Bracket,SNOT,Bracket,1x
-2436,1x4 Bracket,SNOT,Bracket,1x
-87609,2x6x2/3 4 Studs Side,SNOT,Bracket,1x
-99206,2x2x2/3 2 Studs Side,SNOT,Bracket,1x
-44728,2x2 Bracket,SNOT,Bracket,2x
-93274,2x4 Bracket,SNOT,Bracket,2x
-3956,2x2 Bracket w/ 2 Holes,SNOT,Bracket,2x
-14520,1x4x1⅔ Bumper w/ Arches,SNOT,Bracket,1x
-52038,1x4x1⅔ Bumper w/ Arches,SNOT,Bracket,1x
-30166,2x3 Shield w/ Studs,SNOT,Bracket,2x
-36840,1x1 Bracket Inverted,SNOT,Bracket,1x Inverted
-99780,1x2 Bracket Inverted,SNOT,Bracket,1x Inverted
-73825,2x1 Bracket Inverted,SNOT,Bracket,2x Inverted
-99207,2x2 Bracket Inverted,SNOT,Bracket,2x Inverted
-41682,2x2 Bracket Inverted,SNOT,Bracket,2x Inverted
-4585,2x1 Bracket Centered,SNOT,Bracket,2x
-69906,2x2 Bracket Curved 3x2 base,SNOT,Bracket,2x
-28974,Minifig Bracket Thick,Minifig,Clothing,
-42446,Minifig Bracket Thin,Minifig,Clothing,
-18986,Minifig Bracket w/ 2 studs,Minifig,Clothing,
-4070,1x1 Headlight,SNOT,Brick,1x1
-87087,1x1 Stud 1-side,SNOT,Brick,1x1
-47905,1x1 Studs Opposite sides,SNOT,Brick,1x1
-26604,1x1 Studs Adjacent sides,SNOT,Brick,1x1
-4733,1x1 Studs 4-sides,SNOT,Brick,1x1
-3386,1x1x2/3 Stud 1-side Ø1 Rounded End,SNOT,Brick,1x1
-32952,1x1x1⅔ 2 Studs 1-side,SNOT,Brick,1x1
-11211,1x2 Studs 1-side,SNOT,Brick,1x
-52107,1x2 Studs 2-sides,SNOT,Brick,1x
-30414,1x4 Studs 1-side,SNOT,Brick,1x
-22885,1x2x1⅔ Studs 1-side,SNOT,Brick,1x
-80796,1x2x1⅔ Studs 2-sides,SNOT,Brick,1x
-67329,1x2x1⅔ Studs 3-sides,SNOT,Brick,1x
-4595,1x2x⅔ Stud Sides,SNOT,Brick,1x
-15573,1x2 Jumper,SNOT,Jumper,
-3794,1x2 Jumper,SNOT,Jumper,
-87580,2x2 Jumper,SNOT,Jumper,
-34103,1x3 Double Jumper,SNOT,Jumper,
-65509,2x4 Double Jumper,SNOT,Jumper,
-86876,1x2 Jumper Stud 1-side,SNOT,Jumper,
-4590,1x4 Offset w/ 2 Rings,SNOT,Jumper,
-4596,1x2 w/ 3L Space Wing,SNOT,Jumper,
-3957,1L Antenna,Clip,Bar,
-2569,1x8 Whip Antenna,Clip,Bar,
-78258,2L Bar w/ Stop Ring,Clip,Bar,
-87994,3L Bar,Clip,Bar,
-30374,5L Bar,Clip,Bar,
-87618,6L Bar w/ Handle,Clip,Bar,
-63965,6L Bar w/ Stop Ring,Clip,Bar,
-18274,6L Bar w/ Stop Ring,Clip,Bar,
-2714,8L Bar w/ Pin & Ring,Clip,Bar,
-99784,12L Bar w/ 1x2 Plate,Clip,Bar,
-42445,12L Bar w/ 1x2 Plate,Clip,Bar,
-30359,1x8 Bar w/ 1x2 Brick,Clip,Bar,
-3849,9L Bar w/ Handle (Lance),Clip,Bar,
-37762,Candle,Clip,Bar,
-64567,Lightsaber Handle,Clip,Bar,
+63496,4x8 Tile Inverted,Basic,Tile,Large
+1751,4x4 Tile,Basic,Tile,Large
+10202,6x6 Tile,Basic,Tile,Large
+90498,8x16 Tile,Basic,Tile,
 577,Lightsaber Handle,Clip,Bar,
-92690,Bar 1L 1 stud stud 2 sides,Clip,Bar,
-66909,Bar 2L w/ 2-studs,Clip,Bar,
-98549,2x2 w/ Bar & Stud,Clip,Bar,
-73117,Candelabra w/ 3 arms,Clip,Bar,
 1566,Bar Stem w/ Stud Branch,Clip,Bar,
-37494,Pantograph Shoe w/ 4 Bar,Clip,Bar,
+2569,1x8 Whip Antenna,Clip,Bar,
+2714,8L Bar w/ Pin & Ring,Clip,Bar,
+3849,9L Bar w/ Handle (Lance),Clip,Bar,
+3957,1L Antenna,Clip,Bar,
 4042,Bar Curved w/ Axle & 2-studs,Clip,Bar,
-6019,1x1 Clip Horizontal,Clip,Clip,
-61252,1x1 Clip Horizontal,Clip,Clip,
-4081b,1x1 Ring,Clip,Clip,
-4085,1x1 Clip Vertical,Clip,Clip,
-78256,1x2 Vertical End,Clip,Clip,
-63868,1x2 Clip,Clip,Clip,
-11476,1x2 Clip Top,Clip,Clip,
-92280,1x2 Clip Double Side,Clip,Clip,
-44861,1x2 Clip Double Side,Clip,Clip,
-60470,1x1 Round Clip Top,Clip,Clip,
-15712,1x1 Round Clip Top,Clip,Clip,
-79987,1x3 2-clips,Clip,Clip,
-60475,1x1 Clip Horizontal,Clip,Clip,
-30241,1x1 Clip Vertical,Clip,Clip,
-60475,1x1 Clip Vertical,Clip,Clip,
-30283,1x1x3 2 Clips,Clip,Clip,
-30237,1x2 Clip Vertical,Clip,Clip,
-30350,2x3 Tile Clips Side,Clip,Clip,
-11399,4x4 Clips Side,Clip,Clip,
-66252,4x4 Clips Side Studs 3 Edges,Clip,Clip,
+18274,6L Bar w/ Stop Ring,Clip,Bar,
+30359,1x8 Bar w/ 1x2 Brick,Clip,Bar,
+30374,5L Bar,Clip,Bar,
+37494,Pantograph Shoe w/ 4 Bar,Clip,Bar,
+37762,Candle,Clip,Bar,
+42445,12L Bar w/ 1x2 Plate,Clip,Bar,
+63965,6L Bar w/ Stop Ring,Clip,Bar,
+64567,Lightsaber Handle,Clip,Bar,
+66909,Bar 2L w/ 2-studs,Clip,Bar,
+73117,Candelabra w/ 3 arms,Clip,Bar,
+78258,2L Bar w/ Stop Ring,Clip,Bar,
+87618,6L Bar w/ Handle,Clip,Bar,
+87994,3L Bar,Clip,Bar,
+92690,Bar 1L 1 stud stud 2 sides,Clip,Bar,
+98549,2x2 w/ Bar & Stud,Clip,Bar,
+99784,12L Bar w/ 1x2 Plate,Clip,Bar,
 3626,2L Bar w/ 3-clips,Clip,Clip,
-11090,Bar holder w/ clip,Clip,Clip,
-72869,Bar Holder w/ Clip 90°,Clip,Clip,
-23443,Bar holder w/ handle,Clip,Clip,
-48729,Bar w/ clip,Clip,Clip,
+4085,1x1 Clip Vertical,Clip,Clip,
 4735,1x3 Bar w/ Clip (Robot Arm),Clip,Clip,
-59230,Droid Arm Straight,Clip,Clip,
-30377,Droid Arm Bent,Clip,Clip,
-93609,Skeleton Arm Bent,Clip,Clip,
-93061,Skeleton Arm Bent,Clip,Clip,
-98313,Arm Mechanical,Clip,Clip,
-53989,Arm Mechanical,Clip,Clip,
+6019,1x1 Clip Horizontal,Clip,Clip,
 6266,Skeleton Leg,Clip,Clip,
-2335,2x2 Flag,Clip,Flag,
-44676,2x2 Flag Trapezoid,Clip,Flag,
-4495,4x1 Flag Wave,Clip,Flag,
-2525,6x4 Flag,Clip,Flag,
-15210,2x2 Square Road sign,Clip,Flag,
-892,2x2 Triangle Road sign,Clip,Flag,
-30259,2x2 Triangle Road sign,Clip,Flag,
-51000,5x6 Flag Hexagonal,Clip,Flag,
-17979,5x6 Flag Hexagonal,Clip,Flag,
-x1435,5x6 Flag Hexagonal,Clip,Flag,
-30292,7x3 Flag w/ Rod,Clip,Flag,
-35252,7x3 Flag w/ Rod,Clip,Flag,
-28220,Armor Plate w/ 2 bars,Clip,Flag,
-35649,1x2 Kite / Diamond w/ bar,Clip,Flag,
-28947,1x1 Handle Round,Clip,Handle,
-78237,1x1 Handle Both Ends,Clip,Handle,
-60478,1x2 Handle End,Clip,Handle,
-18649,1x2 Handle Both Ends,Clip,Handle,
-48336,1x2 Handle Side,Clip,Handle,
-2540,1x2 Handle Side (two ends),Clip,Handle,
-4823,1x2 Handle Side (arm up),Clip,Handle,
-88072,1x2 Handle Side (arm up),Clip,Handle,
-30043,1x4 Handle Side (arm down),Clip,Handle,
-2921,1x1 Handle Vertical,Clip,Handle,
-30236,1x2 Handle Side,Clip,Handle,
-34816,1x2 Handle Vertical,Clip,Handle,
-26597,1x2 Handle Vertical,Clip,Handle,
-15071,1x2x2/3 Studs 4-sides & Angled Bar,Clip,Handle,
-92692,1x2 Angled,Clip,Handle,
-25893,1x1 Round w/ Handle,Clip,Handle,
-77808,1x2 Rounded Brick w/ Bars,Clip,Handle,
-2566,Palm Tree Top,Clip,Handle,
-98284,2x2 Round w/ 4 Handles,Clip,Handle,
-3839,1x2 Handles Both Sides,Clip,Handle,
-2397,Horse Hitching,Clip,Handle,
-49134,Horse Hitching,Clip,Handle,
-2432,1x2 Handle Top,Clip,Handle,
-3900,Paddle,Clip,Handle,
-32828,Round Plate w/ Bar 1L,Clip,Handle,
-65578,1x1 Round w/ 45° Bar,Clip,Handle,
-36452,Minifig Bracket w/ 4 Handles,Clip,Handle,
-3661,1x1 Plate w/ Handle (arm down),Clip,Handle,
-3171,Clip w/ Bar Angled,Clip,Handle,
-3917,2.4x2.4 Bar Ring w/ Stud Holder,Clip,Handle,
-92107,6x8 Trap Door Frame,Clip,Door,
+11090,Bar holder w/ clip,Clip,Clip,
+11399,4x4 Clips Side,Clip,Clip,
+11476,1x2 Clip Top,Clip,Clip,
+15712,1x1 Round Clip Top,Clip,Clip,
+23443,Bar holder w/ handle,Clip,Clip,
+30237,1x2 Clip Vertical,Clip,Clip,
+30241,1x1 Clip Vertical,Clip,Clip,
+30283,1x1x3 2 Clips,Clip,Clip,
+30350,2x3 Tile Clips Side,Clip,Clip,
+30377,Droid Arm Bent,Clip,Clip,
+44861,1x2 Clip Double Side,Clip,Clip,
+48729,Bar w/ clip,Clip,Clip,
+53989,Arm Mechanical,Clip,Clip,
+59230,Droid Arm Straight,Clip,Clip,
+60470,1x1 Round Clip Top,Clip,Clip,
+60475,1x1 Clip Horizontal,Clip,Clip,
+60475,1x1 Clip Vertical,Clip,Clip,
+61252,1x1 Clip Horizontal,Clip,Clip,
+63868,1x2 Clip,Clip,Clip,
+66252,4x4 Clips Side Studs 3 Edges,Clip,Clip,
+72869,Bar Holder w/ Clip 90°,Clip,Clip,
+78256,1x2 Vertical End,Clip,Clip,
+79987,1x3 2-clips,Clip,Clip,
+92280,1x2 Clip Double Side,Clip,Clip,
+93061,Skeleton Arm Bent,Clip,Clip,
+93609,Skeleton Arm Bent,Clip,Clip,
+98313,Arm Mechanical,Clip,Clip,
+4081b,1x1 Ring,Clip,Clip,
 30041,6x8 Trap Door Frame,Clip,Door,
-92099,4x6 Trap Door,Clip,Door,
 30042,4x6 Trap Door,Clip,Door,
 69934,10x16 w/ Bar Edge (Book Cover),Clip,Door,
-75c,Flex Tube Ø3mm (Rigid Hose),Clip,Flexible,
-27965,22L Flex Cable w/ Bar Hole (Zipline),Clip,Flexible,
-27328,10L Ribbed Hose,Clip,Flexible,
+92099,4x6 Trap Door,Clip,Door,
+92107,6x8 Trap Door Frame,Clip,Door,
+892,2x2 Triangle Road sign,Clip,Flag,
+2335,2x2 Flag,Clip,Flag,
+2525,6x4 Flag,Clip,Flag,
+4495,4x1 Flag Wave,Clip,Flag,
+15210,2x2 Square Road sign,Clip,Flag,
+17979,5x6 Flag Hexagonal,Clip,Flag,
+28220,Armor Plate w/ 2 bars,Clip,Flag,
+30259,2x2 Triangle Road sign,Clip,Flag,
+30292,7x3 Flag w/ Rod,Clip,Flag,
+35252,7x3 Flag w/ Rod,Clip,Flag,
+35649,1x2 Kite / Diamond w/ bar,Clip,Flag,
+44676,2x2 Flag Trapezoid,Clip,Flag,
+51000,5x6 Flag Hexagonal,Clip,Flag,
+x1435,5x6 Flag Hexagonal,Clip,Flag,
+2630,21L Flex Cable w/ Bar Connectors,Clip,Flexible,
 14301,12L Ribbed Hose,Clip,Flexible,
-57539,19L Ribbed Hose,Clip,Flexible,
-32580,7L Soft Axles,Clip,Flexible,
+27328,10L Ribbed Hose,Clip,Flexible,
+27965,22L Flex Cable w/ Bar Hole (Zipline),Clip,Flexible,
 32199,11L Soft Axles,Clip,Flexible,
 32201,14L Soft Axles,Clip,Flexible,
 32202,16L Soft Axles,Clip,Flexible,
 32235,19L Soft Axles,Clip,Flexible,
-2630,21L Flex Cable w/ Bar Connectors,Clip,Flexible,
-30386,1x2 Click Hinge Both Ends (vertical),Hinge,Click_brick,
-39893,1x2 Click Hinge Both Ends (vertical),Hinge,Click_brick,
-47975,1x2 Click Hinge Both Ends (mixed),Hinge,Click_brick,
-30365,1x2 Click Hinge 2-Finger Vertical,Hinge,Click_brick,
-54671,1x2 Click Hinge 2-Finger Vertical,Hinge,Click_brick,
-30364,1x2 Click Hinge 1-Finger Horizontal,Hinge,Click_brick,
-30541,1x2 Click Hinge 1-Finger Horizontal,Hinge,Click_brick,
-30540,1x2 Click Hinge 2-Finger Horizontal,Hinge,Click_brick,
-54672,1x2 Click Hinge 2-Finger Horizontal,Hinge,Click_brick,
-989,1x2 Click Hinge 1-Finger Top,Hinge,Click_brick,
-30387,1x4 Click Hinge Both Ends (vertical),Hinge,Click_brick,
-54661,1x4 Click Hinge Both Ends (vertical),Hinge,Click_brick,
-30388,1x6 Click Hinge Both Ends (vertical),Hinge,Click_brick,
-30389,2x2 Click Hinge 1 Finger Vertical,Hinge,Click_brick,
-40902,2x2 Click Hinge 2-Finger Vertical,Hinge,Click_brick,
-53029,2x2 Click Hinge 2-Finger Vertical,Hinge,Click_brick,
-44302,1x2 Click Hinge 2-Finger End,Hinge,Click_plate,
-54657,1x2 Click Hinge 2-Finger End,Hinge,Click_plate,
-44301,1x2 Click Hinge 1-Finger End,Hinge,Click_plate,
-30383,1x2 Click Hinge 1-Finger Top,Hinge,Click_plate,
-60471,1x2 Click Hinge 2-Finger Side,Hinge,Click_plate,
-50340,1x2 Click Hinge 2-Finger Side,Hinge,Click_plate,
-44567,1x2 Click Hinge 1-Finger Side,Hinge,Click_plate,
-44300,1x3 Click Hinge 1-Finger Top,Hinge,Click_plate,
-92582,2x2 Click Hinge 1-Finger Top,Hinge,Click_plate,
-44822,1x4 Click Hinge Dual 1-Finger Top,Hinge,Click_plate,
-44568,1x4 Click Hinge Dual 1-Finger Side,Hinge,Click_plate,
-44570,3x4 Click Hinge Dual 2-Finger Side,Hinge,Click_plate,
-50337,3x4 Click Hinge Dual 2-Finger Side,Hinge,Click_plate,
-65133,4x6 Click Hinge Dual 1-Finger Side,Hinge,Click_plate,
-30396,Click Hinge w/ Towball Socket,Hinge,Click_other,
-51432,Click Hinge w/ Towball Socket,Hinge,Click_other,
-47973,1x3 Hinge w/ 2 pins,Hinge,Click_other,
-54662,1x2 Cylinder Both Ends,Hinge,Click_other,
-30554,1x2 Cylinder Both Ends,Hinge,Click_other,
-57360,1x2 Cylinder 2 Finger / Axle,Hinge,Click_other,
-30553,1x2 Cylinder 2 Finger / Axle,Hinge,Click_other,
-53923,1x2 Cylinder 1 Finger / Axle,Hinge,Click_other,
-30552,1x2 Cylinder 1 Finger / Axle,Hinge,Click_other,
-57697,1x3 Cylinder 1 Finger / Pin,Hinge,Click_other,
-41532,1x3 Cylinder 1 Finger / Pin,Hinge,Click_other,
-14137,1x8 Click Hinge Angled Edge,Hinge,Click_other,
-30407,1x8 Click Hinge Angled Edge,Hinge,Click_other,
-57906,1x12 Click Hinge Angled & Tapered,Hinge,Click_other,
-3937,1x2 Hinge Brick,Hinge,Hinge,
-3938,1x2 Hinge Brick,Hinge,Hinge,
-3830,1x4 Hinge Brick,Hinge,Hinge,
-3831,1x4 Hinge Brick,Hinge,Hinge,
-2429,1x4 Hinge Plate,Hinge,Hinge,
-2430,1x4 Hinge Plate,Hinge,Hinge,
-6134,2x2 Hinge Top Plate,Hinge,Hinge,
-3679,2x2 Turntable,Hinge,Turntable,
-3680,2x2 Turntable,Hinge,Turntable,
-27448,2x2 Turntable Base,Hinge,Turntable,
-61485,4x4 Turntable Base,Hinge,Turntable,
-35442,6 Tooth 2x2 Plate Gear,Hinge,Turntable,
-35443,10 Tooth 4x4 Plate Gear,Hinge,Turntable,
-35446,14 Tooth 6x6 Plate Gear,Hinge,Turntable,
-57909,2x2 Ball Joint 1 Ball,Hinge,Socket-ball,
-57908,2x2 Ball Joint 2 Ball,Hinge,Socket-ball,
-17114,2x2 Ball Joint 2 Ball,Hinge,Socket-ball,
-92013,2x2 Ball Joint Receptacle,Hinge,Socket-ball,
-62712,2x2 Ball Joint Receptacle,Hinge,Socket-ball,
-57910,2x2 Ball Joint Receptacle,Hinge,Socket-ball,
-64276,1x2 Liftarm Ball Straight,Hinge,Socket-ball,
-50923,1x2 Liftarm Ball Angled,Hinge,Socket-ball,
-98613c01,2L Extender 1B1S,Hinge,Socket-ball,
-93571,2x3 Socket w/ Axle,Hinge,Socket-ball,
-48171,2x2 Rotation Joint Vertical,Hinge,Socket-click,
-48170,2x2 Rotation Joint Horizontal,Hinge,Socket-click,
-60431,1x2x1⅓ Rotation Joint,Hinge,Socket-click,
-48169,2x2 Rotation Joint 1 Socket,Hinge,Socket-click,
-48172,2x2 Rotation Joint 2 Socket,Hinge,Socket-click,
-1994,2x2x2 Round w/ Rotation Joint Socket,Hinge,Socket-click,
-47455,Rotation Joint 2 Pins,Hinge,Socket-click,
-79505,Ø3 Rotation Disk w/ 2-Rotation Joints,Hinge,Socket-click,
-14417,1x2 Towball Side,Hinge,Socket-towball,
-22890,1x2 Towball End,Hinge,Socket-towball,
-3170,1x2 Towball Both Ends,Hinge,Socket-towball,
-3184,1x4 Towball Side,Hinge,Socket-towball,
-15456,2x2 Towball,Hinge,Socket-towball,
-3731,2x2 Towball,Hinge,Socket-towball,
-14419,1x2 Towball & Socket End,Hinge,Socket-towball,
-14704,1x2 Socket Side,Hinge,Socket-towball,
-14418,1x2 Socket End,Hinge,Socket-towball,
-98263,1x4 Socket Side,Hinge,Socket-towball,
-3183,1x4 Socket Side,Hinge,Socket-towball,
-63082,2x2 Socket,Hinge,Socket-towball,
-3730,2x2 Socket,Hinge,Socket-towball,
-22484,Towball Bar 1L,Hinge,Socket-towball,
-2736,Towball Axle,Hinge,Socket-towball,
-6628,Towball Pin,Hinge,Socket-towball,
-66906,Towball Pin,Hinge,Socket-towball,
-80477,3L Towball Bar w/ Pin,Hinge,Socket-towball,
-2508,1x2 wing w/ Towball End,Hinge,Socket-towball,
-30395,Towball w/ Hook,Hinge,Socket-towball,
-15460,Pin hole w/ 3 Towball,Hinge,Socket-towball,
-6565,3x2 Wedge L.,Angle,Wedge-brick,
-6564,3x2 Wedge R.,Angle,Wedge-brick,
-41765,4x2 Wedge L.,Angle,Wedge-brick,
-41767,4x2 Wedge R.,Angle,Wedge-brick,
-50373,3x4 Wedge,Angle,Wedge-brick,
-30505,3x3 Corner,Angle,Wedge-brick,
-87620,2x2 Corner Facet,Angle,Wedge-brick,
-2462,3x3 Corner Facet,Angle,Wedge-brick,
-14413,4x4 Corner Facet,Angle,Wedge-brick,
-26601,45° 2x2 Corner,Angle,Wedge-plate,
-2450,45° 3x3 Corner,Angle,Wedge-plate,
-30503,45° 4x4 Corner,Angle,Wedge-plate,
-6106,45° 6x6 Corner,Angle,Wedge-plate,
-30504,45° 8x8 Cut Corner,Angle,Wedge-plate,
-92584,45° 10x10 Corner w/ edge studs,Angle,Wedge-plate,
-2419,45° 3x6 Wedge,Angle,Wedge-plate,
-60297,45° 4x8 Wedge,Angle,Wedge-plate,
-89523,45° 10x10 Octagonal,Angle,Wedge-plate,
-6063,45° 10x10 Octagonal w/ cutout,Angle,Wedge-plate,
-22385,2x3 Tile Pentagonal,Angle,Wedge-tile,
-27263,2x2 Tile Corner,Angle,Wedge-tile,
-27928,2x2 Wedge w/ Jumper,Angle,Wedge-tile,
-35787,2x2 Tile Triangular,Angle,Wedge-tile,
-13548,2x2 Wedge Slope,Angle,Wedge-nose,
-47759,2x4 Wedge Slope,Angle,Wedge-nose,
-48961,4x4 Wedge Slope,Angle,Wedge-nose,
-4861,3x4 Corner Slope,Angle,Wedge-nose,
-43711,4x2 Wedge Slope R.,Angle,Wedge-nose,
-43710,4x2 Wedge Slope L.,Angle,Wedge-nose,
-48934,4x4 Wedge Slope,Angle,Wedge-nose,
-47757,4x4 Wedge Pyramid,Angle,Wedge-nose,
-22391,4x4 Wedge Pointed,Angle,Wedge-nose,
-93348,4x4 Wedge Taper,Angle,Wedge-nose,
-64867,4x4 Wedge Fractured,Angle,Wedge-nose,
-6153,6x4 Wedge Slope Cutout,Angle,Wedge-nose,
-22350,6x8 Wedge Slope w/ cutout,Angle,Wedge-nose,
-1762,33° 2x2 Double Wedge Curved,Angle,Wedge-nose,
-42862,3x3 Wedge Slope L.,Angle,Wedge-nose,
-48165,3x3 Wedge Slope R.,Angle,Wedge-nose,
-13349,4x4 Wedge Slope Inv.,Angle,Wedge-nose,
-4855,6x4 Wedge Slope Inv.,Angle,Wedge-nose,
-43713,6x4 Wedge Slope Inv.,Angle,Wedge-nose,
-41765,6x2 Wedge Curve Inv. L.,Angle,Wedge-nose,
-41764,6x2 Wedge Curve Inv. R.,Angle,Wedge-nose,
-4599,10° 6x1 Slope,Angle,Slope-10-18-30,
-4515,10° 6x8 Slope,Angle,Slope-10-18-30,
-61409,18° 2x1 Cheese Grater,Angle,Slope-10-18-30,
-60477,18° 4x1 Slope,Angle,Slope-10-18-30,
-30363,18° 4x2 Slope,Angle,Slope-10-18-30,
-48919,25° 8x1x3 Slope,Angle,Slope-10-18-30,
-54200,30° 1x1 Cheese,Angle,Slope-10-18-30,
-99384,30° 1x2 Cheese,Angle,Slope-10-18-30,
-4286,33° 3x1 Slope,Angle,Slope-33,
-3298,33° 3x2 Slope,Angle,Slope-33,
-4161,33° 3x3 Slope,Angle,Slope-33,
-3297,33° 3x4 Slope,Angle,Slope-33,
-3675,33° 3x3 Corner Slope,Angle,Slope-33,
-99301,33° 3x3 Inside Corner Slope,Angle,Slope-33,
-58181,33° 3x6 Slope,Angle,Slope-33,
-3300,33° 2x2 Dbl. Slope,Angle,Slope-33,
-3299,33° 2x4 Dbl. Slope,Angle,Slope-33,
-3040,45° 2x1 Slope,Angle,Slope-45,
-3039,45° 2x2 Slope,Angle,Slope-45,
-3038,45° 2x3 Slope,Angle,Slope-45,
-3037,45° 2x4 Slope,Angle,Slope-45,
-23949,45° 2x6 Slope,Angle,Slope-45,
-4445,45° 2x8 Slope,Angle,Slope-45,
-3045,45° 2x2 Corner Slope,Angle,Slope-45,
-3046,45° 2x2 Inside Corner Slope,Angle,Slope-45,
-92946,45° 2x1 Cutout,Angle,Slope-45,
-28192,45° 2x1 Cutout w/out stud,Angle,Slope-45,
-3044,45° 2x1 Dbl. Slope,Angle,Slope-45,
-3043,45° 2x2 Dbl. Slope,Angle,Slope-45,
-3042,45° 2x3 Dbl. Slope,Angle,Slope-45,
-3041,45° 2x4 Dbl. Slope,Angle,Slope-45,
-3049,45° 1x2 Dbl. Slope Inv.,Angle,Slope-45,
-15571,45° 2x1 Triple Slope,Angle,Slope-45,
-35464,45° 1x1 Dbl. Slope,Angle,Slope-45,
-22388,45° 1x1¾ Pyramid,Angle,Slope-45,
-13269,45° 6x4 45° / 33°,Angle,Slope-45,
-32083,45° 6x4 Train Roof,Angle,Slope-45,
-30249,55° 6x1x5 Slope,Angle,Slope-55-65-75,
-60481,65° 2x1x2 Slope,Angle,Slope-55-65-75,
-3678,65° 2x2x2 Slope,Angle,Slope-55-65-75,
-4460,75° 2x1x3 Slope,Angle,Slope-55-65-75,
-3684,75° 2x2x3 Slope,Angle,Slope-55-65-75,
-3685,75° 2x2x3 Corner Slope,Angle,Slope-55-65-75,
-3688,75° 2x2x2 Square Cone,Angle,Slope-55-65-75,
-3523,2x4x2 Windscreen,Vehicle,Windscreen,
-57783,3x4x1½ Windscreen,Vehicle,Windscreen,
-2437,3x4x1½ Windscreen,Vehicle,Windscreen,
-6238,4x4x1 Windscreen,Vehicle,Windscreen,
-4176,2x6x2 Windscreen,Vehicle,Windscreen,
-92583,3x6x2 Windscreen,Vehicle,Windscreen,
-6070,5x2x1⅔ Windscreen,Vehicle,Windscreen,
-27262,6x4x1 Windscreen Hexagonal w/ Handle,Vehicle,Windscreen,
-11289,4x4x4½ Windscreen w/ Handle,Vehicle,Windscreen,
-4073,1x1 Round,Curved,plate,1x1
-85861,1x1 Round w/ hole,Curved,plate,1x1
-20482,1x1 Round w/ Pin,Curved,plate,1x1
-35480,1x2 Plate Ø1 Rounded Ends,Curved,plate,1x
-77850,1x3 Plate Ø1 Rounded Ends,Curved,plate,1x
-77845,1x4 Plate Ø1 Rounded Ends,Curved,plate,1x
-4032,2x2 Round,Curved,plate,2x
-15535,2x2 Round w/ Hole,Curved,plate,2x
-18674,2x2 Round Jumper,Curved,plate,2x
-18646,3x6 Ø6 ½-Circle w/ cutout,Curved,plate,3x or greater
-3176,3x2 Ø2 Rounded End w/ Hole,Curved,plate,3x or greater
-60474,4x4 Round,Curved,plate,3x or greater
-11833,4x4 Round w/ 2+2 hole,Curved,plate,3x or greater
-30357,3x3 Ø4 Rounded Corner,Curved,plate,3x or greater
-19950,2x6 Ø4 Rounded Corners,Curved,plate,3x or greater
-25140,8x8 Ø4 Rounded Corners,Curved,plate,3x or greater
-11213,6x6 Round,Curved,plate,3x or greater
-74611,8x8 Round,Curved,plate,3x or greater
-6177,8x8 Round w/ 2+2 Studs,Curved,plate,3x or greater
-22888,4x8 Ø8 ½-Circle,Curved,plate,3x or greater
-30565,4x4 Ø8 ¼-Circle,Curved,plate,3x or greater
-6003,6x6 Ø8 Corner,Curved,plate,3x or greater
-41948,8x8 Ø8 Rounded End,Curved,plate,3x or greater
-30031,10x10 Ø8 Rounded End,Curved,plate,3x or greater
-79491,2x2 Ø2 Corner w/ Cutout,Curved,plate,2x
-68568,3x3 Ø4 Corner w/ cutout,Curved,plate,3x or greater
-50015,5x5 Ø8 Corner w/ Cutout,Curved,plate,3x or greater
-35044,4x4 w/ Ø6 ¼ cutout,Curved,plate,3x or greater
-66792,4x4x⅔ Ø2 Rounded Corners,Curved,doubleplate,
-79387,4x4x⅔ Ø2 Rounded Corners w/ Hole,Curved,doubleplate,
-68869,4x4x⅔ Ø2 Tile Rounded Corners,Curved,doubleplate,
-66789,6x6x⅔ Ø4 Rounded Corners,Curved,doubleplate,
-89681,4x6x⅔ Ø4 2-Corners,Curved,doubleplate,
-66790,8x8x⅔ Ø4 Rounded Corners,Curved,doubleplate,
-73832,8x4x⅔ Ø4 2-Corners,Curved,doubleplate,
-3062,1x1 Round,Curved,brick,1x1
-98138,1x1 Tile Round,Curved,tile,1x1
-3941,2x2 Round,Curved,brick,2x
+32580,7L Soft Axles,Clip,Flexible,
+57539,19L Ribbed Hose,Clip,Flexible,
+75c,Flex Tube Ø3mm (Rigid Hose),Clip,Flexible,
+2397,Horse Hitching,Clip,Handle,
+2432,1x2 Handle Top,Clip,Handle,
+2540,1x2 Handle Side (two ends),Clip,Handle,
+2566,Palm Tree Top,Clip,Handle,
+2921,1x1 Handle Vertical,Clip,Handle,
+3171,Clip w/ Bar Angled,Clip,Handle,
+3661,1x1 Plate w/ Handle (arm down),Clip,Handle,
+3839,1x2 Handles Both Sides,Clip,Handle,
+3900,Paddle,Clip,Handle,
+3917,2.4x2.4 Bar Ring w/ Stud Holder,Clip,Handle,
+4823,1x2 Handle Side (arm up),Clip,Handle,
+15071,1x2x2/3 Studs 4-sides & Angled Bar,Clip,Handle,
+18649,1x2 Handle Both Ends,Clip,Handle,
+25893,1x1 Round w/ Handle,Clip,Handle,
+26597,1x2 Handle Vertical,Clip,Handle,
+28947,1x1 Handle Round,Clip,Handle,
+30043,1x4 Handle Side (arm down),Clip,Handle,
+30236,1x2 Handle Side,Clip,Handle,
+32828,Round Plate w/ Bar 1L,Clip,Handle,
+34816,1x2 Handle Vertical,Clip,Handle,
+36452,Minifig Bracket w/ 4 Handles,Clip,Handle,
+48336,1x2 Handle Side,Clip,Handle,
+49134,Horse Hitching,Clip,Handle,
+60478,1x2 Handle End,Clip,Handle,
+65578,1x1 Round w/ 45° Bar,Clip,Handle,
+77808,1x2 Rounded Brick w/ Bars,Clip,Handle,
+78237,1x1 Handle Both Ends,Clip,Handle,
+88072,1x2 Handle Side (arm up),Clip,Handle,
+92692,1x2 Angled,Clip,Handle,
+98284,2x2 Round w/ 4 Handles,Clip,Handle,
+3572,1x5x2 Bow,Curved,Arch_bow,
+3659,1x4 Arch,Curved,Arch_bow,
+4480,1x3 Arch,Curved,Arch_bow,
+6108,1x12x3 Arch,Curved,Arch_bow,
+6182,1x4x2 Arch,Curved,Arch_bow,
+12939,1x6x2 Arch,Curved,Arch_bow,
+3307,1x6x2 Arch,Curved,Arch_bow,
+13965,1x3x3 Bow Pointed,Curved,Arch_bow,
+16577,1x8x2 Arch,Curved,Arch_bow,
+18653,1x3x2 Inverted,Curved,Arch_bow,
+30099,1x5x4 Inverted,Curved,Arch_bow,
+38583,1x2 Dbl. Half Arch,Curved,Arch_bow,
+38585,1½x1½ Dbl. Half Arch,Curved,Arch_bow,
+50967,8x1 Curved w/ Arch,Curved,Arch_bow,
+76768,1x5x4 Bow,Curved,Arch_bow,
+80543,1x4x3 Bow,Curved,Arch_bow,
+86232,1x3x2 Bow Pointed,Curved,Arch_bow,
+92950,1x6 Arch,Curved,Arch_bow,
+24946,Egg,Curved,Ball,
+54821,Ball Bionicle Zamor Sphere,Curved,Ball,
+72824,Ball Soccer,Curved,Ball,1x
 35013,1x2 ½-Circle,Curved,brick,1x
+35477,1x2 Brick w/ Round Ends,Curved,brick,1x1
+3062,1x1 Round,Curved,brick,1x1
+3626,Minifig Head,Curved,brick,2x
 3063,2x2 Corner,Curved,brick,2x
-87081,4x4 Round w/ Hole,Curved,brick,3x or greater
-65325,4x4 Round w/ Recess,Curved,brick,3x or greater
-48092,4x4 Corner,Curved,brick,3x or greater
+3941,2x2 Round,Curved,brick,2x
+92947,2x2 Round w/ Grille,Curved,brick,3x or greater
 2577,4x4 Corner,Curved,brick,3x or greater
-3626,Minifig Head,Curved,brick,1x1
-92947,2x2 Round w/ Grille,Curved,brick,2x
-35477,1x2 Brick w/ Round Ends,Curved,brick,1x
-24246,1x1 Tile Ø1 Rounded End,Curved,tile,1x1
-1126,1x2 Tile Ø1 Rounded Ends,Curved,tile,1x
-4150,2x2 Round,Curved,tile,2x
-66857,2x4 Tile Ø2 Rounded Ends,Curved,tile,2x
-25269,1x1 Tile Ø2 ½-Circle,Curved,tile,1x1
-1748,1x2 Tile Ø2 ½-Circle,Curved,tile,1x
-3396,2x2 Tile w/ 2 cutouts,Curved,tile,2x
-67095,3x3 Round,Curved,tile,3x or greater
-27925,2x2 Tile Ø4 Corner,Curved,tile,2x
-79393,3x3 Tile Ø6 Corner,Curved,tile,3x or greater
-65474,6x8 Tile Ø6 Rounded Ends,Curved,tile,3x or greater
-27507,4x4 Tile Ø8 Corner,Curved,tile,3x or greater
-73111,3x3x2 Round w/ Recess,Curved,cylinder,
-30967,2x2x5 Ø4 ¼-Cylinder,Curved,cylinder,
-24593,2x4x2 Ø4 ¼-Cylinder,Curved,cylinder,
-6259,2x4x4 Ø4 ¼-Cylinder,Curved,cylinder,
-55941,2x4x5 Ø4 ¼-Cylinder,Curved,cylinder,
-87926,3x6x6 Ø6 ¼-Cylinder,Curved,cylinder,
-3535,3x3x2 Panel Ø6 ¼-Circle,Curved,cylinder,
-4041,4x4x3 Panel Ø8 ¼-Cylinder,Curved,cylinder,
-30562,4x4x6 Ø8 ¼-Cylinder,Curved,cylinder,
-60373,3x3 Ø4 ¼-Cylinder w/ 2 Bows,Curved,cylinder,
-30562,1x5½ Cylinder,Curved,cylinder,
-4589,1x1 Cone,Curved,Cone,
+48092,4x4 Corner,Curved,brick,3x or greater
+65325,4x4 Round w/ Recess,Curved,brick,3x or greater
+4744,Curved 4x2x2 Double with 4 Studs,Curved,brick,3x or greater
+87081,4x4 Round w/ Hole,Curved,brick,
 3942,2x2x2 Cone,Curved,Cone,
 3943,3x3x2 Cone,Curved,Cone,
 3943,4x4x2 Cone,Curved,Cone,
+4589,1x1 Cone,Curved,Cone,
+4589,1x1 w/ Fins,Curved,Cone,
 4742,4x4x2 Hollow,Curved,Cone,
-38317,4x2x3 ½-Cone,Curved,Cone,
-47543,8x4x6 Half Cone,Curved,Cone,
 29096,10x5x6 Half Cone,Curved,Cone,
 35563,2x4x4 1/2 Cone w/ Roof Tiles,Curved,Cone,
-98099,6x3x6 1/2 Cone Paraboloid,Curved,Cone,
-95975,1x1x⅔ (Fez),Curved,Cone,
-93492,1½x1½x⅔ Cone,Curved,Cone,
-98100,2x2 Cone Truncated,Curved,Cone,
-4589,1x1 w/ Fins,Curved,Cone,
+38317,4x2x3 ½-Cone,Curved,Cone,
+47543,8x4x6 Half Cone,Curved,Cone,
 49309,2x2x2 Cone Inverted,Curved,Cone,
 71610,Ice Cream Cone 1x1 Cone Inv. w/ Bar,Curved,Cone,
-4480,1x3 Arch,Curved,Arch_bow,
-3659,1x4 Arch,Curved,Arch_bow,
-6182,1x4x2 Arch,Curved,Arch_bow,
-92950,1x6 Arch,Curved,Arch_bow,
-12939,1x6x2 Arch,Curved,Arch_bow,
-16577,1x8x2 Arch,Curved,Arch_bow,
-6108,1x12x3 Arch,Curved,Arch_bow,
-50967,8x1 Curved w/ Arch,Curved,Arch_bow,
-86232,1x3x2 Bow Pointed,Curved,Arch_bow,
-13965,1x3x3 Bow Pointed,Curved,Arch_bow,
-80543,1x4x3 Bow,Curved,Arch_bow,
-76768,1x5x4 Bow,Curved,Arch_bow,
-3572,1x5x2 Bow,Curved,Arch_bow,
-30099,1x5x4 Inverted,Curved,Arch_bow,
-18653,1x3x2 Inverted,Curved,Arch_bow,
-38583,1x2 Dbl. Half Arch,Curved,Arch_bow,
-38585,1½x1½ Dbl. Half Arch,Curved,Arch_bow,
+93492,1½x1½x⅔ Cone,Curved,Cone,
+95975,1x1x⅔ (Fez),Curved,Cone,
+98099,6x3x6 1/2 Cone Paraboloid,Curved,Cone,
+98100,2x2 Cone Truncated,Curved,Cone,basic_curve
+3063,1x2x⅔ Curved,Curved,Curved,basic_curve
+11477,2x1x⅔ Curved,Curved,Curved,basic_curve
+15068,2x2x⅔ Curved,Curved,Curved,basic_curve
+42022,6x1 Curved,Curved,Curved,basic_curve
+42918,8x2 Curved,Curved,Curved,basic_curve
+44126,6x2 Curved,Curved,Curved,basic_curve
+61678,4x1 Curved,Curved,Curved,basic_curve
+79756,1x4x⅔ Curved,Curved,Curved,basic_curve
+85970,10x1 Curved,Curved,Curved,basic_curve
+93606,4x2 Curved,Curved,Curved,corner
+67810,2x2 Round Corner,Curved,Curved,corner
+6183,1x6x2 Double,Curved,Curved,inverted
+1750,2x2 Curved Inverted,Curved,Curved,inverted
+2339,3x3 Inverted Corner,Curved,Curved,inverted
+5190,2x2 Inverted Corner,Curved,Curved,inverted
+11290,2x8x2 Double Inverted,Curved,Curved,inverted
+11301,2x8x2 Double Inverted,Curved,Curved,inverted
+13547,4x1 Curved Inv.,Curved,Curved,inverted
+24201,2x1 Curved Inverted,Curved,Curved,inverted
+32803,2x2 Curved Inverted,Curved,Curved,inverted
+42023,6x1 Curved Inv.,Curved,Curved,inverted
+54091,2x8x2 Double Inverted,Curved,Curved,inverted
+70681,1x1 Inverted,Curved,Curved,inverted
+78665,1x2 Arch Inv.,Curved,Curved,panel
+2571,3x4x6 Panel Curved Top,Curved,Curved,panel
+18910,3x4x3 Curved Panel w/ Hinge,Curved,Curved,panel
+76798,5x8x3⅔ Curved Panel w/ 2 Axle Holes,Curved,Curved,special_curve
+4045,1x4x1⅓ Curved Rounded Ends,Curved,Curved,special_curve
+6005,1x3x2 Curved,Curved,Curved,special_curve
+6060,1x8x3⅓ Curved,Curved,Curved,special_curve
+6081,4x2x1⅓ Curved,Curved,Curved,special_curve
+6091,1x2x1⅓ Curved,Curved,Curved,special_curve
+6192,2x4 Curved,Curved,Curved,special_curve
+6215,2x3 Curved,Curved,Curved,special_curve
+10314,1x4x1⅓ Curved,Curved,Curved,special_curve
+15625,5x8x⅔ Curved,Curved,Curved,special_curve
+30165,2x2 Curved,Curved,Curved,special_curve
+33243,1x3x2 Curved,Curved,Curved,special_curve
+37352,1x2x1 Curved,Curved,Curved,special_curve
+46413,4x8x2 Curved w/ 2 Click Hinges,Curved,Curved,special_curve
+65734,1x4x2⅔ Curved,Curved,Curved,special_curve
+71771,5x8x⅔ Curved Smooth,Curved,Curved,special_curve
+92434,6x3x2 Curved w/ Bar,Curved,Curved,
+3535,3x3x2 Panel Ø6 ¼-Circle,Curved,cylinder,
+4041,4x4x3 Panel Ø8 ¼-Cylinder,Curved,cylinder,
+6259,2x4x4 Ø4 ¼-Cylinder,Curved,cylinder,
+24593,2x4x2 Ø4 ¼-Cylinder,Curved,cylinder,
+30562,4x4x6 Ø8 ¼-Cylinder,Curved,cylinder,
+30562,1x5½ Cylinder,Curved,cylinder,
+30967,2x2x5 Ø4 ¼-Cylinder,Curved,cylinder,
+55941,2x4x5 Ø4 ¼-Cylinder,Curved,cylinder,
+60373,3x3 Ø4 ¼-Cylinder w/ 2 Bows,Curved,cylinder,
+73111,3x3x2 Round w/ Recess,Curved,cylinder,
+87926,3x6x6 Ø6 ¼-Cylinder,Curved,cylinder,
+553,2x2 Dome,Curved,Dish_dome,
 2740,2x2 Dish,Curved,Dish_dome,
-13938,3x3 Dish,Curved,Dish_dome,
 3960,4x4 Dish,Curved,Dish_dome,
-86138,4x4x⅔ Dish,Curved,Dish_dome,
-79850,4x4 Dome w/ Recess,Curved,Dish_dome,
-41375,6x6 Dish,Curved,Dish_dome,
 3961,8x8 Dish,Curved,Dish_dome,
-50990,10x10 Dish,Curved,Dish_dome,
 4285,6x6 Dish Radar,Curved,Dish_dome,
+13938,3x3 Dish,Curved,Dish_dome,
+15395,2x2 Inv. Dome w/out Studs,Curved,Dish_dome,
 18675,6x6 Dish w/ Handle,Curved,Dish_dome,
 18850,4x4x1⅔ Hemisphere w/ Bar,Curved,Dish_dome,
 20952,1½x1½ x ⅔,Curved,Dish_dome,
-51283,Fishbowl Helmet,Curved,Dish_dome,
-30106,2x2x2 Globe,Curved,Dish_dome,
-30367,2x2 Dome,Curved,Dish_dome,
-30151,2x2x1⅓ Dome,Curved,Dish_dome,
 20953,2x2 Sphere w/ Stud,Curved,Dish_dome,
-49308,3x3x1½,Curved,Dish_dome,
-30208,4x4 Hemisphere - Smooth,Curved,Dish_dome,
-88293,3x3x2 1/4 Dome,Curved,Dish_dome,
-49612,4x4x2⅔ 1/4 Dome,Curved,Dish_dome,
-15395,2x2 Inv. Dome w/out Studs,Curved,Dish_dome,
-24947,2x2 Inv. Dome w/ Studs,Curved,Dish_dome,
-65517,3x3 Round Corner,Curved,Dish_dome,
 24599,5x5 Round Corner,Curved,Dish_dome,
-76795,5x5 Round,Curved,Dish_dome,
-95188,6x6 Round,Curved,Dish_dome,
+24947,2x2 Inv. Dome w/ Studs,Curved,Dish_dome,
+30106,2x2x2 Globe,Curved,Dish_dome,
+30151,2x2x1⅓ Dome,Curved,Dish_dome,
+30208,4x4 Hemisphere - Smooth,Curved,Dish_dome,
+30367,2x2 Dome,Curved,Dish_dome,
+41375,6x6 Dish,Curved,Dish_dome,
+49308,3x3x1½,Curved,Dish_dome,
+49612,4x4x2⅔ 1/4 Dome,Curved,Dish_dome,
+50990,10x10 Dish,Curved,Dish_dome,
+51283,Fishbowl Helmet,Curved,Dish_dome,
 58846,10x10 Round,Curved,Dish_dome,
+65517,3x3 Round Corner,Curved,Dish_dome,
+76795,5x5 Round,Curved,Dish_dome,
 76797,3x3 Curved Corner,Curved,Dish_dome,
-3063,1x2x⅔ Curved,Curved,Curved,basic_curve
-79756,1x4x⅔ Curved,Curved,Curved,basic_curve
-11477,2x1x⅔ Curved,Curved,Curved,basic_curve
-15068,2x2x⅔ Curved,Curved,Curved,basic_curve
-61678,4x1 Curved,Curved,Curved,basic_curve
-93606,4x2 Curved,Curved,Curved,basic_curve
-42022,6x1 Curved,Curved,Curved,basic_curve
-44126,6x2 Curved,Curved,Curved,basic_curve
-42918,8x2 Curved,Curved,Curved,basic_curve
-85970,10x1 Curved,Curved,Curved,basic_curve
-71771,5x8x⅔ Curved Smooth,Curved,Curved,special_curve
-15625,5x8x⅔ Curved,Curved,Curved,special_curve
-37352,1x2x1 Curved,Curved,Curved,special_curve
-6215,2x3 Curved,Curved,Curved,special_curve
-30165,2x2 Curved,Curved,Curved,special_curve
-6192,2x4 Curved,Curved,Curved,special_curve
-67810,2x2 Round Corner,Curved,Curved,corner
-6091,1x2x1⅓ Curved,Curved,Curved,special_curve
-6081,4x2x1⅓ Curved,Curved,Curved,special_curve
-10314,1x4x1⅓ Curved,Curved,Curved,special_curve
-4045,1x4x1⅓ Curved Rounded Ends,Curved,Curved,special_curve
-33243,1x3x2 Curved,Curved,Curved,special_curve
-6005,1x3x2 Curved,Curved,Curved,special_curve
-6183,1x6x2 Double,Curved,Curved,double_curve
-65734,1x4x2⅔ Curved,Curved,Curved,special_curve
-6060,1x8x3⅓ Curved,Curved,Curved,special_curve
-2571,3x4x6 Panel Curved Top,Curved,Curved,panel
-18910,3x4x3 Curved Panel w/ Hinge,Curved,Curved,panel
-76798,5x8x3⅔ Curved Panel w/ 2 Axle Holes,Curved,Curved,panel
-24201,2x1 Curved Inverted,Curved,Curved,inverted
-32803,2x2 Curved Inverted,Curved,Curved,inverted
-1750,2x2 Curved Inverted,Curved,Curved,inverted
-13547,4x1 Curved Inv.,Curved,Curved,inverted
-42023,6x1 Curved Inv.,Curved,Curved,inverted
-11290,2x8x2 Double Inverted,Curved,Curved,inverted
-11301,2x8x2 Double Inverted,Curved,Curved,inverted
-54091,2x8x2 Double Inverted,Curved,Curved,inverted
-70681,1x1 Inverted,Curved,Curved,inverted
-78665,1x2 Arch Inv.,Curved,Curved,inverted
-5190,2x2 Inverted Corner,Curved,Curved,inverted
-2339,3x3 Inverted Corner,Curved,Curved,inverted
-92434,6x3x2 Curved w/ Bar,Curved,Curved,special_curve
-46413,4x8x2 Curved w/ 2 Click Hinges,Curved,Curved,special_curve
-49097,3x2½x1 Mudguard,Vehicle,Mudguard,
-50745,4x2½x2 Mudguard,Vehicle,Mudguard,
-98282,4x2½x1 Mudguard,Vehicle,Mudguard,
-1846,4x3x1½ Arch Mudguard,Vehicle,Mudguard,
-3387,4x2½x2 Arch Mudguard,Vehicle,Mudguard,
-35789,4x2½x2 Mudguard,Vehicle,Mudguard,
-18974,4x2½x2½ Mudguard,Vehicle,Mudguard,
-62361,7½x6x1 Mudguard,Vehicle,Mudguard,
-28326,4x3x1 Mudguard,Vehicle,Mudguard,
-98835,3x4x1½ Curved,Vehicle,Mudguard,
-41854,2x4 Flared Mudguard,Vehicle,Mudguard,
-60212,2x4 Mudguard,Vehicle,Mudguard,
-44674,2x4 Mudguard Overhanging,Vehicle,Mudguard,
-11291,3x4x⅔ Wedge Cutout,Vehicle,Mudguard,
-29119,2x1 Wedge Curved R.,Curved,Wedge,right
-29120,2x1 Wedge Curved L.,Curved,Wedge,left
-66956,2x2 Wedge Curved,Curved,Wedge,
-80178,3x2 Wedge Curved R.,Curved,Wedge,right
-80177,3x2 Wedge Curved L.,Curved,Wedge,left
-64225,3x4 Curve No Studs,Curved,Wedge,
-47753,4x4 Curve No Studs,Curved,Wedge,
-43712,6x4 Wedge Curved,Curved,Wedge,
-41747,6x2 Wedge Curved R.,Curved,Wedge,right
-41748,6x2 Wedge Curved L.,Curved,Wedge,left
-47755,4x3 Curve Cutout,Curved,Wedge,
-50956,10x3 Wedge Curved R.,Curved,Wedge,right
-50955,10x3 Wedge Curved L.,Curved,Wedge,left
-42060,12x3 Wedge Curved R.,Curved,Wedge,right
-42061,12x3 Wedge Curved L.,Curved,Wedge,left
-45301,16x4 Wedge Curved,Curved,Wedge,
-41749,8x3x2 Wedge Curved R.,Curved,Wedge,right
-41750,8x3x2 Wedge Curved L.,Curved,Wedge,left
-77182,10x2x2 Wedge Curved R.,Curved,Wedge,right
-77180,10x2x2 Wedge Curved L.,Curved,Wedge,left
-43721,4x2 Wedge Twist L.,Curved,Wedge,left
-43720,4x2 Wedge Twist R.,Curved,Wedge,right
-62360,3x6x1 Curved Windscreen,Curved,Wedge,
-72824,Ball Soccer,Curved,Ball,
-54821,Ball Bionicle Zamor Sphere,Curved,Ball,
-24946,Egg,Curved,Ball,
-39739,1x1 Tile Heart,Curved,Heart_star,
-39613,3x3 Plate Heart,Curved,Heart_star,
-46342,6x6 Plate Heart,Curved,Heart_star,
+79850,4x4 Dome w/ Recess,Curved,Dish_dome,
+86138,4x4x⅔ Dish,Curved,Dish_dome,
+88293,3x3x2 1/4 Dome,Curved,Dish_dome,
+95188,6x6 Round,Curved,Dish_dome,
+66789,6x6x⅔ Ø4 Rounded Corners,Curved,doubleplate,
+66790,8x8x⅔ Ø4 Rounded Corners,Curved,doubleplate,
+66792,4x4x⅔ Ø2 Rounded Corners,Curved,doubleplate,
+68869,4x4x⅔ Ø2 Tile Rounded Corners,Curved,doubleplate,
+73832,8x4x⅔ Ø4 2-Corners,Curved,doubleplate,
+79387,4x4x⅔ Ø2 Rounded Corners w/ Hole,Curved,doubleplate,
+89681,4x6x⅔ Ø4 2-Corners,Curved,doubleplate,
 11609,1x1 Round Star,Curved,Heart_star,
 39611,4x4x⅔ Star w/ 2x2 Base,Curved,Heart_star,
-15470,1x1 Round Swirled Top,Curved,Other,
-74698,2x2 Round w/ Ring,Curved,Other,
-2654,Round 2x2 (Boat Stud),Curved,Other,
-3940,2x2x2 Support,Curved,Other,
-75937,2x2 Bar frame,Curved,Other,
-15469,2x2 Round w/ 4 petals,Curved,Other,
-15429,Cat Tail,Curved,Other,
-27266,2x2 Round w/ 8 Spikes,Curved,Other,
-80677,2x2 Round spiral,Curved,Other,
-18969,4x4x13 ⅓ Balloon Panel w/ clips,Curved,Other,
-35470,3x5 Cloud w/ 3 Studs,Curved,Other,
-58176,Light Cover (Bionicle Eye),Curved,Other,
-44358,2x2 Hemisphere Socket,Curved,Other,
-53119,1x1 Round w/ Twist (Poop),Curved,Other,
-11010,Ring,Curved,Other,
-26621,25L Bracelet 14x2 studs,Curved,Other,
-11641,Basketball Net w/ Axle,Curved,Other,
+39613,3x3 Plate Heart,Curved,Heart_star,
+39739,1x1 Tile Heart,Curved,Heart_star,
+46342,6x6 Plate Heart,Curved,Heart_star,
 786,Hose Ribbed 97mm,Curved,Other,
 1686,Shoulder Cover Round w/ Bars,Curved,Other,
-65700,2x2 Cake Frosting,Curved,Other,
-40145,2x2 Round w/ Rotation Stem,Curved,Other,
+2654,Round 2x2 (Boat Stud),Curved,Other,
+3940,2x2x2 Support,Curved,Other,
+11010,Ring,Curved,Other,
+11641,Basketball Net w/ Axle,Curved,Other,
+15429,Cat Tail,Curved,Other,
+15469,2x2 Round w/ 4 petals,Curved,Other,
+15470,1x1 Round Swirled Top,Curved,Other,
+18969,4x4x13 ⅓ Balloon Panel w/ clips,Curved,Other,
+26621,25L Bracelet 14x2 studs,Curved,Other,
+27266,2x2 Round w/ 8 Spikes,Curved,Other,
 27976,4x6x6 Slide,Curved,Other,
 28387,6x6x6 Slide Curved,Curved,Other,
-6541,1x1,Technic,brick,
+35470,3x5 Cloud w/ 3 Studs,Curved,Other,
+40145,2x2 Round w/ Rotation Stem,Curved,Other,
+44358,2x2 Hemisphere Socket,Curved,Other,
+53119,1x1 Round w/ Twist (Poop),Curved,Other,
+58176,Light Cover (Bionicle Eye),Curved,Other,
+65700,2x2 Cake Frosting,Curved,Other,
+74698,2x2 Round w/ Ring,Curved,Other,
+75937,2x2 Bar frame,Curved,Other,
+80677,2x2 Round spiral,Curved,Other,1x
+35480,1x2 Plate Ø1 Rounded Ends,Curved,plate,1x
+77845,1x4 Plate Ø1 Rounded Ends,Curved,plate,1x
+77850,1x3 Plate Ø1 Rounded Ends,Curved,plate,1x1
+4073,1x1 Round,Curved,plate,1x1
+20482,1x1 Round w/ Pin,Curved,plate,1x1
+85861,1x1 Round w/ hole,Curved,plate,2x
+4032,2x2 Round,Curved,plate,2x
+15535,2x2 Round w/ Hole,Curved,plate,2x
+18674,2x2 Round Jumper,Curved,plate,2x
+79491,2x2 Ø2 Corner w/ Cutout,Curved,plate,3x or greater
+3176,3x2 Ø2 Rounded End w/ Hole,Curved,plate,3x or greater
+6003,6x6 Ø8 Corner,Curved,plate,3x or greater
+6177,8x8 Round w/ 2+2 Studs,Curved,plate,3x or greater
+11213,6x6 Round,Curved,plate,3x or greater
+11833,4x4 Round w/ 2+2 hole,Curved,plate,3x or greater
+18646,3x6 Ø6 ½-Circle w/ cutout,Curved,plate,3x or greater
+19950,2x6 Ø4 Rounded Corners,Curved,plate,3x or greater
+22888,4x8 Ø8 ½-Circle,Curved,plate,3x or greater
+25140,8x8 Ø4 Rounded Corners,Curved,plate,3x or greater
+30031,10x10 Ø8 Rounded End,Curved,plate,3x or greater
+30357,3x3 Ø4 Rounded Corner,Curved,plate,3x or greater
+30565,4x4 Ø8 ¼-Circle,Curved,plate,3x or greater
+35044,4x4 w/ Ø6 ¼ cutout,Curved,plate,3x or greater
+41948,8x8 Ø8 Rounded End,Curved,plate,3x or greater
+50015,5x5 Ø8 Corner w/ Cutout,Curved,plate,3x or greater
+60474,4x4 Round,Curved,plate,3x or greater
+68568,3x3 Ø4 Corner w/ cutout,Curved,plate,3x or greater
+74611,8x8 Round,Curved,plate,1x
+1126,1x2 Tile Ø1 Rounded Ends,Curved,tile,1x
+1748,1x2 Tile Ø2 ½-Circle,Curved,tile,1x1
+24246,1x1 Tile Ø1 Rounded End,Curved,tile,1x1
+25269,1x1 Tile Ø2 ½-Circle,Curved,tile,1x1
+98138,1x1 Tile Round,Curved,tile,2x
+3396,2x2 Tile w/ 2 cutouts,Curved,tile,2x
+4150,2x2 Round,Curved,tile,2x
+27925,2x2 Tile Ø4 Corner,Curved,tile,2x
+66857,2x4 Tile Ø2 Rounded Ends,Curved,tile,3x or greater
+27507,4x4 Tile Ø8 Corner,Curved,tile,3x or greater
+65474,6x8 Tile Ø6 Rounded Ends,Curved,tile,3x or greater
+67095,3x3 Round,Curved,tile,3x or greater
+79393,3x3 Tile Ø6 Corner,Curved,tile,
+43712,6x4 Wedge Curved,Curved,Wedge,
+45301,16x4 Wedge Curved,Curved,Wedge,
+47753,4x4 Curve No Studs,Curved,Wedge,
+47755,4x3 Curve Cutout,Curved,Wedge,
+62360,3x6x1 Curved Windscreen,Curved,Wedge,
+64225,3x4 Curve No Studs,Curved,Wedge,
+66956,2x2 Wedge Curved,Curved,Wedge,left
+29120,2x1 Wedge Curved L.,Curved,Wedge,left
+41748,6x2 Wedge Curved L.,Curved,Wedge,left
+41750,8x3x2 Wedge Curved L.,Curved,Wedge,left
+42061,12x3 Wedge Curved L.,Curved,Wedge,left
+43721,4x2 Wedge Twist L.,Curved,Wedge,left
+50955,10x3 Wedge Curved L.,Curved,Wedge,left
+77180,10x2x2 Wedge Curved L.,Curved,Wedge,left
+80177,3x2 Wedge Curved L.,Curved,Wedge,right
+29119,2x1 Wedge Curved R.,Curved,Wedge,right
+41747,6x2 Wedge Curved R.,Curved,Wedge,right
+41749,8x3x2 Wedge Curved R.,Curved,Wedge,right
+42060,12x3 Wedge Curved R.,Curved,Wedge,right
+43720,4x2 Wedge Twist R.,Curved,Wedge,right
+50956,10x3 Wedge Curved R.,Curved,Wedge,right
+77182,10x2x2 Wedge Curved R.,Curved,Wedge,right
+80178,3x2 Wedge Curved R.,Curved,Wedge,
+989,1x2 Click Hinge 1-Finger Top,Hinge,Click_brick,
+30364,1x2 Click Hinge 1-Finger Horizontal,Hinge,Click_brick,
+30365,1x2 Click Hinge 2-Finger Vertical,Hinge,Click_brick,
+30386,1x2 Click Hinge Both Ends (vertical),Hinge,Click_brick,
+30387,1x4 Click Hinge Both Ends (vertical),Hinge,Click_brick,
+30388,1x6 Click Hinge Both Ends (vertical),Hinge,Click_brick,
+30389,2x2 Click Hinge 1 Finger Vertical,Hinge,Click_brick,
+30540,1x2 Click Hinge 2-Finger Horizontal,Hinge,Click_brick,
+30541,1x2 Click Hinge 1-Finger Horizontal,Hinge,Click_brick,
+39893,1x2 Click Hinge Both Ends (vertical),Hinge,Click_brick,
+40902,2x2 Click Hinge 2-Finger Vertical,Hinge,Click_brick,
+47975,1x2 Click Hinge Both Ends (mixed),Hinge,Click_brick,
+53029,2x2 Click Hinge 2-Finger Vertical,Hinge,Click_brick,
+54661,1x4 Click Hinge Both Ends (vertical),Hinge,Click_brick,
+54671,1x2 Click Hinge 2-Finger Vertical,Hinge,Click_brick,
+54672,1x2 Click Hinge 2-Finger Horizontal,Hinge,Click_brick,
+14137,1x8 Click Hinge Angled Edge,Hinge,Click_other,
+30396,Click Hinge w/ Towball Socket,Hinge,Click_other,
+30407,1x8 Click Hinge Angled Edge,Hinge,Click_other,
+30552,1x2 Cylinder 1 Finger / Axle,Hinge,Click_other,
+30553,1x2 Cylinder 2 Finger / Axle,Hinge,Click_other,
+30554,1x2 Cylinder Both Ends,Hinge,Click_other,
+41532,1x3 Cylinder 1 Finger / Pin,Hinge,Click_other,
+47973,1x3 Hinge w/ 2 pins,Hinge,Click_other,
+51432,Click Hinge w/ Towball Socket,Hinge,Click_other,
+53923,1x2 Cylinder 1 Finger / Axle,Hinge,Click_other,
+54662,1x2 Cylinder Both Ends,Hinge,Click_other,
+57360,1x2 Cylinder 2 Finger / Axle,Hinge,Click_other,
+57697,1x3 Cylinder 1 Finger / Pin,Hinge,Click_other,
+57906,1x12 Click Hinge Angled & Tapered,Hinge,Click_other,
+30383,1x2 Click Hinge 1-Finger Top,Hinge,Click_plate,
+44300,1x3 Click Hinge 1-Finger Top,Hinge,Click_plate,
+44301,1x2 Click Hinge 1-Finger End,Hinge,Click_plate,
+44302,1x2 Click Hinge 2-Finger End,Hinge,Click_plate,
+44567,1x2 Click Hinge 1-Finger Side,Hinge,Click_plate,
+44568,1x4 Click Hinge Dual 1-Finger Side,Hinge,Click_plate,
+44570,3x4 Click Hinge Dual 2-Finger Side,Hinge,Click_plate,
+44822,1x4 Click Hinge Dual 1-Finger Top,Hinge,Click_plate,
+50337,3x4 Click Hinge Dual 2-Finger Side,Hinge,Click_plate,
+50340,1x2 Click Hinge 2-Finger Side,Hinge,Click_plate,
+54657,1x2 Click Hinge 2-Finger End,Hinge,Click_plate,
+60471,1x2 Click Hinge 2-Finger Side,Hinge,Click_plate,
+65133,4x6 Click Hinge Dual 1-Finger Side,Hinge,Click_plate,
+92582,2x2 Click Hinge 1-Finger Top,Hinge,Click_plate,
+2429,1x4 Hinge Plate,Hinge,Hinge,
+2430,1x4 Hinge Plate,Hinge,Hinge,
+3830,1x4 Hinge Brick,Hinge,Hinge,
+3831,1x4 Hinge Brick,Hinge,Hinge,
+3937,1x2 Hinge Brick,Hinge,Hinge,
+3938,1x2 Hinge Brick,Hinge,Hinge,
+6134,2x2 Hinge Top Plate,Hinge,Hinge,
+17114,2x2 Ball Joint 2 Ball,Hinge,Socket-ball,
+50923,1x2 Liftarm Ball Angled,Hinge,Socket-ball,
+57908,2x2 Ball Joint 2 Ball,Hinge,Socket-ball,
+57909,2x2 Ball Joint 1 Ball,Hinge,Socket-ball,
+57910,2x2 Ball Joint Receptacle,Hinge,Socket-ball,
+62712,2x2 Ball Joint Receptacle,Hinge,Socket-ball,
+64276,1x2 Liftarm Ball Straight,Hinge,Socket-ball,
+92013,2x2 Ball Joint Receptacle,Hinge,Socket-ball,
+93571,2x3 Socket w/ Axle,Hinge,Socket-ball,
+98613c01,2L Extender 1B1S,Hinge,Socket-ball,
+1994,2x2x2 Round w/ Rotation Joint Socket,Hinge,Socket-click,
+47455,Rotation Joint 2 Pins,Hinge,Socket-click,
+48169,2x2 Rotation Joint 1 Socket,Hinge,Socket-click,
+48170,2x2 Rotation Joint Horizontal,Hinge,Socket-click,
+48171,2x2 Rotation Joint Vertical,Hinge,Socket-click,
+48172,2x2 Rotation Joint 2 Socket,Hinge,Socket-click,
+60431,1x2x1⅓ Rotation Joint,Hinge,Socket-click,
+79505,Ø3 Rotation Disk w/ 2-Rotation Joints,Hinge,Socket-click,
+2508,1x2 wing w/ Towball End,Hinge,Socket-towball,
+2736,Towball Axle,Hinge,Socket-towball,
+3170,1x2 Towball Both Ends,Hinge,Socket-towball,
+3183,1x4 Socket Side,Hinge,Socket-towball,
+3184,1x4 Towball Side,Hinge,Socket-towball,
+3730,2x2 Socket,Hinge,Socket-towball,
+3731,2x2 Towball,Hinge,Socket-towball,
+6628,Towball Pin,Hinge,Socket-towball,
+14417,1x2 Towball Side,Hinge,Socket-towball,
+14418,1x2 Socket End,Hinge,Socket-towball,
+14419,1x2 Towball & Socket End,Hinge,Socket-towball,
+14704,1x2 Socket Side,Hinge,Socket-towball,
+15456,2x2 Towball,Hinge,Socket-towball,
+15460,Pin hole w/ 3 Towball,Hinge,Socket-towball,
+22484,Towball Bar 1L,Hinge,Socket-towball,
+22890,1x2 Towball End,Hinge,Socket-towball,
+30395,Towball w/ Hook,Hinge,Socket-towball,
+63082,2x2 Socket,Hinge,Socket-towball,
+66906,Towball Pin,Hinge,Socket-towball,
+80477,3L Towball Bar w/ Pin,Hinge,Socket-towball,
+98263,1x4 Socket Side,Hinge,Socket-towball,
+3679,2x2 Turntable,Hinge,Turntable,
+3680,2x2 Turntable,Hinge,Turntable,
+27448,2x2 Turntable Base,Hinge,Turntable,
+35442,6 Tooth 2x2 Plate Gear,Hinge,Turntable,
+35443,10 Tooth 4x4 Plate Gear,Hinge,Turntable,
+35446,14 Tooth 6x6 Plate Gear,Hinge,Turntable,
+61485,4x4 Turntable Base,Hinge,Turntable,
+18986,Minifig Bracket w/ 2 studs,Minifig,Clothing,
+28974,Minifig Bracket Thick,Minifig,Clothing,
+42446,Minifig Bracket Thin,Minifig,Clothing,
+99781,Bracket 1 x 2 - 1 x 2,SNOT,Bracket,1x
+2436,1x4 Bracket,SNOT,Bracket,1x
+14520,1x4x1⅔ Bumper w/ Arches,SNOT,Bracket,1x
+36841,1x1 Bracket,SNOT,Bracket,1x
+52038,1x4x1⅔ Bumper w/ Arches,SNOT,Bracket,1x
+87609,2x6x2/3 4 Studs Side,SNOT,Bracket,1x
+98281,1x2 Bracket,SNOT,Bracket,1x
+99206,2x2x2/3 2 Studs Side,SNOT,Bracket,1x Inverted
+36840,1x1 Bracket Inverted,SNOT,Bracket,1x Inverted
+99780,1x2 Bracket Inverted,SNOT,Bracket,2x
+3956,2x2 Bracket w/ 2 Holes,SNOT,Bracket,2x
+4585,2x1 Bracket Centered,SNOT,Bracket,2x
+30166,2x3 Shield w/ Studs,SNOT,Bracket,2x
+44728,2x2 Bracket,SNOT,Bracket,2x
+69906,2x2 Bracket Curved 3x2 base,SNOT,Bracket,2x
+93274,2x4 Bracket,SNOT,Bracket,2x Inverted
+41682,2x2 Bracket Inverted,SNOT,Bracket,2x Inverted
+73825,2x1 Bracket Inverted,SNOT,Bracket,2x Inverted
+99207,2x2 Bracket Inverted,SNOT,Bracket,1x
+4595,1x2x⅔ Stud Sides,SNOT,Brick,1x
+11211,1x2 Studs 1-side,SNOT,Brick,1x
+22885,1x2x1⅔ Studs 1-side,SNOT,Brick,1x
+30414,1x4 Studs 1-side,SNOT,Brick,1x
+52107,1x2 Studs 2-sides,SNOT,Brick,1x
+67329,1x2x1⅔ Studs 3-sides,SNOT,Brick,1x
+80796,1x2x1⅔ Studs 2-sides,SNOT,Brick,1x1
+3386,1x1x2/3 Stud 1-side Ø1 Rounded End,SNOT,Brick,1x1
+4070,1x1 Headlight,SNOT,Brick,1x1
+4733,1x1 Studs 4-sides,SNOT,Brick,1x1
+26604,1x1 Studs Adjacent sides,SNOT,Brick,1x1
+32952,1x1x1⅔ 2 Studs 1-side,SNOT,Brick,1x1
+47905,1x1 Studs Opposite sides,SNOT,Brick,1x1
+87087,1x1 Stud 1-side,SNOT,Brick,
+3794,1x2 Jumper,SNOT,Jumper,
+4590,1x4 Offset w/ 2 Rings,SNOT,Jumper,
+4596,1x2 w/ 3L Space Wing,SNOT,Jumper,
+15573,1x2 Jumper,SNOT,Jumper,
+34103,1x3 Double Jumper,SNOT,Jumper,
+65509,2x4 Double Jumper,SNOT,Jumper,
+86876,1x2 Jumper Stud 1-side,SNOT,Jumper,
+87580,2x2 Jumper,SNOT,Jumper,basic
+3705,Axle 4,Technic,Axle,basic
+3706,Axle 6,Technic,Axle,basic
+3707,Axle 8,Technic,Axle,basic
+3708,Axle 12,Technic,Axle,basic
+3737,Axle 10,Technic,Axle,basic
+4519,Axle 3,Technic,Axle,basic
+23948,Axle 11,Technic,Axle,basic
+32062,Axle 2,Technic,Axle,basic
+32073,Axle 5,Technic,Axle,basic
+44294,Axle 7,Technic,Axle,basic
+50450,Axle 32,Technic,Axle,basic
+50451,Axle 16,Technic,Axle,basic
+60485,Axle 9,Technic,Axle,pin/axle hybrid
+3749,Smooth Pin & Axle,Technic,Axle,pin/axle hybrid
+11214,2L Friction Pin 1L Axle,Technic,Axle,pin/axle hybrid
+18651,1L Friction Pin 2L Axle,Technic,Axle,pin/axle hybrid
+43093,Friction Pin & Axle,Technic,Axle,pin/axle hybrid
+65249,1L Smooth Pin 2L Axle,Technic,Axle,stop
+6587,Axle 3 w/ stud,Technic,Axle,stop
+15462,Axle 5 w/ stop,Technic,Axle,stop
+24316,Axle 3 w/ stop,Technic,Axle,stop
+32209,Axle 5.5 w/ stop,Technic,Axle,stop
+55013,Axle 8 w/ stop,Technic,Axle,stop
+87083,Axle 4 w/ stop,Technic,Axle,stop
+99008,Axle 4 w/ stop,Technic,Axle,
+2730,1x10,Technic,brick,
+2744,1x6x1½ Slope 3 Pin Holes,Technic,brick,
+3668,2x6x1½ Cutout 2 Axle Holes,Technic,brick,
 3700,1x2,Technic,brick,
 3701,1x4,Technic,brick,
-3894,1x6,Technic,brick,
 3702,1x8,Technic,brick,
-2730,1x10,Technic,brick,
-3895,1x12,Technic,brick,
-32018,1x14,Technic,brick,
 3703,1x16,Technic,brick,
-32000,1x2 2 holes,Technic,brick,
-73109,1x2 Brick w/ Plate,Technic,brick,
-73230,1x1 w/ Axle Hole,Technic,brick,
-32064,1x2 Axle hole,Technic,brick,
-90258,2x2 Grooves & Axle hole,Technic,brick,
-39789,2x4 Brick w/ 3 Axle Holes,Technic,brick,
-85943,1x2 dual liftarm,Technic,brick,
-91176,2x2x13 w/ 5 Pin holes,Technic,brick,
-44865,1x2 Brick Pin Side,Technic,brick,
-30526,1x2 Brick 2 pins,Technic,brick,
+3894,1x6,Technic,brick,
+3895,1x12,Technic,brick,
+6222,4x4 Round w/ Pins,Technic,brick,
 6232,2x2 Brick Pin Side,Technic,brick,
-30000,2x2 Brick Pin 2 Sides,Technic,brick,
-30592,2x4 Brick Pin Top,Technic,brick,
 6249,2x4 Brick Pin 2 Sides,Technic,brick,
-49699,1x6x4½ Cutout 4 Pin Holes,Technic,brick,
+6541,1x1,Technic,brick,
+17485,2x2 Round w/ Pins,Technic,brick,
 18975,2x4x1½ Cutout,Technic,brick,
-67446,2x4x1½ Cutout 2 Axle Holes,Technic,brick,
-3668,2x6x1½ Cutout 2 Axle Holes,Technic,brick,
+30000,2x2 Brick Pin 2 Sides,Technic,brick,
+30361,2x2x2 Robot Body,Technic,brick,
+30526,1x2 Brick 2 pins,Technic,brick,
+30592,2x4 Brick Pin Top,Technic,brick,
+32000,1x2 2 holes,Technic,brick,
+32018,1x14,Technic,brick,
+32064,1x2 Axle hole,Technic,brick,
 32324,4x4 open center,Technic,brick,
+32555,5x5 corner,Technic,brick,
+39789,2x4 Brick w/ 3 Axle Holes,Technic,brick,
 40344,4x6 open center,Technic,brick,
 40345,6x8 open center,Technic,brick,
-32555,5x5 corner,Technic,brick,
-65803,16x16x1½ Technic Plate,Technic,plate,
-2744,1x6x1½ Slope 3 Pin Holes,Technic,brick,
-17485,2x2 Round w/ Pins,Technic,brick,
-30361,2x2x2 Robot Body,Technic,brick,
-6222,4x4 Round w/ Pins,Technic,brick,
-3709,2x4 w/ holes,Technic,plate,
-32001,2x6 w/ holes,Technic,plate,
-3738,2x8 w/ holes,Technic,plate,
-32124,1x5 Technic Plate,Technic,plate,
-32125,3-blade Rotor,Technic,plate,
-69984,Technic 6-blade Waterwheel,Technic,plate,
-77598,2x2x½ Wheel Fork,Technic,plate,
-3172,1x3 w/ 2 studs Hole Bottom,Technic,plate,
-18677,1x2 Plate Hole Bottom,Technic,plate,
-11458,1x2 Plate Hole Top,Technic,plate,
-10247,2x2 Plate 1 Hole Bottom,Technic,plate,
-2817,2x2 Plate 2 Hole Bottom,Technic,plate,
-26599,2x4 Plate 2-Hole Bottom,Technic,plate,
-32529,1x2 Plate 1 Hole Bottom,Technic,plate,
-32530,1x2 Plate 2 Hole Top,Technic,plate,
-43045,2x4 Pin Hinge Top,Technic,plate,
-98285,2x4 Pin Hinge Bottom,Technic,plate,
-2476,2x2 Plate Pin Bottom,Technic,plate,
-15092,2x2 Plate 2 Pins Bottom,Technic,plate,
-2460,2x2 Plate Pin Top,Technic,plate,
-30157,2x4 Plate Pin Sides,Technic,plate,
-30390,2x4 Dbl. Inv. Pin Sides 2-sides,Technic,plate,
-43857,1x2 Liftarm,Technic,Liftarm,Liftarm
-60483,1x2 Liftarm w/ Axle,Technic,Liftarm,
-32523,1x3 Liftarm,Technic,Liftarm,Liftarm
-32316,1x5 Liftarm,Technic,Liftarm,Liftarm
-32524,1x7 Liftarm,Technic,Liftarm,Liftarm
-40490,1x9 Liftarm,Technic,Liftarm,Liftarm
-32525,1x11 Liftarm,Technic,Liftarm,Liftarm
-41239,1x13 Liftarm,Technic,Liftarm,Liftarm
-32278,1x15 Liftarm,Technic,Liftarm,Liftarm
-32348,1x7 Liftarm Bent (4-4),Technic,Liftarm,Bent
-6629,1x9 Liftarm Bent (6-4),Technic,Liftarm,Bent
-32271,1x9 Liftarm Bent (7-3),Technic,Liftarm,Bent
-32009,1x11.5 Liftarm Double Bent,Technic,Liftarm,Bent
+44865,1x2 Brick Pin Side,Technic,brick,
+49699,1x6x4½ Cutout 4 Pin Holes,Technic,brick,
+67446,2x4x1½ Cutout 2 Axle Holes,Technic,brick,
+73109,1x2 Brick w/ Plate,Technic,brick,
+73230,1x1 w/ Axle Hole,Technic,brick,
+85943,1x2 dual liftarm,Technic,brick,
+90258,2x2 Grooves & Axle hole,Technic,brick,
+91176,2x2x13 w/ 5 Pin holes,Technic,brick,
+2393,1x3 Cross Block w/ 2 Pins 3 Pin Holes,Technic,Connector,
+6536,2L Axle & Pin Perpendicular,Technic,Connector,
+6553,Pole Reverser Handle,Technic,Connector,
+6590,Bush,Technic,Connector,
+11272,Axle 2x3 Quadruple,Technic,Connector,
+11455,2x4 Bent Pin Connector,Technic,Connector,
+15461,3L Pin 2 Pins & Hole,Technic,Connector,
+18654,1L Pin Connector,Technic,Connector,
+22410,37mm D x 22mm w/ 7 Pin Holes,Technic,Connector,
+25214,1x1d 90° Elbow 2 Axle Holes,Technic,Connector,
+32039,Axle & Axle Connector,Technic,Connector,
+32068,3L Axle & 1 Pin,Technic,Connector,
+32123,½ Bush Smooth,Technic,Connector,
+32126,Toggle Joint Connector,Technic,Connector,
+32184,3L Axle & Center Pin,Technic,Connector,
+32291,1 Axle & Double Pin,Technic,Connector,
+32333,1x4x3 Pin Connector Block,Technic,Connector,
+32557,3L w/ Double Pin,Technic,Connector,
+40244,5½ Spiral Staircase Axle,Technic,Connector,
+42003,3L Axle & 2 Pin,Technic,Connector,
+42195,3L Axle Connector,Technic,Connector,
+44809,Pin Bent,Technic,Connector,
+45590,Dbl Axle Rubber,Technic,Connector,
+48496,Toggle Dbl w/ 2 Pins,Technic,Connector,
+48989,3L Pin w/ 4 Pins,Technic,Connector,
+53586,Axle & Pin w/ Extension,Technic,Connector,
+55615,3x3 Bent w/ 4 Pins,Technic,Connector,
+59443,Smooth Axle Connector,Technic,Connector,
+60208,31mm D x 15mm w/ 7 Pin Holes,Technic,Connector,
+61903,Universal Joint 3L,Technic,Connector,
+62462,2L Pin Connector,Technic,Connector,
+63869,1 Axle & Triple Pin,Technic,Connector,
+65473,2x2d 45° Elbow 2 Axle Holes,Technic,Connector,
+69819,Split Axle & Double Pin,Technic,Connector,
+72008,2x2 Liftarm w/ Split Axle Holes,Technic,Connector,
+80910,2x4 Double Axle & Pin Conn,Technic,Connector,
+87408,Toggle Dbl w/ Axle & Pins,Technic,Connector,
+92907,Axle & Pin Split,Technic,Connector,
+98585,3x3 Round Connector,Technic,Connector,
+98989,4L Axle & Double Pin,Technic,Connector,
+3250,15x15 Frame Round,Technic,Frame,
+14720,3x5 Frame H-Shape,Technic,Frame,
+39369,11x19 Frame,Technic,Frame,
+39790,11x15 Frame Open Center,Technic,Frame,
+39793,1x3x3 Pin Panel,Technic,Frame,
+39794,7x11 Frame Open Center,Technic,Frame,
+64178,5x11 Frame H-Shape,Technic,Frame,
+64179,5x7 Frame Open Center,Technic,Frame,
+67491,3x19 Frame w/ 3 Open Areas,Technic,Frame,
+77107,11x11 Frame Round,Technic,Frame,
+79768,7x16 Frame Triangular w/ Bars,Technic,Frame,
+3648,24 Tooth,Technic,Gears,
+3649,40 Tooth,Technic,Gears,
+4019,"Technic, Gear 16 Tooth - Axle Hole with Open Sides",Technic,Gears,
+6542,16 Tooth w/ Clutch,Technic,Gears,
+6585,4x4x1⅓ Gearbox,Technic,Gears,
+6588,2x4x3⅓ Gearbox,Technic,Gears,
+6589,12 Tooth Bevel,Technic,Gears,
+10928,8 Tooth Type 2,Technic,Gears,
+11955,8 Tooth without friction,Technic,Gears,
+18939,60 Tooth Turntable,Technic,Gears,
+24014,8 Tooth 1.5L Axle,Technic,Gears,
+24121,35 Tooth ¼ Gear Ring,Technic,Gears,
+27938,4L Worm Screw,Technic,Gears,
+32198,20 Tooth Bevel,Technic,Gears,
+32269,20 Tooth Dbl Bevel,Technic,Gears,
+32270,12 Tooth Dbl Bevel,Technic,Gears,
+32498,32 Tooth Dbl Bevel,Technic,Gears,
+32905,8L Worm Screw,Technic,Gears,
+35185,20 Tooth Dbl Clutch Dbl Bevel,Technic,Gears,
+46372,28 Tooth Dbl Bevel,Technic,Gears,
+60201,24 Tooth Clutch,Technic,Gears,
+62821,28 Tooth Differential,Technic,Gears,
+65413,28 Tooth Dbl Bevel w/ Peghole,Technic,Gears,
+65414,Differential Casing,Technic,Gears,
+69761,22 Tooth Thick Bevel,Technic,Gears,
+69762,14 Tooth Thick Bevel,Technic,Gears,
+69778,12 Tooth,Technic,Gears,
+73763,6L Worm Gear,Technic,Gears,
+73764,2x2x1½ w/ Worm Gear Hole,Technic,Gears,
+76244,16 Tooth Dbl Clutch,Technic,Gears,
+78442,15 Tooth ¼ Gear Ring,Technic,Gears,
+81346,20 Tooth Dbl Clutch,Technic,Gears,
+87407,20 Tooth,Technic,Gears,
+87407,20 Tooth Bevel w/ Pin,Technic,Gears,
+94925,16 Tooth Reinforced,Technic,Gears,
+99009,28 Tooth Turntable,Technic,Gears,
+10197,Pin Hub 2 Axle 90°,Technic,Hub,
+10288,Angled Triple,Technic,Hub,
+15100,Pin Hub 1 Pin,Technic,Hub,
+22961,Pin Hub 1 Axle,Technic,Hub,
+24122,Axle Hub 2 Bar Holder,Technic,Hub,
+27940,Pin Hub 2 Axle,Technic,Hub,
+32013,Angled #1,Technic,Hub,
+32014,Angled #6 90°,Technic,Hub,
+32015,Angled #5 67.5°,Technic,Hub,
+32016,Angled #3 22.5°,Technic,Hub,
+32034,Angled #2 0°,Technic,Hub,
+32192,Angled #4 45°,Technic,Hub,
+48723,Axle Hub 4 Bar,Technic,Hub,
+57585,Axle Hub 3 Axle,Technic,Hub,
+87082,Pin Hub 2 Pin,Technic,Hub,
+90202,Pin Hub 4 Clip,Technic,Hub,
 32140,2x4 Liftarm L-Shape,Technic,Liftarm,
 32526,3x5 Liftarm L-Shape,Technic,Liftarm,
+44224,Rotation Joint w/ 3L Liftarm,Technic,Liftarm,
+60483,1x2 Liftarm w/ Axle,Technic,Liftarm,
 60484,3x3 Liftarm T-Shape,Technic,Liftarm,
 71708,2x3 Liftarm D-Shape,Technic,Liftarm,
 80286,2x5 Liftarm D-Shape,Technic,Liftarm,
-85940,1x2 Liftarm w/ bar,Technic,Liftarm,
+85940,1x2 Liftarm w/ bar,Technic,Liftarm,Alternating
 2391,1x7 Liftarm w/ Alternating Holes,Technic,Liftarm,Alternating
-73507,1x11 Liftarm w/ Alternating holes,Technic,Liftarm,Alternating
-71710,1x15 Liftarm w/ Alternating Holes,Technic,Liftarm,Alternating
 2477,3x5 Liftarm L-shape w/ Alternating holes,Technic,Liftarm,Alternating
-41677,1x2 Thin Liftarm,Technic,Liftarm,Thin
+71710,1x15 Liftarm w/ Alternating Holes,Technic,Liftarm,Alternating
+73507,1x11 Liftarm w/ Alternating holes,Technic,Liftarm,Bent
+6629,1x9 Liftarm Bent (6-4),Technic,Liftarm,Bent
+32009,1x11.5 Liftarm Double Bent,Technic,Liftarm,Bent
+32271,1x9 Liftarm Bent (7-3),Technic,Liftarm,Bent
+32348,1x7 Liftarm Bent (4-4),Technic,Liftarm,Liftarm
+32278,1x15 Liftarm,Technic,Liftarm,Liftarm
+32316,1x5 Liftarm,Technic,Liftarm,Liftarm
+32523,1x3 Liftarm,Technic,Liftarm,Liftarm
+32524,1x7 Liftarm,Technic,Liftarm,Liftarm
+32525,1x11 Liftarm,Technic,Liftarm,Liftarm
+40490,1x9 Liftarm,Technic,Liftarm,Liftarm
+41239,1x13 Liftarm,Technic,Liftarm,Liftarm
+43857,1x2 Liftarm,Technic,Liftarm,Thin
+2825,1x4 Thin w/ Stud,Technic,Liftarm,Thin
 6632,1x3 Thin Liftarm,Technic,Liftarm,Thin
-32449,1x4 Thin Liftarm,Technic,Liftarm,Thin
-32017,1x5 Thin Liftarm,Technic,Liftarm,Thin
 11478,1x5 Thin Liftarm w/ Axle,Technic,Liftarm,Thin
+32017,1x5 Thin Liftarm,Technic,Liftarm,Thin
+32056,3x3 Thin L-Shape,Technic,Liftarm,Thin
 32063,1x6 Thin Liftarm,Technic,Liftarm,Thin
 32065,1x7 Thin Liftarm,Technic,Liftarm,Thin
-32056,3x3 Thin L-Shape,Technic,Liftarm,Thin
 32249,3x3 Thin D-Shape,Technic,Liftarm,Thin
 32250,3x5 Thin D-Shape,Technic,Liftarm,Thin
-99773,3x5 Thin Triangle,Technic,Liftarm,Thin
 32289,1x3 Thin w/ Pin & Axle,Technic,Liftarm,Thin
-2825,1x4 Thin w/ Stud,Technic,Liftarm,Thin
-44224,Rotation Joint w/ 3L Liftarm,Technic,Liftarm,
-32062,Axle 2,Technic,Axle,basic
-4519,Axle 3,Technic,Axle,basic
-3705,Axle 4,Technic,Axle,basic
-32073,Axle 5,Technic,Axle,basic
-3706,Axle 6,Technic,Axle,basic
-44294,Axle 7,Technic,Axle,basic
-3707,Axle 8,Technic,Axle,basic
-60485,Axle 9,Technic,Axle,basic
-3737,Axle 10,Technic,Axle,basic
-23948,Axle 11,Technic,Axle,basic
-3708,Axle 12,Technic,Axle,basic
-50451,Axle 16,Technic,Axle,basic
-50450,Axle 32,Technic,Axle,basic
-24316,Axle 3 w/ stop,Technic,Axle,stop
-87083,Axle 4 w/ stop,Technic,Axle,stop
-15462,Axle 5 w/ stop,Technic,Axle,stop
-55013,Axle 8 w/ stop,Technic,Axle,stop
-6587,Axle 3 w/ stud,Technic,Axle,stop
-99008,Axle 4 w/ stop,Technic,Axle,stop
-32209,Axle 5.5 w/ stop,Technic,Axle,stop
-3749,Smooth Pin & Axle,Technic,Axle,pin/axle hybrid
-43093,Friction Pin & Axle,Technic,Axle,pin/axle hybrid
-65249,1L Smooth Pin 2L Axle,Technic,Axle,pin/axle hybrid
-18651,1L Friction Pin 2L Axle,Technic,Axle,pin/axle hybrid
-11214,2L Friction Pin 1L Axle,Technic,Axle,pin/axle hybrid
-4274,½ Pin Smooth,Technic,Pin,
-89678,½ Pin Friction,Technic,Pin,
-32002,¾ Pin Smooth,Technic,Pin,
-3673,Pin Smooth,Technic,Pin,
-2780,Pin Friction,Technic,Pin,
-32556,3L Pin Smooth,Technic,Pin,
-6558,3L Pin Friction,Technic,Pin,
-32054,3L Pin w/ Bush,Technic,Pin,
-65526,½ Pin w/ Stud Holder,Technic,Pin,
-77765,Pin 3L w/ stop,Technic,Pin,
-61184,½ Pin Flick Missile,Technic,Pin,
-32138,Double Pin,Technic,Pin,
-47994,Double Pin 1x3 w/ 2 clips,Technic,Pin,
-64179,5x7 Frame Open Center,Technic,Frame,
-39794,7x11 Frame Open Center,Technic,Frame,
-39790,11x15 Frame Open Center,Technic,Frame,
-67491,3x19 Frame w/ 3 Open Areas,Technic,Frame,
-39369,11x19 Frame,Technic,Frame,
-14720,3x5 Frame H-Shape,Technic,Frame,
-64178,5x11 Frame H-Shape,Technic,Frame,
-39793,1x3x3 Pin Panel,Technic,Frame,
-79768,7x16 Frame Triangular w/ Bars,Technic,Frame,
-77107,11x11 Frame Round,Technic,Frame,
-3250,15x15 Frame Round,Technic,Frame,
-61069,4x6.5 Engine Block,Technic,Panel,
-24116,3x6x3 Bent w/ 2 pins,Technic,Panel,
-24119,7x3 Curved w/ 2 pins,Technic,Panel,
-62531,11x3 Curved w/ 2 pins,Technic,Panel,
-11954,11x3 Curved w/ 10 pins,Technic,Panel,
-18944,3x13 Panel Curved,Technic,Panel,
-42531,9x2x3 Mudguard,Technic,Panel,
-24118,15x2x5 Mudguard,Technic,Panel,
-11946,Fairing #21 Very Small,Technic,Panel,
-11947,Fairing #22 Very Small,Technic,Panel,
-87086,Fairing #2 Small,Technic,Panel,
-87080,Fairing #1 Small,Technic,Panel,
-64391,Fairing #4 Small Long,Technic,Panel,
-64683,Fairing #3 Small Long,Technic,Panel,
-64393,Fairing #6 Long,Technic,Panel,
-64681,Fairing #5 Long,Technic,Panel,
-64680,Fairing #14 Large Short,Technic,Panel,
-64394,Fairing #13 Large Short,Technic,Panel,
-64682,Fairing #18 Large,Technic,Panel,
-64392,Fairing #17 Large,Technic,Panel,
-89679,2x1 Curved w/ 1 Axle Hole,Technic,Panel,
-71682,2x3 Curved w/ 3 Axle Holes,Technic,Panel,
-67142,5x13 Panel #50 Curved/Tapered,Technic,Panel,
-68196,5x13 Panel #51 Curved/Tapered,Technic,Panel,
-2457,#3 3x2 Fairing Angled 22.5°,Technic,Panel,
-80285,3x5x2 Panel Curved,Technic,Panel,
-2395,#9 3x3 Fairing Tapered Lt,Technic,Panel,
-2403,#10 3x3 Fairing Tapered Rt,Technic,Panel,
-80274,#62 5x4 Fairing Tapered Rt,Technic,Panel,
-80278,#63 5x4 Fairing Tapered Lt,Technic,Panel,
-80268,#60 5x7 Fairing Tapered Rt,Technic,Panel,
-80267,#61 5x7 Fairing Tapered Lt,Technic,Panel,
-2387,#7 2x3 Fairing Tapered A,Technic,Panel,
-2389,#8 2x3 Fairing Tapered B,Technic,Panel,
-2438,5x3x2 Fairing Rounded L,Technic,Panel,
-2442,5x3x2 Fairing Rounded R,Technic,Panel,
-67139,3x5 Technic Picture Hanger,Technic,Panel,
-71709,3x7 Panel,Technic,Panel,
-15458,3x11 Panel,Technic,Panel,
-64782,5x11 Panel,Technic,Panel,
-18945,5x11 Panel Tapered,Technic,Panel,
-46882,15x2x7 Mudguard,Technic,Panel,
-69911,13x2x5 #41 Mudguard,Technic,Panel,
-71689,13x2x5 Mudguard Extension,Technic,Panel,
-6590,Bush,Technic,Connector,
-32123,½ Bush Smooth,Technic,Connector,
-59443,Smooth Axle Connector,Technic,Connector,
-42195,3L Axle Connector,Technic,Connector,
-18654,1L Pin Connector,Technic,Connector,
-62462,2L Pin Connector,Technic,Connector,
-40244,5½ Spiral Staircase Axle,Technic,Connector,
-53586,Axle & Pin w/ Extension,Technic,Connector,
-6536,2L Axle & Pin Perpendicular,Technic,Connector,
-42003,3L Axle & 2 Pin,Technic,Connector,
-32068,3L Axle & 1 Pin,Technic,Connector,
-32184,3L Axle & Center Pin,Technic,Connector,
-32291,1 Axle & Double Pin,Technic,Connector,
-63869,1 Axle & Triple Pin,Technic,Connector,
-98989,4L Axle & Double Pin,Technic,Connector,
-44809,Pin Bent,Technic,Connector,
-80910,2x4 Double Axle & Pin Conn,Technic,Connector,
-69819,Split Axle & Double Pin,Technic,Connector,
-92907,Axle & Pin Split,Technic,Connector,
-6553,Pole Reverser Handle,Technic,Connector,
-11272,Axle 2x3 Quadruple,Technic,Connector,
-32039,Axle & Axle Connector,Technic,Connector,
-45590,Dbl Axle Rubber,Technic,Connector,
-48496,Toggle Dbl w/ 2 Pins,Technic,Connector,
-87408,Toggle Dbl w/ Axle & Pins,Technic,Connector,
-11455,2x4 Bent Pin Connector,Technic,Connector,
-61903,Universal Joint 3L,Technic,Connector,
-32126,Toggle Joint Connector,Technic,Connector,
-15461,3L Pin 2 Pins & Hole,Technic,Connector,
-2393,1x3 Cross Block w/ 2 Pins 3 Pin Holes,Technic,Connector,
-48989,3L Pin w/ 4 Pins,Technic,Connector,
-55615,3x3 Bent w/ 4 Pins,Technic,Connector,
-72008,2x2 Liftarm w/ Split Axle Holes,Technic,Connector,
-32557,3L w/ Double Pin,Technic,Connector,
-32333,1x4x3 Pin Connector Block,Technic,Connector,
-98585,3x3 Round Connector,Technic,Connector,
-60208,31mm D x 15mm w/ 7 Pin Holes,Technic,Connector,
-22410,37mm D x 22mm w/ 7 Pin Holes,Technic,Connector,
-25214,1x1d 90° Elbow 2 Axle Holes,Technic,Connector,
-65473,2x2d 45° Elbow 2 Axle Holes,Technic,Connector,
-22961,Pin Hub 1 Axle,Technic,Hub,
-27940,Pin Hub 2 Axle,Technic,Hub,
-15100,Pin Hub 1 Pin,Technic,Hub,
-87082,Pin Hub 2 Pin,Technic,Hub,
-10197,Pin Hub 2 Axle 90°,Technic,Hub,
-57585,Axle Hub 3 Axle,Technic,Hub,
-48723,Axle Hub 4 Bar,Technic,Hub,
-90202,Pin Hub 4 Clip,Technic,Hub,
-24122,Axle Hub 2 Bar Holder,Technic,Hub,
-32013,Angled #1,Technic,Hub,
-32034,Angled #2 0°,Technic,Hub,
-32016,Angled #3 22.5°,Technic,Hub,
-32192,Angled #4 45°,Technic,Hub,
-32015,Angled #5 67.5°,Technic,Hub,
-32014,Angled #6 90°,Technic,Hub,
-10288,Angled Triple,Technic,Hub,
-10928,8 Tooth Type 2,Technic,Gears,
-11955,8 Tooth without friction,Technic,Gears,
-69778,12 Tooth,Technic,Gears,
-6589,12 Tooth Bevel,Technic,Gears,
-32270,12 Tooth Dbl Bevel,Technic,Gears,
-69762,14 Tooth Thick Bevel,Technic,Gears,
-94925,16 Tooth Reinforced,Technic,Gears,
-6542,16 Tooth w/ Clutch,Technic,Gears,
-76244,16 Tooth Dbl Clutch,Technic,Gears,
-87407,20 Tooth,Technic,Gears,
-81346,20 Tooth Dbl Clutch,Technic,Gears,
-32198,20 Tooth Bevel,Technic,Gears,
-32269,20 Tooth Dbl Bevel,Technic,Gears,
-87407,20 Tooth Bevel w/ Pin,Technic,Gears,
-35185,20 Tooth Dbl Clutch Dbl Bevel,Technic,Gears,
-69761,22 Tooth Thick Bevel,Technic,Gears,
-3648,24 Tooth,Technic,Gears,
-60201,24 Tooth Clutch,Technic,Gears,
-46372,28 Tooth Dbl Bevel,Technic,Gears,
-65413,28 Tooth Dbl Bevel w/ Peghole,Technic,Gears,
-65414,Differential Casing,Technic,Gears,
-62821,28 Tooth Differential,Technic,Gears,
-99009,28 Tooth Turntable,Technic,Gears,
-32498,32 Tooth Dbl Bevel,Technic,Gears,
-3649,40 Tooth,Technic,Gears,
-18939,60 Tooth Turntable,Technic,Gears,
-27938,4L Worm Screw,Technic,Gears,
-32905,8L Worm Screw,Technic,Gears,
-73763,6L Worm Gear,Technic,Gears,
-73764,2x2x1½ w/ Worm Gear Hole,Technic,Gears,
-78442,15 Tooth ¼ Gear Ring,Technic,Gears,
-24121,35 Tooth ¼ Gear Ring,Technic,Gears,
-6585,4x4x1⅓ Gearbox,Technic,Gears,
-6588,2x4x3⅓ Gearbox,Technic,Gears,
-24014,8 Tooth 1.5L Axle,Technic,Gears,
-3743,1x4 Rack,Technic,Rack,
-87761,1x7 Rack w/ Pin+Axle,Technic,Rack,
-64781,1x13 Rack,Technic,Rack,
-18940,1x14x2 Rack Housing,Technic,Rack,
-18942,1x14x2 Rack,Technic,Rack,
-2739,1x6 Link,Technic,Link,
-32293,1x3 Link,Technic,Link,
-64451,1x9 Link Bent (6-4),Technic,Link,
+32449,1x4 Thin Liftarm,Technic,Liftarm,Thin
+41677,1x2 Thin Liftarm,Technic,Liftarm,Thin
+99773,3x5 Thin Triangle,Technic,Liftarm,
+33299,Modified Crank / Pin 1 x 3 - Axle Holes,Technic,Liftarm,
 2637,1x16 Link,Technic,Link,
-32294,Wishbone Suspension Arm,Technic,Link,
+2739,1x6 Link,Technic,Link,
 3711,Link Chain,Technic,Link,
 15379,Link Tread,Technic,Link,
 24375,Rubber Tread Pin,Technic,Link,
-88323,Link Wide Tread,Technic,Link,
-69910,Link Tread 7L Wide,Technic,Link,
-57520,6 Tooth Small Sprocket,Technic,Link,
-57519,10 Tooth Large Sprocket,Technic,Link,
+32293,1x3 Link,Technic,Link,
+32294,Wishbone Suspension Arm,Technic,Link,
 42529,14 Tooth XL Sprocket,Technic,Link,
-92909,Steering Wheel Hub,Technic,Other,
-11950,Steering Axle w/ 2 Pin Holes,Technic,Other,
-23801,Steering Hub w/ 2 Axle holes,Technic,Other,
-92908,Steering Portal Frame,Technic,Other,
-92910,Steering Ball Joint Large,Technic,Other,
-32494,CV Steering Joint Small,Technic,Other,
-52730,CV Steering Joint Large,Technic,Other,
-77590,CV Joint Sliding,Technic,Other,
-15459,5x1 Steering Arm w/ Socket,Technic,Other,
-57515,6x2 Steering Arm w/ Socket,Technic,Other,
-32069,Steering Arm w/ Pins,Technic,Other,
-3736,Steering Pulley Large,Technic,Other,
+57519,10 Tooth Large Sprocket,Technic,Link,
+57520,6 Tooth Small Sprocket,Technic,Link,
+64451,1x9 Link Bent (6-4),Technic,Link,
+69910,Link Tread 7L Wide,Technic,Link,
+88323,Link Wide Tread,Technic,Link,
 2741,Large Steering Wheel,Technic,Other,
 2819,Small Steering Wheel,Technic,Other,
-40001,Steering Yoke,Technic,Other,
-35189,Brake Disc Hub w/ 3 Pin Holes,Technic,Other,
-69636,Steering Hub w/ Shock,Technic,Other,
-80563,Rotation Socket w/ 2 Pins,Technic,Other,
-52731,3L CV Joint,Technic,Other,
-18948,Driving Ring Conn,Technic,Other,
-18947,Driving Ring 3L,Technic,Other,
-32187,Driving Ring Ext,Technic,Other,
-35186,8-Tooth Driving Ring Ext,Technic,Other,
-6641,Changeover Catch,Technic,Other,
-35188,Wave Selector,Technic,Other,
-46834,Clutch Outside,Technic,Other,
-46835,Clutch Inside,Technic,Other,
-6575,Cam,Technic,Other,
+2850,Engine Cylinder,Technic,Other,
+2851,Engine Piston,Technic,Other,
 2852,Engine Conn Rod,Technic,Other,
 2853,Engine Crankshaft,Technic,Other,
 2854,Crankshaft Center,Technic,Other,
-2850,Engine Cylinder,Technic,Other,
-2851,Engine Piston,Technic,Other,
-76537,6.5L Shock Absorber,Technic,Other,
-92693,Mini Linear Actuator,Technic,Other,
-61927,Linear Actuator,Technic,Other,
-61904,Linear Actuator Holder,Technic,Other,
-76717,9L Shock Absorber,Technic,Other,
-69633,18L Shock Absorber,Technic,Other,
-47223,Pneumatic Switches,Technic,Other,
-19482,Pneumatic Pumps,Technic,Other,
-15475,Pneumatic Cylinders,Technic,Other,
-21761,Pneumatic Hose,Technic,Other,
-99021,Bush w/ Pneumatic Hose Connector,Technic,Other,
-4697,Pneumatic T piece,Technic,Other,
-39370,1x3 D-Shape w/ Socket,Technic,Other,
-50229,19mm D Ball (Spike Prime),Technic,Other,
-44359,Ø3 Ball Turret Hemisphere,Technic,Other,
-98012,Sm Rotor Blade,Technic,Other,
-85422,19L Rotor w/ 3 Holes,Technic,Other,
-98138,Blade 16L w/ Axle,Technic,Other,
-61800,Technic Wing Small,Technic,Other,
 2958,3x3 Disc,Technic,Other,
-32474,Technic Ball Joint,Technic,Other,
-53585,Ball Joint w/ Axle,Technic,Other,
-61510,2x1 Reel,Technic,Other,
+3736,Steering Pulley Large,Technic,Other,
+4697,Pneumatic T piece,Technic,Other,
+6575,Cam,Technic,Other,
+6641,Changeover Catch,Technic,Other,
+11950,Steering Axle w/ 2 Pin Holes,Technic,Other,
+15459,5x1 Steering Arm w/ Socket,Technic,Other,
+15475,Pneumatic Cylinders,Technic,Other,
 15540,1x6 Ski w/ Pin,Technic,Other,
+18947,Driving Ring 3L,Technic,Other,
+18948,Driving Ring Conn,Technic,Other,
+19482,Pneumatic Pumps,Technic,Other,
+21761,Pneumatic Hose,Technic,Other,
+23801,Steering Hub w/ 2 Axle holes,Technic,Other,
+32069,Steering Arm w/ Pins,Technic,Other,
+32187,Driving Ring Ext,Technic,Other,
+32474,Technic Ball Joint,Technic,Other,
+32494,CV Steering Joint Small,Technic,Other,
+35186,8-Tooth Driving Ring Ext,Technic,Other,
+35188,Wave Selector,Technic,Other,
+35189,Brake Disc Hub w/ 3 Pin Holes,Technic,Other,
+39370,1x3 D-Shape w/ Socket,Technic,Other,
+40001,Steering Yoke,Technic,Other,
 41669,1x3 Tooth w/ Axle,Technic,Other,
-99781,Bracket 1 x 2 - 1 x 2,SNOT,Bracket,
-4019,"Technic, Gear 16 Tooth - Axle Hole with Open Sides",Technic,Gears,
-553,2x2 Dome,Curved,Dish_dome,
+44359,Ø3 Ball Turret Hemisphere,Technic,Other,
+46834,Clutch Outside,Technic,Other,
+46835,Clutch Inside,Technic,Other,
+47223,Pneumatic Switches,Technic,Other,
+50229,19mm D Ball (Spike Prime),Technic,Other,
+52730,CV Steering Joint Large,Technic,Other,
+52731,3L CV Joint,Technic,Other,
+53585,Ball Joint w/ Axle,Technic,Other,
+57515,6x2 Steering Arm w/ Socket,Technic,Other,
+61510,2x1 Reel,Technic,Other,
+61800,Technic Wing Small,Technic,Other,
+61904,Linear Actuator Holder,Technic,Other,
+61927,Linear Actuator,Technic,Other,
+69633,18L Shock Absorber,Technic,Other,
+69636,Steering Hub w/ Shock,Technic,Other,
+76537,6.5L Shock Absorber,Technic,Other,
+76717,9L Shock Absorber,Technic,Other,
+77590,CV Joint Sliding,Technic,Other,
+80563,Rotation Socket w/ 2 Pins,Technic,Other,
+85422,19L Rotor w/ 3 Holes,Technic,Other,
+92693,Mini Linear Actuator,Technic,Other,
+92908,Steering Portal Frame,Technic,Other,
+92909,Steering Wheel Hub,Technic,Other,
+92910,Steering Ball Joint Large,Technic,Other,
+98012,Sm Rotor Blade,Technic,Other,
+98138,Blade 16L w/ Axle,Technic,Other,
+99021,Bush w/ Pneumatic Hose Connector,Technic,Other,
+2387,#7 2x3 Fairing Tapered A,Technic,Panel,
+2389,#8 2x3 Fairing Tapered B,Technic,Panel,
+2395,#9 3x3 Fairing Tapered Lt,Technic,Panel,
+2403,#10 3x3 Fairing Tapered Rt,Technic,Panel,
+2438,5x3x2 Fairing Rounded L,Technic,Panel,
+2442,5x3x2 Fairing Rounded R,Technic,Panel,
+2457,#3 3x2 Fairing Angled 22.5°,Technic,Panel,
+11946,Fairing #21 Very Small,Technic,Panel,
+11947,Fairing #22 Very Small,Technic,Panel,
+11954,11x3 Curved w/ 10 pins,Technic,Panel,
+15458,3x11 Panel,Technic,Panel,
+18944,3x13 Panel Curved,Technic,Panel,
+18945,5x11 Panel Tapered,Technic,Panel,
+24116,3x6x3 Bent w/ 2 pins,Technic,Panel,
+24118,15x2x5 Mudguard,Technic,Panel,
+24119,7x3 Curved w/ 2 pins,Technic,Panel,
+42531,9x2x3 Mudguard,Technic,Panel,
+46882,15x2x7 Mudguard,Technic,Panel,
+61069,4x6.5 Engine Block,Technic,Panel,
+62531,11x3 Curved w/ 2 pins,Technic,Panel,
+64391,Fairing #4 Small Long,Technic,Panel,
+64392,Fairing #17 Large,Technic,Panel,
+64393,Fairing #6 Long,Technic,Panel,
+64394,Fairing #13 Large Short,Technic,Panel,
+64680,Fairing #14 Large Short,Technic,Panel,
+64681,Fairing #5 Long,Technic,Panel,
+64682,Fairing #18 Large,Technic,Panel,
+64683,Fairing #3 Small Long,Technic,Panel,
+64782,5x11 Panel,Technic,Panel,
+67139,3x5 Technic Picture Hanger,Technic,Panel,
+67142,5x13 Panel #50 Curved/Tapered,Technic,Panel,
+68196,5x13 Panel #51 Curved/Tapered,Technic,Panel,
+69911,13x2x5 #41 Mudguard,Technic,Panel,
+71682,2x3 Curved w/ 3 Axle Holes,Technic,Panel,
+71689,13x2x5 Mudguard Extension,Technic,Panel,
+71709,3x7 Panel,Technic,Panel,
+80267,#61 5x7 Fairing Tapered Lt,Technic,Panel,
+80268,#60 5x7 Fairing Tapered Rt,Technic,Panel,
+80274,#62 5x4 Fairing Tapered Rt,Technic,Panel,
+80278,#63 5x4 Fairing Tapered Lt,Technic,Panel,
+80285,3x5x2 Panel Curved,Technic,Panel,
+87080,Fairing #1 Small,Technic,Panel,
+87086,Fairing #2 Small,Technic,Panel,
+89679,2x1 Curved w/ 1 Axle Hole,Technic,Panel,
+2780,Pin Friction,Technic,Pin,
+3673,Pin Smooth,Technic,Pin,
+4274,½ Pin Smooth,Technic,Pin,
+6558,3L Pin Friction,Technic,Pin,
+32002,¾ Pin Smooth,Technic,Pin,
+32054,3L Pin w/ Bush,Technic,Pin,
+32138,Double Pin,Technic,Pin,
+32556,3L Pin Smooth,Technic,Pin,
+47994,Double Pin 1x3 w/ 2 clips,Technic,Pin,
+61184,½ Pin Flick Missile,Technic,Pin,
+65526,½ Pin w/ Stud Holder,Technic,Pin,
+77765,Pin 3L w/ stop,Technic,Pin,
+89678,½ Pin Friction,Technic,Pin,
+2460,2x2 Plate Pin Top,Technic,plate,
+2476,2x2 Plate Pin Bottom,Technic,plate,
+2817,2x2 Plate 2 Hole Bottom,Technic,plate,
+3172,1x3 w/ 2 studs Hole Bottom,Technic,plate,
+3709,2x4 w/ holes,Technic,plate,
+3738,2x8 w/ holes,Technic,plate,
+10247,2x2 Plate 1 Hole Bottom,Technic,plate,
+11458,1x2 Plate Hole Top,Technic,plate,
+15092,2x2 Plate 2 Pins Bottom,Technic,plate,
+18677,1x2 Plate Hole Bottom,Technic,plate,
+26599,2x4 Plate 2-Hole Bottom,Technic,plate,
+30157,2x4 Plate Pin Sides,Technic,plate,
+30390,2x4 Dbl. Inv. Pin Sides 2-sides,Technic,plate,
+32001,2x6 w/ holes,Technic,plate,
+32124,1x5 Technic Plate,Technic,plate,
+32125,3-blade Rotor,Technic,plate,
+32529,1x2 Plate 1 Hole Bottom,Technic,plate,
+32530,1x2 Plate 2 Hole Top,Technic,plate,
+43045,2x4 Pin Hinge Top,Technic,plate,
+65803,16x16x1½ Technic Plate,Technic,plate,
+69984,Technic 6-blade Waterwheel,Technic,plate,
+77598,2x2x½ Wheel Fork,Technic,plate,
+98285,2x4 Pin Hinge Bottom,Technic,plate,
+3743,1x4 Rack,Technic,Rack,
+18940,1x14x2 Rack Housing,Technic,Rack,
+18942,1x14x2 Rack,Technic,Rack,
+64781,1x13 Rack,Technic,Rack,
+87761,1x7 Rack w/ Pin+Axle,Technic,Rack,
+1846,4x3x1½ Arch Mudguard,Vehicle,Mudguard,
+3387,4x2½x2 Arch Mudguard,Vehicle,Mudguard,
+11291,3x4x⅔ Wedge Cutout,Vehicle,Mudguard,
+18974,4x2½x2½ Mudguard,Vehicle,Mudguard,
+28326,4x3x1 Mudguard,Vehicle,Mudguard,
+35789,4x2½x2 Mudguard,Vehicle,Mudguard,
+41854,2x4 Flared Mudguard,Vehicle,Mudguard,
+44674,2x4 Mudguard Overhanging,Vehicle,Mudguard,
+49097,3x2½x1 Mudguard,Vehicle,Mudguard,
+50745,4x2½x2 Mudguard,Vehicle,Mudguard,
+60212,2x4 Mudguard,Vehicle,Mudguard,
+62361,7½x6x1 Mudguard,Vehicle,Mudguard,
+98282,4x2½x1 Mudguard,Vehicle,Mudguard,
+98835,3x4x1½ Curved,Vehicle,Mudguard,
+2437,3x4x1½ Windscreen,Vehicle,Windscreen,
+3523,2x4x2 Windscreen,Vehicle,Windscreen,
+4176,2x6x2 Windscreen,Vehicle,Windscreen,
+6070,5x2x1⅔ Windscreen,Vehicle,Windscreen,
+6238,4x4x1 Windscreen,Vehicle,Windscreen,
+11289,4x4x4½ Windscreen w/ Handle,Vehicle,Windscreen,
+27262,6x4x1 Windscreen Hexagonal w/ Handle,Vehicle,Windscreen,
+57783,3x4x1½ Windscreen,Vehicle,Windscreen,
+92583,3x6x2 Windscreen,Vehicle,Windscreen,
+2412,1x2 Grille Tile,Wall,Decorative,
+2877,1x2 Grille Brick,Wall,Decorative,
+15533,1x4 Masonry,Wall,Decorative,
+20310,1x1 Round w/ scroll,Wall,Decorative,
+30136,1x2 Log (Palisade),Wall,Decorative,
+30137,1x4 Log (Palisade),Wall,Decorative,
+71752,2x2x⅔ Brick Ribbed,Wall,Decorative,
+98283,1x2 Masonry,Wall,Decorative,
+4033,1x4x3 Train,Wall,Door,
+4035,1x2x3 Train,Wall,Door,
+4218,Garage Roller Door Section,Wall,Door,
+4447,4x4x3 Roof Window,Wall,Door,
+20309,1x4x1½ Arch Window,Wall,Door,
+28327,4x4x6 Corner Door Frame,Wall,Door,
+30044,1x2x2⅔ Round Top,Wall,Door,
+30045,2x2⅔ Round Bar,Wall,Door,
+30046,2x2⅔ Round Pane Lattice,Wall,Door,
+30179,1x4x6 Door Frame,Wall,Door,
+35565,2x6x6 w/ Gothic Arch,Wall,Door,
+40066,1x4x6 w/ Arch + Pillars,Wall,Door,
+42205,1x6x6 Window,Wall,Door,
+42509,6x6 Glass,Wall,Door,
+57894,1x4x6 3 Panes,Wall,Door,
+57895,4x6 Glass,Wall,Door,
+60032,1x2x2 Door,Wall,Door,
+60599,2x4x6 Door Frame,Wall,Door,
+60616,4x6 Door,Wall,Door,
+60621,4x6 Door Barred,Wall,Door,
+60623,4x6 Door Frames,Wall,Door,
+60808,1x4x5 w/ Window,Wall,Door,
+61345,1x2x4 Dbl. Plane,Wall,Door,
+80683,3x6 Door,Wall,Door,
+90195,1x2x2 Round,Wall,Door,
+92589,4x6 Grille,Wall,Door,
+3185,1x4x2 Fence,Wall,Fence,
+3224,1x2x1⅔ Frame w/ Diagonal Bar,Wall,Fence,
+3633,1x4x1 Fence,Wall,Fence,
+19121,1x4x2 Ornamented,Wall,Fence,
+21229,4x4x2 Quarter Round,Wall,Fence,
+30055,1x4x2 Spindled,Wall,Fence,
+32932,1x4x2 Asian Lattice,Wall,Fence,
+33303,1x4x2 Picket,Wall,Fence,
+41823,3x3x2 Ø6 Ornamented,Wall,Fence,
+2653,1x4 w/ groove,Wall,Groove_Rail,
+4216,1x2 w/ Groove,Wall,Groove_Rail,
+4217,1x14 w/ Groove,Wall,Groove_Rail,
+4510,1x8 door rail,Wall,Groove_Rail,
+30586,2x8 door rail,Wall,Groove_Rail,
+32028,1x2 door rail,Wall,Groove_Rail,
+88393,1x2x5 w/ Groove,Wall,Groove_Rail,
+6082,4x10x6 Rock Panel (BURP),Wall,Panel,
+6231,1x1 Corner Panel,Wall,Panel,
+14718,1x4x2 Panel,Wall,Panel,
+15714,1x2 Panel Rnd. Corners,Wall,Panel,
+23405,1x6x5 Panel Corrugated,Wall,Panel,
+23950,1x3 Panel,Wall,Panel,
+23969,1x2 Panel w/ 2 sides,Wall,Panel,
+30022,Tipper End Panel,Wall,Panel,
+30413,1x4 Panel,Wall,Panel,
+47847,2x4x6 Rock Panel,Wall,Panel,
+48651,1x2 Panel Sq. Corners,Wall,Panel,
+59349,1x6x5 Panel,Wall,Panel,
+60581,1x4x3 Panel,Wall,Panel,
+64453,1x6x3 Windscreen,Wall,Panel,
+65735,1x10x4 Windscreen,Wall,Panel,
+87421,3x3x6 Corner,Wall,Panel,
+87544,1x2x3 Panel,Wall,Panel,
+87552,1x2x2 Panel,Wall,Panel,
+91501,2x2 Corner Panel,Wall,Panel,
+93095,1x2 Panel w/ Divider,Wall,Panel,
+98280,1x6x3 Panel Studs on Sides,Wall,Panel,
+4175,1x2 Ladder,Wall,Stairs,
+30134,7x4x6 Stairs Open,Wall,Stairs,
+40243,Staircase Spiral,Wall,Stairs,
+2529,2x3 Pane Lattice,Wall,Window,
+4132,2x4x3 Frame,Wall,Window,
+6154,1x4x4 Window,Wall,Window,
+38320,2x2 Pane Lattice,Wall,Window,
+51239,1x3x3 Window,Wall,Window,
+51266,3x3 Glass,Wall,Window,
+60592,1x2x2 Window,Wall,Window,
+60593,1x2x3 Window,Wall,Window,
+60594,1x4x3 Window,Wall,Window,
+60600,2x3 Shutter,Wall,Window,
+60601,2x2 Glass,Wall,Window,
+60602,2x3 Glass,Wall,Window,
+62113,4x3 Grille,Wall,Window,
+73878,3x3x2 Curved Window,Wall,Window,
+86210,4x3 Glass,Wall,Window,
+93273,Curved 4x1x2/3,Curved,Curved,
+50950,Curved 3 x 1,Curved,Curved,
+4490,1x3 Arch,Curved,Arch_bow,
