@@ -1,10 +1,22 @@
 {
     "camera": {
-        "device_id": 1,
+        "device_id": 0,
+        "buffer_size": 1,
+        "width": 1920,
+        "height": 1080,
+        "fps": 30,
+        "auto_exposure": true,
         "directory": "LegoPictures",
         "filename_prefix": "Lego"
     },
     "detector": {
+        "detector_type": "conveyor",
+        "min_area": 1000,
+        "max_area": 50000,
+        "min_aspect_ratio": 0.3,
+        "max_aspect_ratio": 3.0,
+        "edge_margin": 10,
+        "debug_mode": false,
         "min_piece_area": 1200,
         "max_piece_area": 50000,
         "entry_zone_percent": 0.1,
@@ -33,11 +45,13 @@
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "primary",
-        "target_primary_category": "",
+        "strategy": "secondary",
+        "target_primary_category": "Basic",
         "target_secondary_category": "",
-        "max_bins": 7,
-        "overflow_bin": 0
+        "max_bins": 5,
+        "overflow_bin": 0,
+        "confidence_threshold": 0.7,
+        "pre_assignments": {}
     },
     "threading": {
         "max_queue_size": 100,
@@ -48,12 +62,17 @@
         "polling_interval": 0.01
     },
     "servo": {
-        "channel": 0,
         "min_pulse": 500,
         "max_pulse": 2500,
-        "frequency": 50,
         "default_position": 90,
+        "speed": 100,
+        "calibration_positions": {},
         "calibration_mode": false,
+        "min_bin_separation": 20,
+        "movement_speed": 0.5,
+        "settling_time": 0.2,
+        "channel": 0,
+        "frequency": 50,
         "bin_positions": {
             "0": 20,
             "1": 40,
@@ -65,7 +84,9 @@
             "7": 160,
             "8": 180,
             "9": 0
-        }
+        },
+        "default_angle": 90,
+        "move_duration": 500
     },
     "arduino_servo": {
         "port": "/dev/cu.usbmodem48CA435B6CCC2",
@@ -75,10 +96,12 @@
         "retry_delay": 1.0
     },
     "detector_roi": {
-        "x": 43,
-        "y": 52,
-        "w": 554,
-        "h": 376
+        "x": 210,
+        "y": 165,
+        "w": 1500,
+        "h": 750,
+        "entry_zone_width": 150,
+        "exit_zone_width": 150
     },
     "exit_zone_trigger": {
         "enabled": true,
@@ -142,5 +165,19 @@
         "max_entries": 10,
         "csv_path": "piece_history.csv",
         "include_timestamp": true
-    }
+    },
+    "gui_settings": {
+        "window_width": 1200,
+        "window_height": 800,
+        "theme": "dark",
+        "auto_save": true,
+        "save_interval": 300,
+        "show_tooltips": true,
+        "confirm_exit": true
+    },
+    "validation": {
+        "strict_mode": false,
+        "auto_fix": true
+    },
+    "version": "2.1"
 }

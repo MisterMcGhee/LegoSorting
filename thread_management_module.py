@@ -12,6 +12,7 @@ import time
 import logging
 from typing import Dict, Any, Callable, Optional, List, Tuple
 from dataclasses import dataclass, field
+from enhanced_config_manager import ModuleConfig, ConfigSchema
 
 # Get module logger
 logger = logging.getLogger(__name__)
@@ -45,52 +46,61 @@ class ThreadManager:
         """Initialize thread manager.
 
         Args:
-            config_manager: Optional configuration manager for thread settings
-            max_queue_size: Maximum number of items in the queue before blocking
+            config_manager: Configuration manager object (optional)
+            max_queue_size: Maximum size of message queue (overridden by config)
         """
-        # Set up configuration
+        # NEW: Get complete threading configuration
+        if config_manager:
+            threading_config = config_manager.get_module_config(ModuleConfig.THREADING.value)
+
+            # All values guaranteed to exist
+            self.max_queue_size = threading_config["max_queue_size"]
+            self.worker_count = threading_config["worker_count"]
+            self.api_timeout = threading_config["api_timeout"]
+            self.processing_timeout = threading_config["processing_timeout"]
+            self.shutdown_timeout = threading_config["shutdown_timeout"]
+            self.polling_interval = threading_config["polling_interval"]
+        else:
+            # Use schema defaults if no config manager
+            threading_config = ConfigSchema.get_module_schema(ModuleConfig.THREADING.value)
+            self.max_queue_size = threading_config["max_queue_size"]
+            self.worker_count = threading_config["worker_count"]
+            self.api_timeout = threading_config["api_timeout"]
+            self.processing_timeout = threading_config["processing_timeout"]
+            self.shutdown_timeout = threading_config["shutdown_timeout"]
+            self.polling_interval = threading_config["polling_interval"]
+
+        # Store config manager reference
         self.config_manager = config_manager
 
-        # Use config if provided, otherwise use defaults
-        if config_manager:
-            max_queue_size = config_manager.get("threading", "max_queue_size", max_queue_size)
+        # Message queues
+        self.piece_queue = queue.PriorityQueue(maxsize=self.max_queue_size)
+        self.result_queue = queue.Queue()
 
-            # Get exit zone trigger configuration
-            self.exit_zone_trigger_config = config_manager.get_section("exit_zone_trigger")
-            self.exit_zone_enabled = self.exit_zone_trigger_config.get("enabled", True)
-            self.priority_method = self.exit_zone_trigger_config.get("priority_method", "rightmost")
-        else:
-            self.exit_zone_enabled = True
-            self.priority_method = "rightmost"
-            self.exit_zone_trigger_config = {}
+        # Worker threads
+        self.workers = []
+        self.worker_status = {}
 
-        # Initialize message queue with priority
-        self.message_queue = queue.PriorityQueue(maxsize=max_queue_size)
-
-        # Keep track of messages in the queue for reprioritization
-        self.messages_in_queue = {}  # piece_id -> PieceMessage
-        self.queue_lock = threading.RLock()
-
-        # Thread control flags
-        self.running = False
+        # Control flags
         self.should_exit = threading.Event()
+        self.all_workers_ready = threading.Event()
 
-        # Thread registry
-        self.workers = {}
-
-        # Callback registry
-        self.callbacks = {}
-
-        # Synchronization primitives
-        self.locks = {
-            "camera": threading.Lock(),
-            "servo": threading.Lock(),
-            "api": threading.Lock()
+        # Statistics
+        self.stats_lock = threading.RLock()
+        self.statistics = {
+            "messages_queued": 0,
+            "messages_processed": 0,
+            "messages_failed": 0,
+            "total_processing_time": 0,
+            "average_processing_time": 0,
+            "queue_high_water_mark": 0
         }
 
-        logger.info("Thread manager initialized with max queue size: %d", max_queue_size)
-        logger.info(f"Exit zone trigger enabled: {self.exit_zone_enabled}")
-        logger.info(f"Priority method: {self.priority_method}")
+        # Exit zone management
+        self.exit_zone_pieces = []
+        self.exit_zone_lock = threading.RLock()
+
+        logger.info(f"ThreadManager initialized with queue size: {self.max_queue_size}")
 
     def start_worker(self, name: str, target: Callable, args: Tuple = (), daemon: bool = True) -> bool:
         """Start a new worker thread.
