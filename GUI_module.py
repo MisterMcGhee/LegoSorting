@@ -1260,6 +1260,491 @@ class ConfigurationScreen(QWidget):
         self.config_confirmed.emit()
 
 
+class LegoSortingGUI(QMainWindow):
+    """Main GUI window for active sorting operation
+
+    This class should be added to GUI_module.py to provide the sorting
+    interface that Lego_Sorting_006 expects.
+    """
+
+    # Signals for communication with main application
+    pause_requested = pyqtSignal()
+    resume_requested = pyqtSignal()
+    stop_requested = pyqtSignal()
+
+    def __init__(self, config_manager):
+        super().__init__()
+        self.config_manager = config_manager
+        self.is_paused = False
+
+        self.setWindowTitle("LEGO Sorting System - Active Sorting")
+        self.setGeometry(100, 100, 1400, 900)
+
+        # Apply consistent styling
+        self.apply_theme()
+
+        # Initialize UI
+        self.init_ui()
+
+    def apply_theme(self):
+        """Apply dark theme consistent with configuration screen"""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #2b2b2b;
+            }
+            QLabel {
+                color: #ffffff;
+            }
+            QGroupBox {
+                color: #ffffff;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+            QPushButton {
+                background-color: #555;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 4px;
+                font-weight: bold;
+                min-height: 30px;
+            }
+            QPushButton:hover {
+                background-color: #666;
+            }
+            QPushButton:pressed {
+                background-color: #444;
+            }
+            QPushButton#stopButton {
+                background-color: #aa3333;
+            }
+            QPushButton#stopButton:hover {
+                background-color: #cc4444;
+            }
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #00ff00;
+                border: 1px solid #555;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 10pt;
+            }
+            QStatusBar {
+                color: #ffffff;
+                background-color: #1e1e1e;
+                border-top: 1px solid #555;
+            }
+        """)
+
+    def init_ui(self):
+        """Initialize the user interface"""
+        # Create central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        # Main layout
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Left panel - Video feed and controls
+        self.create_video_panel(main_layout)
+
+        # Right panel - Information displays
+        self.create_info_panel(main_layout)
+
+        # Status bar
+        self.create_status_bar()
+
+        # Menu bar (optional)
+        self.create_menu_bar()
+
+    def create_video_panel(self, parent_layout):
+        """Create video display panel with controls"""
+        left_panel = QVBoxLayout()
+        parent_layout.addLayout(left_panel, stretch=3)
+
+        # Video display label
+        self.video_label = QLabel()
+        self.video_label.setMinimumSize(800, 600)
+        self.video_label.setStyleSheet("""
+            QLabel {
+                border: 2px solid #555;
+                background-color: #000;
+                color: #888;
+                font-size: 14pt;
+            }
+        """)
+        self.video_label.setAlignment(Qt.AlignCenter)
+        self.video_label.setText("Waiting for camera feed...")
+        self.video_label.setScaledContents(False)
+        left_panel.addWidget(self.video_label)
+
+        # Control buttons
+        control_layout = QHBoxLayout()
+        control_layout.setSpacing(10)
+        left_panel.addLayout(control_layout)
+
+        # Pause/Resume button
+        self.pause_button = QPushButton("Pause")
+        self.pause_button.clicked.connect(self.toggle_pause)
+        self.pause_button.setMinimumHeight(40)
+        control_layout.addWidget(self.pause_button)
+
+        # Stop button
+        self.stop_button = QPushButton("Stop Sorting")
+        self.stop_button.setObjectName("stopButton")
+        self.stop_button.clicked.connect(self.stop_sorting)
+        self.stop_button.setMinimumHeight(40)
+        control_layout.addWidget(self.stop_button)
+
+        # Add spacer
+        control_layout.addStretch()
+
+    def create_info_panel(self, parent_layout):
+        """Create information display panel"""
+        right_panel = QVBoxLayout()
+        right_panel.setSpacing(10)
+        parent_layout.addLayout(right_panel, stretch=1)
+
+        # System metrics
+        self.metrics_group = QGroupBox("System Metrics")
+        metrics_layout = QGridLayout()
+        metrics_layout.setSpacing(5)
+        self.metrics_group.setLayout(metrics_layout)
+        right_panel.addWidget(self.metrics_group)
+
+        # Create metric labels
+        self.metric_labels = {}
+        metrics = [
+            ('pieces_detected', 'Pieces Detected:', '0'),
+            ('pieces_sorted', 'Pieces Sorted:', '0'),
+            ('efficiency', 'Efficiency:', '0%'),
+            ('average_processing_time', 'Avg Process Time:', '0.0s'),
+            ('servo_movements', 'Servo Movements:', '0'),
+            ('uptime', 'Uptime:', '00:00:00'),
+            ('errors', 'Errors:', '0')
+        ]
+
+        for i, (key, label_text, default_value) in enumerate(metrics):
+            label = QLabel(label_text)
+            value = QLabel(default_value)
+            value.setAlignment(Qt.AlignRight)
+            value.setStyleSheet("color: #0ff; font-weight: bold;")
+            metrics_layout.addWidget(label, i, 0)
+            metrics_layout.addWidget(value, i, 1)
+            self.metric_labels[key] = value
+
+        # Recent pieces display
+        self.recent_pieces_group = QGroupBox("Recent Pieces")
+        recent_layout = QVBoxLayout()
+        self.recent_pieces_group.setLayout(recent_layout)
+        right_panel.addWidget(self.recent_pieces_group)
+
+        self.recent_pieces_text = QTextEdit()
+        self.recent_pieces_text.setReadOnly(True)
+        self.recent_pieces_text.setMaximumHeight(250)
+        recent_layout.addWidget(self.recent_pieces_text)
+
+        # Processing history
+        history_label = QLabel("Processing History:")
+        history_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        right_panel.addWidget(history_label)
+
+        self.history_text = QTextEdit()
+        self.history_text.setReadOnly(True)
+        self.history_text.setMaximumHeight(150)
+        right_panel.addWidget(self.history_text)
+
+        # Add stretch to push everything to top
+        right_panel.addStretch()
+
+    def create_status_bar(self):
+        """Create status bar"""
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("System Ready")
+
+        # Add permanent widgets to status bar
+        self.fps_label = QLabel("FPS: 0")
+        self.fps_label.setStyleSheet("color: #0ff; padding: 0 10px;")
+        self.status_bar.addPermanentWidget(self.fps_label)
+
+        self.camera_status = QLabel("Camera: Active")
+        self.camera_status.setStyleSheet("color: #0f0; padding: 0 10px;")
+        self.status_bar.addPermanentWidget(self.camera_status)
+
+    def create_menu_bar(self):
+        """Create menu bar with additional options"""
+        menubar = self.menuBar()
+        menubar.setStyleSheet("""
+            QMenuBar {
+                background-color: #2b2b2b;
+                color: white;
+            }
+            QMenuBar::item:selected {
+                background-color: #555;
+            }
+        """)
+
+        # File menu
+        file_menu = menubar.addMenu('File')
+
+        save_action = QAction('Save Configuration', self)
+        save_action.triggered.connect(self.save_configuration)
+        file_menu.addAction(save_action)
+
+        export_action = QAction('Export History', self)
+        export_action.triggered.connect(self.export_history)
+        file_menu.addAction(export_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction('Exit', self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # View menu
+        view_menu = menubar.addMenu('View')
+
+        fullscreen_action = QAction('Toggle Fullscreen', self)
+        fullscreen_action.setShortcut('F11')
+        fullscreen_action.triggered.connect(self.toggle_fullscreen)
+        view_menu.addAction(fullscreen_action)
+
+        # Tools menu
+        tools_menu = menubar.addMenu('Tools')
+
+        calibrate_action = QAction('Calibrate System', self)
+        calibrate_action.triggered.connect(self.open_calibration)
+        tools_menu.addAction(calibrate_action)
+
+    def toggle_pause(self):
+        """Toggle pause state"""
+        self.is_paused = not self.is_paused
+        if self.is_paused:
+            self.pause_button.setText("Resume")
+            self.pause_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #33aa33;
+                }
+                QPushButton:hover {
+                    background-color: #44cc44;
+                }
+            """)
+            self.pause_requested.emit()
+            self.status_bar.showMessage("System Paused")
+            self.camera_status.setText("Camera: Paused")
+            self.camera_status.setStyleSheet("color: #ff0; padding: 0 10px;")
+        else:
+            self.pause_button.setText("Pause")
+            self.pause_button.setStyleSheet("")  # Reset to default style
+            self.resume_requested.emit()
+            self.status_bar.showMessage("System Resumed")
+            self.camera_status.setText("Camera: Active")
+            self.camera_status.setStyleSheet("color: #0f0; padding: 0 10px;")
+
+    def stop_sorting(self):
+        """Stop sorting operation with confirmation"""
+        reply = QMessageBox.question(
+            self,
+            "Stop Sorting",
+            "Are you sure you want to stop the sorting system?\n\n"
+            "This will return you to the configuration screen.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            self.status_bar.showMessage("Stopping system...")
+            self.stop_requested.emit()
+
+    @pyqtSlot(np.ndarray)
+    def update_frame_display(self, frame):
+        """Update video feed display with numpy array"""
+        try:
+            height, width = frame.shape[:2]
+
+            # Convert frame to QImage
+            if len(frame.shape) == 3:
+                # Color image
+                bytes_per_line = 3 * width
+                q_image = QImage(
+                    frame.data,
+                    width,
+                    height,
+                    bytes_per_line,
+                    QImage.Format_RGB888
+                ).rgbSwapped()
+            else:
+                # Grayscale image
+                bytes_per_line = width
+                q_image = QImage(
+                    frame.data,
+                    width,
+                    height,
+                    bytes_per_line,
+                    QImage.Format_Grayscale8
+                )
+
+            # Convert to pixmap and scale
+            pixmap = QPixmap.fromImage(q_image)
+            scaled_pixmap = pixmap.scaled(
+                self.video_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.video_label.setPixmap(scaled_pixmap)
+
+        except Exception as e:
+            logger.error(f"Failed to update frame display: {e}")
+
+    @pyqtSlot(dict)
+    def update_metrics(self, metrics):
+        """Update metrics display with formatted values"""
+        for key, value in metrics.items():
+            if key in self.metric_labels:
+                if key == 'efficiency':
+                    self.metric_labels[key].setText(f"{value:.1f}%")
+                elif key == 'average_processing_time':
+                    self.metric_labels[key].setText(f"{value:.2f}s")
+                elif key == 'uptime':
+                    # Format uptime as HH:MM:SS
+                    hours = int(value // 3600)
+                    minutes = int((value % 3600) // 60)
+                    seconds = int(value % 60)
+                    self.metric_labels[key].setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+                else:
+                    self.metric_labels[key].setText(str(value))
+
+    @pyqtSlot(dict)
+    def add_piece_to_display(self, piece_record):
+        """Add detected piece to display panels"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+
+        # Format piece information for recent pieces display
+        piece_info = (
+            f"[{timestamp}] Piece #{piece_record.get('piece_id', '?')}\n"
+            f"  Element ID: {piece_record.get('element_id', 'Unknown')}\n"
+            f"  Name: {piece_record.get('name', 'Unknown')}\n"
+            f"  Category: {piece_record.get('category', 'Unknown')}\n"
+            f"  Assigned to Bin: {piece_record.get('bin_number', '?')}\n"
+            f"{'-' * 40}\n"
+        )
+
+        # Update recent pieces (prepend to show newest first)
+        current_text = self.recent_pieces_text.toPlainText()
+        new_text = piece_info + current_text
+
+        # Limit the text length to prevent memory issues
+        max_chars = 5000
+        if len(new_text) > max_chars:
+            new_text = new_text[:max_chars]
+
+        self.recent_pieces_text.setPlainText(new_text)
+
+        # Format for history (more compact)
+        history_entry = (
+            f"[{timestamp}] ID: {piece_record.get('piece_id', '?')} | "
+            f"{piece_record.get('name', 'Unknown')} -> Bin {piece_record.get('bin_number', '?')}\n"
+        )
+
+        # Append to history
+        self.history_text.append(history_entry)
+
+        # Auto-scroll to bottom of history
+        scrollbar = self.history_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def update_fps(self, fps):
+        """Update FPS display"""
+        self.fps_label.setText(f"FPS: {fps:.1f}")
+
+    def save_configuration(self):
+        """Save current configuration"""
+        try:
+            self.config_manager.save_config()
+            QMessageBox.information(
+                self,
+                "Configuration Saved",
+                "Current configuration has been saved successfully."
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Save Error",
+                f"Failed to save configuration: {str(e)}"
+            )
+
+    def export_history(self):
+        """Export processing history to file"""
+        from PyQt5.QtWidgets import QFileDialog
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export History",
+            f"lego_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            "Text Files (*.txt);;All Files (*.*)"
+        )
+
+        if filename:
+            try:
+                with open(filename, 'w') as f:
+                    f.write("LEGO Sorting System - Processing History\n")
+                    f.write(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write("=" * 60 + "\n\n")
+                    f.write(self.history_text.toPlainText())
+
+                QMessageBox.information(
+                    self,
+                    "Export Complete",
+                    f"History exported to: {filename}"
+                )
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Export Error",
+                    f"Failed to export history: {str(e)}"
+                )
+
+    def toggle_fullscreen(self):
+        """Toggle fullscreen mode"""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def open_calibration(self):
+        """Open calibration dialog (placeholder)"""
+        QMessageBox.information(
+            self,
+            "Calibration",
+            "Calibration interface not yet implemented.\n\n"
+            "Please use command-line arguments for calibration."
+        )
+
+    def closeEvent(self, event):
+        """Handle window close event"""
+        reply = QMessageBox.question(
+            self,
+            "Exit Application",
+            "Are you sure you want to exit the sorting system?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            self.stop_requested.emit()
+            event.accept()
+        else:
+            event.ignore()
+
 class MainWindow(QMainWindow):
     """Main application window"""
 
