@@ -33,7 +33,6 @@ from PyQt5.QtGui import (
 
 # Import the enhanced config manager
 from enhanced_config_manager import create_config_manager, ModuleConfig
-from sorting_module import create_sorting_manager
 
 
 class CameraThread(QThread):
@@ -189,120 +188,64 @@ class CameraPreviewWidget(QLabel):
         self.roi_w = max(self.roi_w, 100)
         self.roi_h = max(self.roi_h, 100)
 
-    def update_frame(self, frame):
-        """Update displayed frame"""
-        if frame is None:
-            return
+    def update_frame(self, pixmap, frame_width, frame_height):
+        """Update the displayed frame"""
+        self.frame_width = frame_width
+        self.frame_height = frame_height
 
-        # Update frame dimensions
-        h, w = frame.shape[:2]
-        if w != self.frame_width or h != self.frame_height:
-            self.set_frame_size(w, h)
-
-        # Convert to RGB and create QImage
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        bytes_per_line = 3 * w
-
-        q_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
-
-        # Calculate scale to fit the entire frame in the widget
-        widget_size = self.size()
-        self.scale_factor = min(
-            widget_size.width() / w,
-            widget_size.height() / h
-        )
-
-        # Scale the image to fit
-        self.display_width = int(w * self.scale_factor)
-        self.display_height = int(h * self.scale_factor)
-
-        pixmap = QPixmap.fromImage(q_image)
+        # Scale pixmap to fit widget while maintaining aspect ratio
         scaled_pixmap = pixmap.scaled(
-            self.display_width,
-            self.display_height,
+            self.size(),
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation
         )
 
-        # Create final pixmap centered in widget
-        final_pixmap = QPixmap(widget_size)
-        final_pixmap.fill(QColor(30, 30, 30))
+        # Trigger a repaint which will draw the ROI overlay
+        self.current_pixmap = scaled_pixmap
+        self.update()  # This triggers paintEvent
 
-        # Calculate position to center the scaled frame
-        x_offset = (widget_size.width() - self.display_width) // 2
-        y_offset = (widget_size.height() - self.display_height) // 2
+    def paintEvent(self, event):
+        """Paint event to draw frame and ROI overlay"""
+        painter = QPainter(self)
 
-        # Draw the scaled frame
-        painter = QPainter(final_pixmap)
-        painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
+        # Draw the frame if we have one
+        if hasattr(self, 'current_pixmap'):
+            # Calculate position to center the frame
+            x = (self.width() - self.current_pixmap.width()) // 2
+            y = (self.height() - self.current_pixmap.height()) // 2
+            painter.drawPixmap(x, y, self.current_pixmap)
 
-        # Draw ROI overlay with offset
-        self.draw_roi_overlay(painter, x_offset, y_offset)
+            # Draw ROI overlay
+            self._draw_roi_overlay(painter, x, y)
+        else:
+            # Draw placeholder
+            self.show_placeholder()
 
-        painter.end()
+    def _draw_roi_overlay(self, painter, offset_x, offset_y):
+        """Draw the ROI rectangle overlay"""
+        if not hasattr(self, 'frame_width') or not self.frame_width:
+            return
 
-        self.setPixmap(final_pixmap)
+        # Calculate scale factor
+        scale_x = self.current_pixmap.width() / self.frame_width
+        scale_y = self.current_pixmap.height() / self.frame_height
 
-    def draw_roi_overlay(self, painter, x_offset, y_offset):
-        """Draw ROI rectangle overlay"""
-        # Scale ROI to display coordinates
-        x = int(self.roi_x * self.scale_factor) + x_offset
-        y = int(self.roi_y * self.scale_factor) + y_offset
-        w = int(self.roi_w * self.scale_factor)
-        h = int(self.roi_h * self.scale_factor)
+        # Scale ROI coordinates to display size
+        roi_x = int(self.roi_x * scale_x) + offset_x
+        roi_y = int(self.roi_y * scale_y) + offset_y
+        roi_w = int(self.roi_w * scale_x)
+        roi_h = int(self.roi_h * scale_y)
 
-        # Draw semi-transparent overlay outside ROI (within frame bounds)
-        frame_x = x_offset
-        frame_y = y_offset
-        frame_w = self.display_width
-        frame_h = self.display_height
-
-        # Darken areas outside ROI but inside frame
-        overlay_color = QColor(0, 0, 0, 120)
-
-        # Top
-        if y > frame_y:
-            painter.fillRect(frame_x, frame_y, frame_w, y - frame_y, overlay_color)
-
-        # Left
-        if x > frame_x:
-            painter.fillRect(frame_x, y, x - frame_x, h, overlay_color)
-
-        # Right
-        if x + w < frame_x + frame_w:
-            painter.fillRect(x + w, y, frame_x + frame_w - (x + w), h, overlay_color)
-
-        # Bottom
-        if y + h < frame_y + frame_h:
-            painter.fillRect(frame_x, y + h, frame_w, frame_y + frame_h - (y + h), overlay_color)
-
-        # Draw ROI border
-        pen = QPen(QColor(0, 255, 0), 2)
+        # Draw ROI rectangle
+        pen = QPen(QColor(0, 255, 0), 2)  # Green, 2px width
         painter.setPen(pen)
-        painter.drawRect(x, y, w, h)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(roi_x, roi_y, roi_w, roi_h)
 
-        # Draw corner handles
-        handle_size = 8
-        handle_color = QColor(0, 255, 0)
-        painter.fillRect(x - handle_size // 2, y - handle_size // 2, handle_size, handle_size, handle_color)
-        painter.fillRect(x + w - handle_size // 2, y - handle_size // 2, handle_size, handle_size, handle_color)
-        painter.fillRect(x - handle_size // 2, y + h - handle_size // 2, handle_size, handle_size, handle_color)
-        painter.fillRect(x + w - handle_size // 2, y + h - handle_size // 2, handle_size, handle_size, handle_color)
-
-        # Draw info labels
-        font = QFont()
-        font.setPixelSize(12)
-        painter.setFont(font)
-
-        # ROI size and position
-        painter.setPen(QPen(QColor(255, 255, 255), 1))
-        info_text = f"ROI: {self.roi_w}×{self.roi_h} @ ({self.roi_x}, {self.roi_y})"
-        painter.drawText(x + 5, y - 5, info_text)
-
-        # Frame size in corner
-        frame_info = f"Frame: {self.frame_width}×{self.frame_height}"
-        painter.drawText(frame_x + 5, frame_y + 15, frame_info)
-
+        # Draw ROI info text
+        painter.setPen(QColor(0, 255, 0))
+        info_text = f"ROI: {self.roi_w}x{self.roi_h}"
+        painter.drawText(roi_x + 5, roi_y - 5, info_text)
 
 class ConfigurationScreen(QWidget):
     """Main configuration screen with all settings"""
@@ -328,39 +271,27 @@ class ConfigurationScreen(QWidget):
         self.load_settings()
 
     def init_category_database(self):
-        """Initialize category database from sorting manager"""
+        """Initialize category database from config manager's CSV parser"""
         try:
-            # Create temporary sorting manager to get category data
-            temp_manager = create_sorting_manager(self.config_manager)
+            # Use the new parse_categories_from_csv function
+            hierarchy = self.config_manager.parse_categories_from_csv()
 
-            # Build category database structure
+            # Convert to the format the GUI expects
             self.category_database = {
-                "primary": set(),
-                "primary_to_secondary": {},  # primary -> set of secondaries
-                "secondary_to_tertiary": {}  # (primary, secondary) -> set of tertiaries
+                "primary": set(hierarchy.get("primary", [])),
+                "primary_to_secondary": {},
+                "secondary_to_tertiary": {}
             }
 
-            # Get all categories from the sorting manager's data
-            categories_data = temp_manager.strategy.categories_data
+            # Convert lists back to sets for the GUI's existing methods
+            for primary, secondaries in hierarchy.get("primary_to_secondary", {}).items():
+                self.category_database["primary_to_secondary"][primary] = set(secondaries)
 
-            for element_id, info in categories_data.items():
-                primary = info.get("primary_category", "")
-                secondary = info.get("secondary_category", "")
-                tertiary = info.get("tertiary_category", "")
+            for key, tertiaries in hierarchy.get("secondary_to_tertiary", {}).items():
+                self.category_database["secondary_to_tertiary"][key] = set(tertiaries)
 
-                if primary:
-                    self.category_database["primary"].add(primary)
-
-                    if secondary:
-                        if primary not in self.category_database["primary_to_secondary"]:
-                            self.category_database["primary_to_secondary"][primary] = set()
-                        self.category_database["primary_to_secondary"][primary].add(secondary)
-
-                        if tertiary:
-                            key = (primary, secondary)
-                            if key not in self.category_database["secondary_to_tertiary"]:
-                                self.category_database["secondary_to_tertiary"][key] = set()
-                            self.category_database["secondary_to_tertiary"][key].add(tertiary)
+            print(f"Loaded category hierarchy from CSV:")
+            print(f"  - {len(self.category_database['primary'])} primary categories")
 
         except Exception as e:
             print(f"Error initializing category database: {e}")
@@ -702,45 +633,33 @@ class ConfigurationScreen(QWidget):
         return widget
 
     def start_camera(self):
-        """Start camera preview"""
-        if self.camera_thread is None or not self.camera_thread.isRunning():
-            device_id = self.camera_combo.currentIndex()
+        """Start camera preview using unified camera module"""
+        # Get the singleton camera instance
+        from camera_module import create_camera
+        self.camera = create_camera(config_manager=self.config_manager)
 
-            # Update status
-            self.camera_status_label.setText("Connecting...")
-            self.camera_status_label.setStyleSheet("color: blue;")
+        # Register GUI as a frame consumer
+        self.camera.register_consumer(
+            name="gui_preview",
+            callback=self.on_frame_received,
+            processing_type="async",
+            priority=10  # High priority for responsive display
+        )
 
-            # Get resolution from settings
-            resolution = self.resolution_combo.currentText()
-            width, height = 1920, 1080  # Default
-            if "x" in resolution:
-                w_str, h_str = resolution.split("x")
-                width = int(w_str)
-                height = int(h_str)
-
-            self.camera_thread = CameraThread(device_id, width, height)
-            self.camera_thread.frame_ready.connect(self.on_frame_received)
-            self.camera_thread.resolution_changed.connect(self.on_camera_resolution_changed)
-            self.camera_thread.start()
-
+        # Start capture if not already running
+        if self.camera.start_capture():
             self.start_camera_btn.setEnabled(False)
             self.stop_camera_btn.setEnabled(True)
 
     def stop_camera(self):
         """Stop camera preview"""
-        if self.camera_thread:
-            self.camera_thread.stop()
-            self.camera_thread = None
+        if hasattr(self, 'camera'):
+            # Unregister GUI consumer (camera keeps running for other consumers)
+            self.camera.unregister_consumer("gui_preview")
 
-        self.start_camera_btn.setEnabled(True)
-        self.stop_camera_btn.setEnabled(False)
-
-        # Update status
-        self.camera_status_label.setText("Not connected")
-        self.camera_status_label.setStyleSheet("color: #666;")
-
-        # Show placeholder
-        self.camera_preview.show_placeholder()
+            # Only stop capture if no other consumers
+            if not self.camera.consumers:
+                self.camera.stop_capture()
 
     def on_camera_changed(self):
         """Handle camera device change"""
@@ -812,8 +731,25 @@ class ConfigurationScreen(QWidget):
         self.camera_preview.set_roi(x, y, w, h)
 
     def on_frame_received(self, frame):
-        """Handle new camera frame"""
-        self.camera_preview.update_frame(frame)
+        """Callback when new frame is available from camera module"""
+        # Don't try to draw ROI here - just pass frame to preview widget
+        # The CameraPreviewWidget will handle ROI overlay in its paintEvent
+
+        # Convert frame for Qt display
+        height, width, channel = frame.shape
+        bytes_per_line = 3 * width
+
+        # Convert BGR (OpenCV) to RGB (Qt)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Create QImage
+        q_image = QImage(frame_rgb.data, width, height, bytes_per_line, QImage.Format_RGB888)
+
+        # Convert to QPixmap and update the preview widget
+        pixmap = QPixmap.fromImage(q_image)
+
+        # Update the camera preview widget with the new frame
+        self.camera_preview.update_frame(pixmap, width, height)
 
     def on_roi_changed(self):
         """Handle ROI spinbox changes"""
@@ -883,15 +819,14 @@ class ConfigurationScreen(QWidget):
         self.on_roi_changed()
 
     def on_strategy_changed(self, strategy):
-        """Handle strategy change - update UI and available options"""
-        # Update UI based on strategy
+        """Handle sorting strategy change"""
         if strategy == "primary":
-            # No hierarchy needed for primary
+            # Disable category selectors
             self.primary_combo.setEnabled(False)
-            self.secondary_combo.setEnabled(False)
             self.primary_combo.clear()
+            self.secondary_combo.setEnabled(False)
             self.secondary_combo.clear()
-            self.strategy_desc.setText("Sorting by primary categories (Basic, Technic, etc.)")
+            self.strategy_desc.setText("Sorting all primary categories into bins")
 
         elif strategy == "secondary":
             # Need to select primary category
@@ -899,14 +834,14 @@ class ConfigurationScreen(QWidget):
             self.secondary_combo.setEnabled(False)
             self.secondary_combo.clear()
             self.update_primary_options()
-            self.strategy_desc.setText("Sorting by secondary categories within a primary category")
+            self.strategy_desc.setText("Select which primary category to sort within")
 
         elif strategy == "tertiary":
             # Need to select both primary and secondary
             self.primary_combo.setEnabled(True)
             self.secondary_combo.setEnabled(True)
             self.update_primary_options()
-            self.strategy_desc.setText("Sorting by tertiary categories within primary/secondary")
+            self.strategy_desc.setText("Select primary and secondary categories to sort within")
 
         # Update bin assignment options
         self.update_bin_assignment_options()
@@ -937,6 +872,10 @@ class ConfigurationScreen(QWidget):
             if primary and secondary:
                 self.strategy_desc.setText(
                     f"Sorting tertiary categories within '{primary}' → '{secondary}'"
+                )
+            elif primary:
+                self.strategy_desc.setText(
+                    f"Select secondary category within '{primary}'"
                 )
 
         # Update bin assignments
