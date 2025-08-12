@@ -1397,10 +1397,14 @@ class ConfigurationScreen(QWidget):
             if not self.category_database:
                 return
 
+            # Variables to track final strategy context
+            strategy_name = "primary"
             target_primary = ""
             target_secondary = ""
 
             if "Secondary" in strategy:
+                strategy_name = "secondary"
+
                 # Add primary category dropdown
                 primary_row = QHBoxLayout()
                 primary_row.addWidget(QLabel("Within:"))
@@ -1409,26 +1413,27 @@ class ConfigurationScreen(QWidget):
                 # Populate with sorted primary categories
                 primary_categories = sorted(self.category_database.get("primary", []))
                 self.primary_combo.addItems(primary_categories)
-                self.primary_combo.currentTextChanged.connect(self.on_primary_changed)
 
                 primary_row.addWidget(self.primary_combo)
                 self.dynamic_dropdowns_layout.addLayout(primary_row)
 
-                target_primary = self.primary_combo.currentText() if self.primary_combo.count() > 0 else ""
+                # Get the selected primary category
+                if self.primary_combo.count() > 0:
+                    target_primary = self.primary_combo.currentText()
 
             elif "Tertiary" in strategy:
+                strategy_name = "tertiary"
+
                 # Add primary category dropdown
                 primary_row = QHBoxLayout()
                 primary_row.addWidget(QLabel("Within Primary:"))
                 self.primary_combo = QComboBox()
 
-                # Block signals during setup
+                # Block signals during setup to prevent premature updates
                 self.primary_combo.blockSignals(True)
 
-                # Populate with sorted primary categories
                 primary_categories = sorted(self.category_database.get("primary", []))
                 self.primary_combo.addItems(primary_categories)
-                self.primary_combo.currentTextChanged.connect(self.on_primary_changed)
 
                 primary_row.addWidget(self.primary_combo)
                 self.dynamic_dropdowns_layout.addLayout(primary_row)
@@ -1437,57 +1442,100 @@ class ConfigurationScreen(QWidget):
                 secondary_row = QHBoxLayout()
                 secondary_row.addWidget(QLabel("Within Secondary:"))
                 self.secondary_combo = QComboBox()
+                self.secondary_combo.currentTextChanged.connect(self.on_secondary_changed)
                 secondary_row.addWidget(self.secondary_combo)
                 self.dynamic_dropdowns_layout.addLayout(secondary_row)
 
-                # Unblock signals and trigger initial population
-                self.primary_combo.blockSignals(False)
+                # Now populate the secondary dropdown based on primary selection
                 if self.primary_combo.count() > 0:
-                    self.on_primary_changed(self.primary_combo.currentText())
+                    primary_category = self.primary_combo.currentText()
+                    target_primary = primary_category
 
-                target_primary = self.primary_combo.currentText() if self.primary_combo.count() > 0 else ""
-                target_secondary = self.secondary_combo.currentText() if self.secondary_combo and self.secondary_combo.count() > 0 else ""
+                    # Populate secondary dropdown
+                    primary_to_secondary = self.category_database.get("primary_to_secondary", {})
+                    if primary_category in primary_to_secondary:
+                        secondaries_set = primary_to_secondary[primary_category]
+                        secondaries = sorted(list(secondaries_set))
 
-            # Update bin assignment widget with new strategy context
+                        if secondaries:
+                            self.secondary_combo.addItems(secondaries)
+                            self.secondary_combo.setEnabled(True)
+                            # Get the first secondary as default
+                            if self.secondary_combo.count() > 0:
+                                target_secondary = self.secondary_combo.currentText()
+                        else:
+                            self.secondary_combo.addItem("(No secondary categories)")
+                            self.secondary_combo.setEnabled(False)
+                    else:
+                        self.secondary_combo.addItem("(No secondary categories)")
+                        self.secondary_combo.setEnabled(False)
+
+                # Connect the signal for future changes (after initial setup)
+                self.primary_combo.currentTextChanged.connect(self.on_primary_changed)
+
+                # Unblock signals
+                self.primary_combo.blockSignals(False)
+
+            # Update bin assignment widget with final strategy context
             if hasattr(self, 'bin_assignment_widget'):
-                strategy_name = "primary"
-                if "Secondary" in strategy:
-                    strategy_name = "secondary"
-                elif "Tertiary" in strategy:
-                    strategy_name = "tertiary"
-
                 self.bin_assignment_widget.set_strategy_context(strategy_name, target_primary, target_secondary)
 
         except Exception as e:
             print(f"Error in on_strategy_changed: {e}")
+            import traceback
+            traceback.print_exc()
 
     def on_primary_changed(self, primary_category):
-        """Handle primary category selection for tertiary sorting"""
-        if self.secondary_combo is None or not primary_category:
+        """Handle primary category selection for secondary and tertiary sorting"""
+        if not primary_category:
             return
 
-        self.secondary_combo.clear()
+        strategy_text = self.strategy_combo.currentText() if hasattr(self, 'strategy_combo') else ""
 
-        primary_to_secondary = self.category_database.get("primary_to_secondary", {})
+        if "Secondary" in strategy_text:
+            # Handle secondary sorting - just update bin assignments
+            if hasattr(self, 'bin_assignment_widget'):
+                self.bin_assignment_widget.set_strategy_context("secondary", primary_category, "")
 
-        if primary_category in primary_to_secondary:
-            secondaries_set = primary_to_secondary[primary_category]
-            secondaries = sorted(list(secondaries_set))
+        elif "Tertiary" in strategy_text:
+            # Handle tertiary sorting - update secondary dropdown and bin assignments
+            if self.secondary_combo is None:
+                return
 
-            if secondaries:
-                self.secondary_combo.addItems(secondaries)
-                self.secondary_combo.setEnabled(True)
+            self.secondary_combo.clear()
+
+            primary_to_secondary = self.category_database.get("primary_to_secondary", {})
+
+            if primary_category in primary_to_secondary:
+                secondaries_set = primary_to_secondary[primary_category]
+                secondaries = sorted(list(secondaries_set))
+
+                if secondaries:
+                    self.secondary_combo.addItems(secondaries)
+                    self.secondary_combo.setEnabled(True)
+                else:
+                    self.secondary_combo.addItem("(No secondary categories)")
+                    self.secondary_combo.setEnabled(False)
             else:
                 self.secondary_combo.addItem("(No secondary categories)")
                 self.secondary_combo.setEnabled(False)
-        else:
-            self.secondary_combo.addItem("(No secondary categories)")
-            self.secondary_combo.setEnabled(False)
 
-        # Update bin assignment widget context
-        if hasattr(self, 'bin_assignment_widget'):
-            target_secondary = self.secondary_combo.currentText() if self.secondary_combo.isEnabled() else ""
-            self.bin_assignment_widget.set_strategy_context("tertiary", primary_category, target_secondary)
+            # Update bin assignment with new context
+            if hasattr(self, 'bin_assignment_widget'):
+                target_secondary = self.secondary_combo.currentText() if self.secondary_combo.isEnabled() and self.secondary_combo.count() > 0 else ""
+                self.bin_assignment_widget.set_strategy_context("tertiary", primary_category, target_secondary)
+    def on_secondary_changed(self, secondary_category):
+        """Handle secondary category selection for tertiary sorting"""
+        if not hasattr(self, 'bin_assignment_widget'):
+            return
+
+        # Only update if we're in tertiary mode
+        strategy_text = self.strategy_combo.currentText()
+        if "Tertiary" not in strategy_text:
+            return
+
+        primary_category = self.primary_combo.currentText() if self.primary_combo else ""
+        self.bin_assignment_widget.set_strategy_context("tertiary", primary_category, secondary_category)
 
     def on_max_bins_changed(self, value):
         """Handle max bins change"""

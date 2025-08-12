@@ -76,9 +76,9 @@
     },
     "detector_roi": {
         "x": 43,
-        "y": 112,
+        "y": 52,
         "w": 554,
-        "h": 300
+        "h": 376
     },
     "exit_zone_trigger": {
         "enabled": true,
