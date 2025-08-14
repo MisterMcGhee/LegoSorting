@@ -48,7 +48,7 @@
         "strategy": "primary",
         "target_primary_category": "Basic",
         "target_secondary_category": "",
-        "max_bins": 3,
+        "max_bins": 7,
         "overflow_bin": 0,
         "confidence_threshold": 0.7,
         "pre_assignments": {}
@@ -96,9 +96,9 @@
         "retry_delay": 1.0
     },
     "detector_roi": {
-        "x": 90,
-        "y": 71,
-        "w": 1069,
+        "x": 375,
+        "y": 73,
+        "w": 601,
         "h": 507,
         "entry_zone_width": 150,
         "exit_zone_width": 150

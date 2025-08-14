@@ -805,7 +805,7 @@ def create_detector(detector_type="conveyor", config_manager=None, thread_manage
     Args:
         detector_type: Type of detector ("conveyor" or future types)
         config_manager: Configuration manager
-        thread_manager: Thread manager for asynchronous operation
+        thread_manager: Thread manager for asynchronous operation (not used by ConveyorDetector)
 
     Returns:
         Detector instance
@@ -813,12 +813,13 @@ def create_detector(detector_type="conveyor", config_manager=None, thread_manage
     logger.info(f"Creating detector of type: {detector_type}")
 
     if detector_type == "conveyor":
-        return ConveyorDetector(config_manager, thread_manager)
+        # ConveyorDetector only accepts config_manager parameter
+        # thread_manager is not used by ConveyorDetector
+        return ConveyorDetector(config_manager)
     else:
         error_msg = f"Unsupported detector type: {detector_type}. Currently only 'conveyor' is supported."
         logger.error(error_msg)
         raise ValueError(error_msg)
-
 
 # Simple configuration manager class for standalone testing
 class SimpleConfigManager:

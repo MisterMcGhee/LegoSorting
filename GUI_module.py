@@ -167,80 +167,143 @@ class CameraThread(QThread):
 # ============= Camera Preview Widget with ROI Constraints =============
 
 class CameraPreviewWidget(QLabel):
-    """Widget for camera preview with ROI selection during configuration"""
+    """Widget for displaying camera feed with ROI overlay"""
+
     roi_changed = pyqtSignal(int, int, int, int)  # x, y, w, h
 
     def __init__(self):
         super().__init__()
         self.setMinimumSize(640, 480)
-        self.setStyleSheet("QLabel { background-color: #000000; border: 2px solid #555; }")
-        self.setAlignment(Qt.AlignCenter)
-        self.setText("Camera not started")
+        self.setMaximumSize(960, 720)
+        self.setScaledContents(False)
+        self.setStyleSheet("border: 1px solid #ccc; background-color: #222;")
 
-        # ROI parameters with constraints
-        self.roi_x = 100
-        self.roi_y = 100
-        self.roi_w = 400
-        self.roi_h = 300
-
-        # Minimum ROI size
-        self.min_roi_width = 100
-        self.min_roi_height = 100
-
-        # Mouse tracking
-        self.dragging = False
-        self.drag_start = None
-        self.setMouseTracking(True)
-
-        # Frame dimensions
-        self.frame_width = 640
-        self.frame_height = 480
+        # Initialize current_pixmap to None
         self.current_pixmap = None
 
-    def update_frame(self, frame):
-        """Update displayed frame"""
-        self.frame_height, self.frame_width = frame.shape[:2]
+        # ROI parameters (in camera coordinates)
+        self.roi_x = 125
+        self.roi_y = 200
+        self.roi_w = 1550
+        self.roi_h = 500
 
-        # Convert to RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Camera frame dimensions
+        self.frame_width = 1920
+        self.frame_height = 1080
 
-        # Create QImage
-        h, w, ch = frame_rgb.shape
-        bytes_per_line = ch * w
-        q_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        # Display scaling
+        self.scale_factor = 1.0
+        self.display_width = 640
+        self.display_height = 480
 
-        # Convert to pixmap and scale
-        pixmap = QPixmap.fromImage(q_image)
-        scaled_pixmap = pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        # Interaction state
+        self.dragging = False
+        self.drag_start = None
+        self.resize_handle = None
 
-        # Store current pixmap for ROI drawing
+        self.setMouseTracking(True)
+
+        # Show placeholder when no camera
+        self.show_placeholder()
+
+    def show_placeholder(self):
+        """Show placeholder text when no camera feed"""
+        placeholder = QPixmap(self.size())
+        placeholder.fill(QColor(40, 40, 40))
+
+        painter = QPainter(placeholder)
+        painter.setPen(QPen(QColor(100, 100, 100), 1))
+        font = QFont()
+        font.setPixelSize(16)
+        painter.setFont(font)
+        painter.drawText(
+            placeholder.rect(),
+            Qt.AlignCenter,
+            "Camera Preview\nClick 'Start Camera' to begin"
+        )
+        painter.end()
+
+        self.setPixmap(placeholder)
+
+    def set_frame_size(self, width, height):
+        """Update the actual camera frame dimensions"""
+        self.frame_width = width
+        self.frame_height = height
+        self.constrain_roi()
+
+    def set_roi(self, x, y, w, h):
+        """Set ROI parameters and constrain to frame"""
+        self.roi_x = x
+        self.roi_y = y
+        self.roi_w = w
+        self.roi_h = h
+        self.constrain_roi()
+        self.update()
+
+    def constrain_roi(self):
+        """Ensure ROI stays within camera frame bounds"""
+        # Constrain position
+        self.roi_x = max(0, min(self.roi_x, self.frame_width - self.roi_w))
+        self.roi_y = max(0, min(self.roi_y, self.frame_height - self.roi_h))
+
+        # Constrain size
+        self.roi_w = min(self.roi_w, self.frame_width - self.roi_x)
+        self.roi_h = min(self.roi_h, self.frame_height - self.roi_y)
+
+        # Ensure minimum size
+        self.roi_w = max(self.roi_w, 100)
+        self.roi_h = max(self.roi_h, 100)
+
+    def update_frame(self, pixmap, frame_width, frame_height):
+        """Update the displayed frame"""
+        self.frame_width = frame_width
+        self.frame_height = frame_height
+
+        # Scale pixmap to fit widget while maintaining aspect ratio
+        scaled_pixmap = pixmap.scaled(
+            self.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+
+        # Trigger a repaint which will draw the ROI overlay
         self.current_pixmap = scaled_pixmap
+        self.update()  # This triggers paintEvent
 
-        # Draw ROI on pixmap
-        self.draw_roi()
+    def paintEvent(self, event):
+        """Paint event to draw frame and ROI overlay"""
+        painter = QPainter(self)
 
-    def draw_roi(self):
-        """Draw ROI rectangle on the current pixmap"""
-        if not self.current_pixmap:
+        # Draw the frame if we have one
+        if self.current_pixmap is not None:
+            # Calculate position to center the frame
+            x = (self.width() - self.current_pixmap.width()) // 2
+            y = (self.height() - self.current_pixmap.height()) // 2
+            painter.drawPixmap(x, y, self.current_pixmap)
+
+            # Draw ROI overlay
+            self._draw_roi_overlay(painter, x, y)
+        else:
+            # Draw placeholder
+            self.show_placeholder()
+
+    def _draw_roi_overlay(self, painter, offset_x, offset_y):
+        """Draw the ROI rectangle overlay"""
+        if not hasattr(self, 'frame_width') or not self.frame_width:
             return
 
-        # Create a copy for drawing
-        display_pixmap = QPixmap(self.current_pixmap)
-
-        painter = QPainter(display_pixmap)
-
-        # Calculate scale factors
+        # Calculate scale factor
         scale_x = self.current_pixmap.width() / self.frame_width
         scale_y = self.current_pixmap.height() / self.frame_height
 
         # Scale ROI coordinates to display size
-        roi_x = int(self.roi_x * scale_x)
-        roi_y = int(self.roi_y * scale_y)
+        roi_x = int(self.roi_x * scale_x) + offset_x
+        roi_y = int(self.roi_y * scale_y) + offset_y
         roi_w = int(self.roi_w * scale_x)
         roi_h = int(self.roi_h * scale_y)
 
         # Draw ROI rectangle
-        pen = QPen(QColor(0, 255, 0), 2)
+        pen = QPen(QColor(0, 255, 0), 2)  # Green, 2px width
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(roi_x, roi_y, roi_w, roi_h)
@@ -250,57 +313,167 @@ class CameraPreviewWidget(QLabel):
         info_text = f"ROI: {self.roi_w}x{self.roi_h}"
         painter.drawText(roi_x + 5, roi_y - 5, info_text)
 
-        painter.end()
+    def mousePressEvent(self, event):
+        """Handle mouse press events for ROI interaction"""
+        if event.button() == Qt.LeftButton and self.current_pixmap is not None:
+            # Convert mouse position to camera coordinates
+            offset_x = (self.width() - self.current_pixmap.width()) // 2
+            offset_y = (self.height() - self.current_pixmap.height()) // 2
 
-        self.setPixmap(display_pixmap)
+            mouse_x = event.x()
+            mouse_y = event.y()
 
-    def set_roi(self, x, y, w, h):
-        """Set ROI coordinates with constraints"""
-        # Constrain ROI to frame boundaries
-        self.roi_x = max(0, min(x, self.frame_width - self.min_roi_width))
-        self.roi_y = max(0, min(y, self.frame_height - self.min_roi_height))
-        self.roi_w = max(self.min_roi_width, min(w, self.frame_width - self.roi_x))
-        self.roi_h = max(self.min_roi_height, min(h, self.frame_height - self.roi_y))
+            # Check if within image area
+            if (mouse_x >= offset_x and mouse_x <= offset_x + self.current_pixmap.width() and
+                    mouse_y >= offset_y and mouse_y <= offset_y + self.current_pixmap.height()):
 
-        self.draw_roi()
-        self.roi_changed.emit(self.roi_x, self.roi_y, self.roi_w, self.roi_h)
-
-    def mousePressEvent(self, event: QMouseEvent):
-        """Handle mouse press for ROI dragging"""
-        if event.button() == Qt.LeftButton:
-            self.dragging = True
-            self.drag_start = event.pos()
-
-    def mouseMoveEvent(self, event: QMouseEvent):
-        """Handle mouse move for ROI dragging with constraints"""
-        if self.dragging and self.drag_start:
-            # Calculate movement
-            delta = event.pos() - self.drag_start
-
-            # Convert to frame coordinates
-            if self.current_pixmap:
+                # Convert to camera coordinates
                 scale_x = self.frame_width / self.current_pixmap.width()
                 scale_y = self.frame_height / self.current_pixmap.height()
 
-                new_x = self.roi_x + int(delta.x() * scale_x)
-                new_y = self.roi_y + int(delta.y() * scale_y)
+                cam_x = int((mouse_x - offset_x) * scale_x)
+                cam_y = int((mouse_y - offset_y) * scale_y)
 
-                # Apply constraints to keep ROI within frame
-                new_x = max(0, min(new_x, self.frame_width - self.roi_w))
-                new_y = max(0, min(new_y, self.frame_height - self.roi_h))
+                # Check if clicking on ROI
+                if (cam_x >= self.roi_x and cam_x <= self.roi_x + self.roi_w and
+                        cam_y >= self.roi_y and cam_y <= self.roi_y + self.roi_h):
+                    self.dragging = True
+                    self.drag_start = (cam_x, cam_y)
+                    self.resize_handle = self._get_resize_handle(cam_x, cam_y)
 
-                self.roi_x = new_x
-                self.roi_y = new_y
-
-                self.drag_start = event.pos()
-                self.draw_roi()
-                self.roi_changed.emit(self.roi_x, self.roi_y, self.roi_w, self.roi_h)
-
-    def mouseReleaseEvent(self, event: QMouseEvent):
-        """Handle mouse release"""
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release events"""
         if event.button() == Qt.LeftButton:
             self.dragging = False
             self.drag_start = None
+            self.resize_handle = None
+            self.setCursor(Qt.ArrowCursor)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move events for ROI dragging and resizing"""
+        if not hasattr(self, 'frame_width') or not self.frame_width:
+            return
+
+        # Convert mouse position to camera coordinates
+        mouse_x = event.x()
+        mouse_y = event.y()
+
+        # Calculate position in scaled coordinates
+        # Check that current_pixmap exists AND is not None
+        if self.current_pixmap is not None:
+            offset_x = (self.width() - self.current_pixmap.width()) // 2
+            offset_y = (self.height() - self.current_pixmap.height()) // 2
+
+            # Check if mouse is within the image area
+            if (mouse_x < offset_x or mouse_x > offset_x + self.current_pixmap.width() or
+                    mouse_y < offset_y or mouse_y > offset_y + self.current_pixmap.height()):
+                self.setCursor(Qt.ArrowCursor)
+                return
+
+            # Convert to camera coordinates
+            scale_x = self.frame_width / self.current_pixmap.width()
+            scale_y = self.frame_height / self.current_pixmap.height()
+
+            cam_x = int((mouse_x - offset_x) * scale_x)
+            cam_y = int((mouse_y - offset_y) * scale_y)
+
+            if self.dragging and self.drag_start:
+                # Calculate the delta from drag start
+                delta_x = cam_x - self.drag_start[0]
+                delta_y = cam_y - self.drag_start[1]
+
+                if self.resize_handle:
+                    # Handle resizing
+                    new_x = self.roi_x
+                    new_y = self.roi_y
+                    new_w = self.roi_w
+                    new_h = self.roi_h
+
+                    if 'left' in self.resize_handle:
+                        new_x = min(self.roi_x + delta_x, self.roi_x + self.roi_w - 100)
+                        new_w = self.roi_w - (new_x - self.roi_x)
+                    if 'right' in self.resize_handle:
+                        new_w = max(100, self.roi_w + delta_x)
+                    if 'top' in self.resize_handle:
+                        new_y = min(self.roi_y + delta_y, self.roi_y + self.roi_h - 100)
+                        new_h = self.roi_h - (new_y - self.roi_y)
+                    if 'bottom' in self.resize_handle:
+                        new_h = max(100, self.roi_h + delta_y)
+
+                    # Constrain to frame bounds
+                    new_x = max(0, min(new_x, self.frame_width - new_w))
+                    new_y = max(0, min(new_y, self.frame_height - new_h))
+                    new_w = min(new_w, self.frame_width - new_x)
+                    new_h = min(new_h, self.frame_height - new_y)
+
+                    self.roi_x = new_x
+                    self.roi_y = new_y
+                    self.roi_w = new_w
+                    self.roi_h = new_h
+                else:
+                    # Handle dragging - maintain size, just move position
+                    new_x = self.roi_x + delta_x
+                    new_y = self.roi_y + delta_y
+
+                    # Constrain position to keep ROI within frame bounds
+                    # Do NOT change the size - just bump against edges
+                    new_x = max(0, min(new_x, self.frame_width - self.roi_w))
+                    new_y = max(0, min(new_y, self.frame_height - self.roi_h))
+
+                    self.roi_x = new_x
+                    self.roi_y = new_y
+
+                self.roi_changed.emit(self.roi_x, self.roi_y, self.roi_w, self.roi_h)
+                self.update()
+            else:
+                # Check if cursor is near ROI edges for resize handles
+                self._update_cursor_for_resize(cam_x, cam_y)
+        else:
+            # No pixmap available yet, just set default cursor
+            self.setCursor(Qt.ArrowCursor)
+
+    def _get_resize_handle(self, cam_x, cam_y):
+        """Determine which resize handle is being grabbed"""
+        edge_threshold = 10
+        handle = []
+
+        # Check edges
+        if abs(cam_x - self.roi_x) < edge_threshold:
+            handle.append('left')
+        elif abs(cam_x - (self.roi_x + self.roi_w)) < edge_threshold:
+            handle.append('right')
+
+        if abs(cam_y - self.roi_y) < edge_threshold:
+            handle.append('top')
+        elif abs(cam_y - (self.roi_y + self.roi_h)) < edge_threshold:
+            handle.append('bottom')
+
+        return handle if handle else None
+
+    def _update_cursor_for_resize(self, cam_x, cam_y):
+        """Update cursor based on proximity to ROI edges"""
+        edge_threshold = 10
+
+        # Check if near edges
+        near_left = abs(cam_x - self.roi_x) < edge_threshold
+        near_right = abs(cam_x - (self.roi_x + self.roi_w)) < edge_threshold
+        near_top = abs(cam_y - self.roi_y) < edge_threshold
+        near_bottom = abs(cam_y - (self.roi_y + self.roi_h)) < edge_threshold
+
+        # Set appropriate cursor
+        if (near_left and near_top) or (near_right and near_bottom):
+            self.setCursor(Qt.SizeFDiagCursor)
+        elif (near_left and near_bottom) or (near_right and near_top):
+            self.setCursor(Qt.SizeBDiagCursor)
+        elif near_left or near_right:
+            self.setCursor(Qt.SizeHorCursor)
+        elif near_top or near_bottom:
+            self.setCursor(Qt.SizeVerCursor)
+        elif (cam_x >= self.roi_x and cam_x <= self.roi_x + self.roi_w and
+              cam_y >= self.roi_y and cam_y <= self.roi_y + self.roi_h):
+            self.setCursor(Qt.OpenHandCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
 
 
 # ============= Configuration Screen =============
@@ -641,23 +814,26 @@ class ConfigurationScreen(QWidget):
             self.stop_camera_btn.setEnabled(True)
 
     def on_frame_received(self, frame):
-        """Handle received frame and update resolution info"""
-        self.camera_preview.update_frame(frame)
+        """Callback when new frame is available from camera module"""
+        # Don't try to draw ROI here - just pass frame to preview widget
+        # The CameraPreviewWidget will handle ROI overlay in its paintEvent
 
-        # Update resolution label on first frame
-        if self.camera_resolution_label.text() == "Unknown":
-            h, w = frame.shape[:2]
-            self.camera_resolution_label.setText(f"{w}x{h}")
+        # Convert frame for Qt display
+        height, width, channel = frame.shape
+        bytes_per_line = 3 * width
 
-            # Update ROI constraints based on actual frame size
-            self.camera_preview.frame_width = w
-            self.camera_preview.frame_height = h
+        # Convert BGR (OpenCV) to RGB (Qt)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            # Update spinbox ranges
-            self.roi_x_spin.setRange(0, w - 100)
-            self.roi_y_spin.setRange(0, h - 100)
-            self.roi_w_spin.setRange(100, w)
-            self.roi_h_spin.setRange(100, h)
+        # Create QImage
+        q_image = QImage(frame_rgb.data, width, height, bytes_per_line, QImage.Format_RGB888)
+
+        # Convert to QPixmap and update the preview widget
+        pixmap = QPixmap.fromImage(q_image)
+
+        # Update the camera preview widget with the new frame
+        # Pass pixmap, width, and height as required by update_frame method
+        self.camera_preview.update_frame(pixmap, width, height)
 
     def stop_camera(self):
         """Stop camera preview"""
@@ -1173,14 +1349,123 @@ class BinStatusPanel(QGroupBox):
 
         self.setLayout(layout)
 
-    def update_assignments(self, assignments: Dict[int, str]):
-        """Update bin category assignments"""
-        self.bin_assignments = assignments
+    def update_assignment_ui(self):
+        """Update the bin assignment UI based on current strategy"""
+        # Clear existing assignment widgets
+        while self.assignment_scroll_layout.count():
+            child = self.assignment_scroll_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
-        for bin_num, category in assignments.items():
-            if bin_num in self.bin_widgets and bin_num != 0:  # Don't update overflow bin
-                self.bin_widgets[bin_num]['category'].setText(category)
-                self.bin_widgets[bin_num]['category'].setStyleSheet("QLabel { color: #ffffff; }")
+        # Get available categories for current strategy
+        available_categories = self.get_available_categories()
+        if not available_categories:
+            no_cat_label = QLabel("No categories available for current strategy")
+            no_cat_label.setStyleSheet("color: #999;")
+            self.assignment_scroll_layout.addWidget(no_cat_label)
+            return
+
+        # Get current max bins setting (remember bin 0 is reserved for overflow)
+        max_bins = self.max_bins_spin.value()
+
+        # Add assignment row for each available category
+        self.assignment_widgets = {}
+        for category in sorted(available_categories):
+            row_widget = QWidget()
+            row_layout = QHBoxLayout()
+            row_layout.setContentsMargins(5, 2, 5, 2)
+
+            # Category label
+            cat_label = QLabel(category)
+            cat_label.setMinimumWidth(120)
+            row_layout.addWidget(cat_label)
+
+            # Assignment type selector
+            assign_combo = QComboBox()
+            assign_combo.addItems(["Auto", "Manual"])
+            assign_combo.setMinimumWidth(80)
+            row_layout.addWidget(assign_combo)
+
+            # Bin number spinbox (only enabled for manual assignment)
+            bin_spin = QSpinBox()
+            # Bin range is 1 to max_bins (bin 0 is reserved for overflow)
+            bin_spin.setRange(1, max_bins)
+            bin_spin.setValue(1)
+            bin_spin.setEnabled(False)
+            bin_spin.setMinimumWidth(60)
+            row_layout.addWidget(bin_spin)
+
+            # Status label
+            status_label = QLabel("")
+            status_label.setMinimumWidth(80)
+            row_layout.addWidget(status_label)
+
+            # Connect signals
+            assign_combo.currentTextChanged.connect(
+                lambda text, spin=bin_spin: spin.setEnabled(text == "Manual")
+            )
+
+            # Store widgets for later access
+            self.assignment_widgets[category] = {
+                "combo": assign_combo,
+                "spin": bin_spin,
+                "status": status_label
+            }
+
+            row_widget.setLayout(row_layout)
+            self.assignment_scroll_layout.addWidget(row_widget)
+
+        # Add stretch at the end
+        self.assignment_scroll_layout.addStretch()
+
+        # Update the assignment info label
+        self.update_assignment_summary()
+
+    def on_max_bins_changed(self):
+        """Handle max bins change"""
+        max_bins = self.max_bins_spin.value()
+
+        # Update all bin spinboxes with new range
+        if hasattr(self, 'assignment_widgets'):
+            for category, widgets in self.assignment_widgets.items():
+                bin_spin = widgets["spin"]
+                # Update range for all spinboxes (1 to max_bins, since 0 is overflow)
+                current_value = bin_spin.value()
+                bin_spin.setRange(1, max_bins)
+                # Keep current value if still valid, otherwise set to max
+                if current_value > max_bins:
+                    bin_spin.setValue(max_bins)
+
+        # Update the summary
+        self.update_assignment_summary()
+
+    def update_assignment_summary(self):
+        """Update the assignment summary label"""
+        max_bins = self.max_bins_spin.value()
+
+        # Count manual assignments
+        manual_count = 0
+        if hasattr(self, 'assignment_widgets'):
+            for widgets in self.assignment_widgets.values():
+                if widgets["combo"].currentText() == "Manual":
+                    manual_count += 1
+
+        # Calculate available bins (excluding bin 0 for overflow)
+        auto_available = max_bins - manual_count
+
+        summary_text = (f"Bins 1-{max_bins} available for assignment\n"
+                        f"Bin 0: Reserved for overflow\n"
+                        f"Manual assignments: {manual_count}\n"
+                        f"Available for auto-assignment: {auto_available}")
+
+        # Create or update summary label
+        if not hasattr(self, 'assignment_summary_label'):
+            self.assignment_summary_label = QLabel()
+            self.assignment_summary_label.setStyleSheet("color: #666; font-size: 10px;")
+            # Insert at the beginning of the scroll layout
+            self.assignment_scroll_layout.insertWidget(0, self.assignment_summary_label)
+
+        self.assignment_summary_label.setText(summary_text)
 
     def update_bin_count(self, bin_num: int, count: int):
         """Update count for a specific bin"""
