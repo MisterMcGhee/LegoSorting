@@ -45,13 +45,17 @@
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "primary",
+        "strategy": "secondary",
         "target_primary_category": "Basic",
         "target_secondary_category": "",
         "max_bins": 7,
         "overflow_bin": 0,
         "confidence_threshold": 0.7,
-        "pre_assignments": {}
+        "pre_assignments": {
+            "Brick": 1,
+            "Plate": 2,
+            "Tile": 3
+        }
     },
     "threading": {
         "max_queue_size": 100,
@@ -96,8 +100,8 @@
         "retry_delay": 1.0
     },
     "detector_roi": {
-        "x": 375,
-        "y": 73,
+        "x": 412,
+        "y": 65,
         "w": 601,
         "h": 507,
         "entry_zone_width": 150,

@@ -102,6 +102,11 @@ class ArduinoServoModule:
                 self.config_manager.set("servo", "calibration_mode", False)
                 self.config_manager.save_config()
 
+    def set_max_bins(self, max_bins: int):
+        """Update max_bins setting and recalculate positions"""
+        self.max_bins = max_bins
+        logger.info(f"Updated max_bins to {max_bins}")
+        # Positions will be recalculated by calling _calculate_bin_positions()
     def _calculate_bin_positions(self):
         """Calculate bin positions dynamically based on max_bins and minimum bin separation"""
         # Bin 0 (overflow bin) is always at 0 degrees

@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
     QLabel, QPushButton, QGroupBox, QGridLayout, QFrame,
     QSplitter, QStatusBar, QCheckBox, QSpinBox, QComboBox,
     QTextEdit, QProgressBar, QTabWidget, QMessageBox,
-    QLineEdit, QListWidget, QListWidgetItem, QDialog
+    QLineEdit, QListWidget, QListWidgetItem, QDialog, QScrollArea
 )
 from PyQt5.QtGui import (
     QPixmap, QImage, QPainter, QColor, QPen, QBrush,
@@ -708,50 +708,190 @@ class ConfigurationScreen(QWidget):
         self.max_bins_spin.setRange(1, 7)  # Bins 1-7 for categories
         self.max_bins_spin.setValue(7)
         self.max_bins_spin.setToolTip("Number of bins for categories (Bin 0 is reserved for overflow)")
+        # CRITICAL FIX: Connect the valueChanged signal
+        self.max_bins_spin.valueChanged.connect(self.on_max_bins_changed)
         strategy_inner.addWidget(self.max_bins_spin)
 
         strategy_group.setLayout(strategy_inner)
         strategy_layout.addWidget(strategy_group)
 
+        # Assignment UI - Scrollable area for categories
+        assignment_group = QGroupBox("Category Assignments")
+        assignment_layout = QVBoxLayout()
+
+        # Create scroll area for assignments
+        scroll_area = QScrollArea()
+        scroll_widget = QWidget()
+        self.assignment_scroll_layout = QVBoxLayout()
+        scroll_widget.setLayout(self.assignment_scroll_layout)
+        scroll_area.setWidget(scroll_widget)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMaximumHeight(200)
+
+        assignment_layout.addWidget(scroll_area)
+        assignment_group.setLayout(assignment_layout)
+        strategy_layout.addWidget(assignment_group)
+
         strategy_layout.addStretch()
         main_layout.addLayout(strategy_layout, 1)
 
-        # Right side - Bin Assignments
+        # Right side - Bin Visual Status
         bins_layout = QVBoxLayout()
 
         bins_group = QGroupBox("Bin Pre-Assignments")
-        bins_inner = QGridLayout()
+        self.bins_inner_layout = QVBoxLayout()  # Store reference for dynamic updates
 
-        # Add overflow bin 0 label (not assignable)
-        overflow_label = QLabel("Bin 0:")
-        overflow_label.setStyleSheet("font-weight: bold; color: #ff5555;")
-        bins_inner.addWidget(overflow_label, 0, 0)
-        overflow_info = QLabel("OVERFLOW (Auto)")
-        overflow_info.setStyleSheet("color: #ff5555;")
-        overflow_info.setToolTip("Bin 0 is reserved for overflow/errors/uncertainty")
-        bins_inner.addWidget(overflow_info, 0, 1)
+        # Create initial bin display
+        self.update_bin_display()
 
-        # Add separator
-        separator = QFrame()
-        separator.setFrameStyle(QFrame.HLine)
-        bins_inner.addWidget(separator, 1, 0, 1, 2)
-
-        # Category bins (1-7)
-        self.bin_combos = {}
-        for i in range(1, 8):  # Bins 1-7 for categories
-            bins_inner.addWidget(QLabel(f"Bin {i}:"), i + 1, 0)
-            combo = QComboBox()
-            combo.addItem("Auto-assign")
-            self.bin_combos[i] = combo
-            bins_inner.addWidget(combo, i + 1, 1)
-
-        bins_group.setLayout(bins_inner)
+        bins_group.setLayout(self.bins_inner_layout)
         bins_layout.addWidget(bins_group)
 
         main_layout.addLayout(bins_layout, 1)
 
         widget.setLayout(main_layout)
+
+        # Initialize assignment UI
+        self.update_assignment_ui()
+
         return widget
+
+    def on_max_bins_changed(self):
+        """Handle max bins change - update all related UI elements"""
+        max_bins = self.max_bins_spin.value()
+
+        # Update the bin display (visual bin assignments) if we have the necessary components
+        if hasattr(self, 'bins_inner_layout'):
+            self.update_bin_display()
+
+        # Update assignment UI (scrollable category list) if it exists
+        if hasattr(self, 'assignment_scroll_layout'):
+            self.update_assignment_ui()
+
+        # Update all bin spinboxes with new range in assignment widgets
+        if hasattr(self, 'assignment_widgets'):
+            for category, widgets in self.assignment_widgets.items():
+                bin_spin = widgets["spin"]
+                # Update range for all spinboxes (1 to max_bins, since 0 is overflow)
+                current_value = bin_spin.value()
+                bin_spin.setRange(1, max_bins)
+                # Keep current value if still valid, otherwise set to max
+                if current_value > max_bins:
+                    bin_spin.setValue(max_bins)
+
+        # Update the summary if the method exists
+        if hasattr(self, 'assignment_summary_label'):
+            self.update_assignment_summary()
+
+        # Update bin combos to reflect new bin count
+        if hasattr(self, 'bin_combos'):
+            # Store current selections
+            current_selections = {}
+            for bin_num, combo in self.bin_combos.items():
+                if bin_num <= max_bins:
+                    current_selections[bin_num] = combo.currentText()
+
+            # Rebuild bin combos with new range
+            self.update_bin_display()
+
+            # Restore selections where possible
+            for bin_num, selection in current_selections.items():
+                if bin_num in self.bin_combos:
+                    index = self.bin_combos[bin_num].findText(selection)
+                    if index >= 0:
+                        self.bin_combos[bin_num].setCurrentIndex(index)
+
+    def update_bin_display(self):
+        """Dynamically update the bin display based on max_bins"""
+        if not hasattr(self, 'bins_inner_layout'):
+            # If the layout doesn't exist yet, we can't update it
+            return
+
+        # Clear existing widgets
+        while self.bins_inner_layout.count():
+            child = self.bins_inner_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Get current max_bins value
+        max_bins = self.max_bins_spin.value()
+
+        # Add overflow bin 0 label (not assignable)
+        overflow_container = QWidget()
+        overflow_layout = QHBoxLayout()
+        overflow_layout.setContentsMargins(0, 0, 0, 0)
+
+        overflow_label = QLabel("Bin 0:")
+        overflow_label.setStyleSheet("font-weight: bold; color: #ff5555;")
+        overflow_layout.addWidget(overflow_label)
+
+        overflow_info = QLabel("OVERFLOW (Auto)")
+        overflow_info.setStyleSheet("color: #ff5555;")
+        overflow_info.setToolTip("Bin 0 is reserved for overflow/errors/uncertainty")
+        overflow_layout.addWidget(overflow_info)
+        overflow_layout.addStretch()
+
+        overflow_container.setLayout(overflow_layout)
+        self.bins_inner_layout.addWidget(overflow_container)
+
+        # Add separator
+        separator = QFrame()
+        separator.setFrameStyle(QFrame.HLine)
+        self.bins_inner_layout.addWidget(separator)
+
+        # Category bins (1 to max_bins)
+        self.bin_combos = {}
+        for i in range(1, max_bins + 1):
+            bin_container = QWidget()
+            bin_layout = QHBoxLayout()
+            bin_layout.setContentsMargins(0, 0, 0, 0)
+
+            bin_label = QLabel(f"Bin {i}:")
+            bin_label.setMinimumWidth(50)
+            bin_layout.addWidget(bin_label)
+
+            combo = QComboBox()
+            combo.addItem("Auto-assign")
+            combo.setMinimumWidth(150)
+            self.bin_combos[i] = combo
+            bin_layout.addWidget(combo)
+            bin_layout.addStretch()
+
+            bin_container.setLayout(bin_layout)
+            self.bins_inner_layout.addWidget(bin_container)
+
+        # Add stretch at the end
+        self.bins_inner_layout.addStretch()
+
+        # Update categories in combos
+        if hasattr(self, 'category_database'):
+            self.update_bin_categories()
+
+    def update_assignment_ui(self):
+        """Update the bin assignment UI based on current strategy"""
+        # This is a placeholder if the full implementation doesn't exist yet
+        if not hasattr(self, 'assignment_scroll_layout'):
+            return
+
+        # Clear existing assignment widgets
+        while self.assignment_scroll_layout.count():
+            child = self.assignment_scroll_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Add a simple label for now
+        info_label = QLabel(f"Max bins set to: {self.max_bins_spin.value()}")
+        info_label.setStyleSheet("color: #999;")
+        self.assignment_scroll_layout.addWidget(info_label)
+
+    def update_assignment_summary(self):
+        """Update the assignment summary label"""
+        # This is a placeholder implementation
+        max_bins = self.max_bins_spin.value()
+        summary_text = f"Bins 1-{max_bins} available for assignment\nBin 0: Reserved for overflow"
+
+        if hasattr(self, 'assignment_summary_label'):
+            self.assignment_summary_label.setText(summary_text)
 
     def create_servo_tab(self):
         """Create servo control settings tab"""
@@ -1274,23 +1414,42 @@ class ProcessedPiecePanel(QGroupBox):
 class BinStatusPanel(QGroupBox):
     """Display bin assignments and status with bin 0 as overflow"""
 
-    def __init__(self):
+    def __init__(self, max_bins=7):
         super().__init__("Bin Assignments")
-        self.init_ui()
+        self.max_bins = max_bins
         self.bin_assignments = {}
         self.bin_counts = {}
+        self.init_ui()
 
     def init_ui(self):
-        layout = QGridLayout()
+        self.main_layout = QGridLayout()
+        self.create_bin_widgets()
+        self.setLayout(self.main_layout)
 
-        # Create bin widgets (0-7: bin 0 is overflow, 1-7 are categories)
+    def create_bin_widgets(self):
+        """Create bin widgets dynamically based on max_bins"""
+        # Clear existing widgets
+        while self.main_layout.count():
+            child = self.main_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Create bin widgets (0 plus 1 to max_bins)
         self.bin_widgets = {}
-        for i in range(8):  # 0-7
+        total_bins = self.max_bins + 1  # Include bin 0
+
+        for i in range(total_bins):
+            if i == 0:
+                # Bin 0 is overflow
+                bin_num = 0
+            else:
+                bin_num = i
+
             bin_frame = QFrame()
             bin_frame.setFrameStyle(QFrame.Box)
 
             # Special styling for overflow bin
-            if i == 0:
+            if bin_num == 0:
                 bin_frame.setStyleSheet("QFrame { background-color: #3b2b2b; border: 2px solid #aa5555; }")
             else:
                 bin_frame.setStyleSheet("QFrame { background-color: #2b2b2b; border: 2px solid #555; }")
@@ -1298,18 +1457,18 @@ class BinStatusPanel(QGroupBox):
             bin_layout = QVBoxLayout()
 
             # Bin number with special label for overflow
-            if i == 0:
+            if bin_num == 0:
                 bin_label = QLabel("Bin 0 (OVERFLOW)")
                 bin_label.setStyleSheet("QLabel { color: #ff5555; font-weight: bold; }")
             else:
-                bin_label = QLabel(f"Bin {i}")
+                bin_label = QLabel(f"Bin {bin_num}")
                 bin_label.setStyleSheet("QLabel { color: #ffffff; font-weight: bold; }")
 
             bin_label.setAlignment(Qt.AlignCenter)
             bin_layout.addWidget(bin_label)
 
             # Category assignment
-            if i == 0:
+            if bin_num == 0:
                 category_label = QLabel("Errors/Unknown")
                 category_label.setStyleSheet("QLabel { color: #ff8888; }")
             else:
@@ -1335,163 +1494,27 @@ class BinStatusPanel(QGroupBox):
 
             bin_frame.setLayout(bin_layout)
 
-            self.bin_widgets[i] = {
+            self.bin_widgets[bin_num] = {
                 'frame': bin_frame,
                 'category': category_label,
                 'count': count_label,
                 'progress': progress
             }
 
-            # Add to grid (2 rows of 4 bins)
-            row = i // 4
-            col = i % 4
-            layout.addWidget(bin_frame, row, col)
+            # Calculate grid position dynamically
+            cols = 4  # Display in 4 columns
+            row = i // cols
+            col = i % cols
+            self.main_layout.addWidget(bin_frame, row, col)
 
-        self.setLayout(layout)
-
-    def update_assignment_ui(self):
-        """Update the bin assignment UI based on current strategy"""
-        # Clear existing assignment widgets
-        while self.assignment_scroll_layout.count():
-            child = self.assignment_scroll_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
-        # Get available categories for current strategy
-        available_categories = self.get_available_categories()
-        if not available_categories:
-            no_cat_label = QLabel("No categories available for current strategy")
-            no_cat_label.setStyleSheet("color: #999;")
-            self.assignment_scroll_layout.addWidget(no_cat_label)
-            return
-
-        # Get current max bins setting (remember bin 0 is reserved for overflow)
-        max_bins = self.max_bins_spin.value()
-
-        # Add assignment row for each available category
-        self.assignment_widgets = {}
-        for category in sorted(available_categories):
-            row_widget = QWidget()
-            row_layout = QHBoxLayout()
-            row_layout.setContentsMargins(5, 2, 5, 2)
-
-            # Category label
-            cat_label = QLabel(category)
-            cat_label.setMinimumWidth(120)
-            row_layout.addWidget(cat_label)
-
-            # Assignment type selector
-            assign_combo = QComboBox()
-            assign_combo.addItems(["Auto", "Manual"])
-            assign_combo.setMinimumWidth(80)
-            row_layout.addWidget(assign_combo)
-
-            # Bin number spinbox (only enabled for manual assignment)
-            bin_spin = QSpinBox()
-            # Bin range is 1 to max_bins (bin 0 is reserved for overflow)
-            bin_spin.setRange(1, max_bins)
-            bin_spin.setValue(1)
-            bin_spin.setEnabled(False)
-            bin_spin.setMinimumWidth(60)
-            row_layout.addWidget(bin_spin)
-
-            # Status label
-            status_label = QLabel("")
-            status_label.setMinimumWidth(80)
-            row_layout.addWidget(status_label)
-
-            # Connect signals
-            assign_combo.currentTextChanged.connect(
-                lambda text, spin=bin_spin: spin.setEnabled(text == "Manual")
-            )
-
-            # Store widgets for later access
-            self.assignment_widgets[category] = {
-                "combo": assign_combo,
-                "spin": bin_spin,
-                "status": status_label
-            }
-
-            row_widget.setLayout(row_layout)
-            self.assignment_scroll_layout.addWidget(row_widget)
-
-        # Add stretch at the end
-        self.assignment_scroll_layout.addStretch()
-
-        # Update the assignment info label
-        self.update_assignment_summary()
-
-    def on_max_bins_changed(self):
-        """Handle max bins change"""
-        max_bins = self.max_bins_spin.value()
-
-        # Update all bin spinboxes with new range
-        if hasattr(self, 'assignment_widgets'):
-            for category, widgets in self.assignment_widgets.items():
-                bin_spin = widgets["spin"]
-                # Update range for all spinboxes (1 to max_bins, since 0 is overflow)
-                current_value = bin_spin.value()
-                bin_spin.setRange(1, max_bins)
-                # Keep current value if still valid, otherwise set to max
-                if current_value > max_bins:
-                    bin_spin.setValue(max_bins)
-
-        # Update the summary
-        self.update_assignment_summary()
-
-    def update_assignment_summary(self):
-        """Update the assignment summary label"""
-        max_bins = self.max_bins_spin.value()
-
-        # Count manual assignments
-        manual_count = 0
-        if hasattr(self, 'assignment_widgets'):
-            for widgets in self.assignment_widgets.values():
-                if widgets["combo"].currentText() == "Manual":
-                    manual_count += 1
-
-        # Calculate available bins (excluding bin 0 for overflow)
-        auto_available = max_bins - manual_count
-
-        summary_text = (f"Bins 1-{max_bins} available for assignment\n"
-                        f"Bin 0: Reserved for overflow\n"
-                        f"Manual assignments: {manual_count}\n"
-                        f"Available for auto-assignment: {auto_available}")
-
-        # Create or update summary label
-        if not hasattr(self, 'assignment_summary_label'):
-            self.assignment_summary_label = QLabel()
-            self.assignment_summary_label.setStyleSheet("color: #666; font-size: 10px;")
-            # Insert at the beginning of the scroll layout
-            self.assignment_scroll_layout.insertWidget(0, self.assignment_summary_label)
-
-        self.assignment_summary_label.setText(summary_text)
-
-    def update_bin_count(self, bin_num: int, count: int):
-        """Update count for a specific bin"""
-        if bin_num in self.bin_widgets:
-            self.bin_counts[bin_num] = count
-            self.bin_widgets[bin_num]['count'].setText(f"Count: {count}")
-
-            # Update progress bar
-            progress = min(100, (count / 50) * 100)
-            self.bin_widgets[bin_num]['progress'].setValue(int(progress))
-
-            # Change color based on fill level (except overflow bin)
-            if bin_num != 0:
-                if progress > 80:
-                    self.bin_widgets[bin_num]['frame'].setStyleSheet(
-                        "QFrame { background-color: #4b2b2b; border: 2px solid #ff5555; }"
-                    )
-                elif progress > 60:
-                    self.bin_widgets[bin_num]['frame'].setStyleSheet(
-                        "QFrame { background-color: #4b4b2b; border: 2px solid #ffff55; }"
-                    )
-
-    def increment_bin(self, bin_num: int):
-        """Increment count for a bin"""
-        current = self.bin_counts.get(bin_num, 0)
-        self.update_bin_count(bin_num, current + 1)
+    def update_bin_count_display(self, new_max_bins):
+        """Update display when max_bins changes"""
+        self.max_bins = new_max_bins
+        self.create_bin_widgets()
+        # Restore counts for existing bins
+        for bin_num, count in self.bin_counts.items():
+            if bin_num in self.bin_widgets:
+                self.update_bin_count(bin_num, count)
 
 
 class VideoDisplayWidget(QLabel):
