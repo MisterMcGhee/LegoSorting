@@ -1,85 +1,152 @@
 """
-GUI_module_refactored.py - Refactored GUI with EnhancedConfigManager integration
-
-This refactored version:
-1. Uses EnhancedConfigManager instead of direct JSON operations
-2. Combines Camera/ROI with live preview
-3. Combines Sorting Strategy and Bin Assignment
-4. Uses "within" language for hierarchical sorting
-5. Dynamically updates available options
-6. Shows ROI overlay on camera feed
+GUI_module.py - Complete GUI module for LEGO Sorting System with all fixes applied
+This module provides both configuration and active sorting operation interfaces.
+Fixed issues:
+1. ROI constrained within camera frame
+2. Camera selection dropdown for multiple devices
+3. Bin 0 properly designated as overflow
+4. Module initialization error resolved
 """
 
 import sys
-import json
-import numpy as np
+import os
+import time
 import cv2
-from typing import Optional, Dict, Any, List, Tuple
+import numpy as np
+import threading
+import logging
+import traceback
 from datetime import datetime
+from typing import Dict, Any, Optional, List, Tuple
+from dataclasses import dataclass
 
+from PyQt5.QtCore import (
+    Qt, QTimer, QThread, pyqtSignal, pyqtSlot, QRect, QPoint,
+    QMutex, QMutexLocker, QSize
+)
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QSpinBox, QComboBox, QSlider, QCheckBox,
-    QMessageBox, QGroupBox, QGridLayout, QScrollArea, QTabWidget,
-    QListWidget, QListWidgetItem, QProgressBar, QFrame, QSplitter,
-    QSizePolicy
-)
-from PyQt5.QtCore import (
-    Qt, QTimer, pyqtSignal, QThread, pyqtSlot, QRect, QSize
+    QLabel, QPushButton, QGroupBox, QGridLayout, QFrame,
+    QSplitter, QStatusBar, QCheckBox, QSpinBox, QComboBox,
+    QTextEdit, QProgressBar, QTabWidget, QMessageBox,
+    QLineEdit, QListWidget, QListWidgetItem, QDialog
 )
 from PyQt5.QtGui import (
-    QImage, QPixmap, QPainter, QPen, QColor, QFont, QBrush
+    QPixmap, QImage, QPainter, QColor, QPen, QBrush,
+    QFont, QPalette, QMouseEvent
 )
 
-# Import the enhanced config manager
+# Import configuration manager
 from enhanced_config_manager import create_config_manager, ModuleConfig
 
+# Initialize logger
+logger = logging.getLogger(__name__)
+
+
+# ============= Camera Selection Dialog =============
+
+class CameraSelectionDialog(QDialog):
+    """Dialog for selecting camera from available devices"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Camera")
+        self.setModal(True)
+        self.selected_index = 0
+
+        layout = QVBoxLayout()
+
+        # Test available cameras
+        self.available_cameras = self.detect_cameras()
+
+        # Camera selection
+        layout.addWidget(QLabel("Available Cameras:"))
+        self.camera_combo = QComboBox()
+
+        for idx, name in self.available_cameras:
+            self.camera_combo.addItem(f"Camera {idx}: {name}")
+
+        layout.addWidget(self.camera_combo)
+
+        # Preview button
+        self.preview_btn = QPushButton("Test Camera")
+        self.preview_btn.clicked.connect(self.test_camera)
+        layout.addWidget(self.preview_btn)
+
+        # Buttons
+        buttons = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(self.ok_btn)
+        buttons.addWidget(self.cancel_btn)
+        layout.addLayout(buttons)
+
+        self.setLayout(layout)
+
+    def detect_cameras(self):
+        """Detect available cameras by testing first 3 indices"""
+        cameras = []
+        for i in range(3):
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    # Try to get camera name
+                    backend = cap.getBackendName()
+                    cameras.append((i, f"{backend} Device"))
+                cap.release()
+
+        if not cameras:
+            cameras.append((0, "Default Camera"))
+
+        return cameras
+
+    def test_camera(self):
+        """Test selected camera"""
+        idx = self.camera_combo.currentIndex()
+        if idx >= 0 and idx < len(self.available_cameras):
+            camera_idx = self.available_cameras[idx][0]
+
+            cap = cv2.VideoCapture(camera_idx)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret:
+                    QMessageBox.information(self, "Camera Test",
+                                            f"Camera {camera_idx} is working!\n"
+                                            f"Resolution: {frame.shape[1]}x{frame.shape[0]}")
+                else:
+                    QMessageBox.warning(self, "Camera Test",
+                                        f"Camera {camera_idx} failed to capture frame")
+                cap.release()
+
+    def get_selected_camera(self):
+        """Get selected camera index"""
+        idx = self.camera_combo.currentIndex()
+        if idx >= 0 and idx < len(self.available_cameras):
+            return self.available_cameras[idx][0]
+        return 0
+
+
+# ============= Camera Thread =============
 
 class CameraThread(QThread):
-    """Thread for handling camera operations"""
+    """Thread for camera capture during configuration"""
     frame_ready = pyqtSignal(np.ndarray)
-    resolution_changed = pyqtSignal(int, int)  # width, height
 
-    def __init__(self, device_id=0, width=1920, height=1080):
+    def __init__(self, camera_index=0):
         super().__init__()
-        self.device_id = device_id
-        self.target_width = width
-        self.target_height = height
-        self.cap = None
+        self.camera_index = camera_index
         self.is_running = False
-
-    def set_resolution(self, width, height):
-        """Set target resolution"""
-        self.target_width = width
-        self.target_height = height
-
-        if self.cap:
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-
-            # Get actual resolution (camera might not support requested resolution)
-            actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            self.resolution_changed.emit(actual_width, actual_height)
+        self.cap = None
 
     def run(self):
         """Main thread loop"""
-        self.cap = cv2.VideoCapture(self.device_id)
-
+        self.cap = cv2.VideoCapture(self.camera_index)
         if not self.cap.isOpened():
-            print(f"Error: Could not open camera {self.device_id}")
+            logger.error(f"Failed to open camera {self.camera_index}")
             return
-
-        # Set desired resolution
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.target_width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.target_height)
-
-        # Get actual resolution (camera might not support requested resolution)
-        actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-        print(f"Camera opened at {actual_width}x{actual_height} (requested {self.target_width}x{self.target_height})")
-        self.resolution_changed.emit(actual_width, actual_height)
 
         self.is_running = True
 
@@ -87,157 +154,93 @@ class CameraThread(QThread):
             ret, frame = self.cap.read()
             if ret:
                 self.frame_ready.emit(frame)
-            else:
-                print("Warning: Failed to read frame from camera")
-
-            # Small delay to prevent CPU overload
-            self.msleep(30)  # ~30 FPS
+            self.msleep(33)  # ~30 FPS
 
     def stop(self):
-        """Stop the camera thread"""
+        """Stop the thread"""
         self.is_running = False
-        self.wait()  # Wait for thread to finish
-
+        self.wait()
         if self.cap:
             self.cap.release()
-            self.cap = None
 
+
+# ============= Camera Preview Widget with ROI Constraints =============
 
 class CameraPreviewWidget(QLabel):
-    """Widget for displaying camera feed with ROI overlay"""
-
+    """Widget for camera preview with ROI selection during configuration"""
     roi_changed = pyqtSignal(int, int, int, int)  # x, y, w, h
 
     def __init__(self):
         super().__init__()
         self.setMinimumSize(640, 480)
-        self.setMaximumSize(960, 720)
-        self.setScaledContents(False)
-        self.setStyleSheet("border: 1px solid #ccc; background-color: #222;")
+        self.setStyleSheet("QLabel { background-color: #000000; border: 2px solid #555; }")
+        self.setAlignment(Qt.AlignCenter)
+        self.setText("Camera not started")
 
-        # ROI parameters (in camera coordinates)
-        self.roi_x = 125
-        self.roi_y = 200
-        self.roi_w = 1550
-        self.roi_h = 500
+        # ROI parameters with constraints
+        self.roi_x = 100
+        self.roi_y = 100
+        self.roi_w = 400
+        self.roi_h = 300
 
-        # Camera frame dimensions
-        self.frame_width = 1920
-        self.frame_height = 1080
+        # Minimum ROI size
+        self.min_roi_width = 100
+        self.min_roi_height = 100
 
-        # Display scaling
-        self.scale_factor = 1.0
-        self.display_width = 640
-        self.display_height = 480
-
-        # Interaction state
+        # Mouse tracking
         self.dragging = False
         self.drag_start = None
-        self.resize_handle = None
-
         self.setMouseTracking(True)
 
-        # Show placeholder when no camera
-        self.show_placeholder()
+        # Frame dimensions
+        self.frame_width = 640
+        self.frame_height = 480
+        self.current_pixmap = None
 
-    def show_placeholder(self):
-        """Show placeholder text when no camera feed"""
-        placeholder = QPixmap(self.size())
-        placeholder.fill(QColor(40, 40, 40))
+    def update_frame(self, frame):
+        """Update displayed frame"""
+        self.frame_height, self.frame_width = frame.shape[:2]
 
-        painter = QPainter(placeholder)
-        painter.setPen(QPen(QColor(100, 100, 100), 1))
-        font = QFont()
-        font.setPixelSize(16)
-        painter.setFont(font)
-        painter.drawText(
-            placeholder.rect(),
-            Qt.AlignCenter,
-            "Camera Preview\nClick 'Start Camera' to begin"
-        )
-        painter.end()
+        # Convert to RGB
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        self.setPixmap(placeholder)
+        # Create QImage
+        h, w, ch = frame_rgb.shape
+        bytes_per_line = ch * w
+        q_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
 
-    def set_frame_size(self, width, height):
-        """Update the actual camera frame dimensions"""
-        self.frame_width = width
-        self.frame_height = height
-        self.constrain_roi()
+        # Convert to pixmap and scale
+        pixmap = QPixmap.fromImage(q_image)
+        scaled_pixmap = pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
-    def set_roi(self, x, y, w, h):
-        """Set ROI parameters and constrain to frame"""
-        self.roi_x = x
-        self.roi_y = y
-        self.roi_w = w
-        self.roi_h = h
-        self.constrain_roi()
-        self.update()
-
-    def constrain_roi(self):
-        """Ensure ROI stays within camera frame bounds"""
-        # Constrain position
-        self.roi_x = max(0, min(self.roi_x, self.frame_width - self.roi_w))
-        self.roi_y = max(0, min(self.roi_y, self.frame_height - self.roi_h))
-
-        # Constrain size
-        self.roi_w = min(self.roi_w, self.frame_width - self.roi_x)
-        self.roi_h = min(self.roi_h, self.frame_height - self.roi_y)
-
-        # Ensure minimum size
-        self.roi_w = max(self.roi_w, 100)
-        self.roi_h = max(self.roi_h, 100)
-
-    def update_frame(self, pixmap, frame_width, frame_height):
-        """Update the displayed frame"""
-        self.frame_width = frame_width
-        self.frame_height = frame_height
-
-        # Scale pixmap to fit widget while maintaining aspect ratio
-        scaled_pixmap = pixmap.scaled(
-            self.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
-        )
-
-        # Trigger a repaint which will draw the ROI overlay
+        # Store current pixmap for ROI drawing
         self.current_pixmap = scaled_pixmap
-        self.update()  # This triggers paintEvent
 
-    def paintEvent(self, event):
-        """Paint event to draw frame and ROI overlay"""
-        painter = QPainter(self)
+        # Draw ROI on pixmap
+        self.draw_roi()
 
-        # Draw the frame if we have one
-        if hasattr(self, 'current_pixmap'):
-            # Calculate position to center the frame
-            x = (self.width() - self.current_pixmap.width()) // 2
-            y = (self.height() - self.current_pixmap.height()) // 2
-            painter.drawPixmap(x, y, self.current_pixmap)
-
-            # Draw ROI overlay
-            self._draw_roi_overlay(painter, x, y)
-        else:
-            # Draw placeholder
-            self.show_placeholder()
-
-    def _draw_roi_overlay(self, painter, offset_x, offset_y):
-        """Draw the ROI rectangle overlay"""
-        if not hasattr(self, 'frame_width') or not self.frame_width:
+    def draw_roi(self):
+        """Draw ROI rectangle on the current pixmap"""
+        if not self.current_pixmap:
             return
 
-        # Calculate scale factor
+        # Create a copy for drawing
+        display_pixmap = QPixmap(self.current_pixmap)
+
+        painter = QPainter(display_pixmap)
+
+        # Calculate scale factors
         scale_x = self.current_pixmap.width() / self.frame_width
         scale_y = self.current_pixmap.height() / self.frame_height
 
         # Scale ROI coordinates to display size
-        roi_x = int(self.roi_x * scale_x) + offset_x
-        roi_y = int(self.roi_y * scale_y) + offset_y
+        roi_x = int(self.roi_x * scale_x)
+        roi_y = int(self.roi_y * scale_y)
         roi_w = int(self.roi_w * scale_x)
         roi_h = int(self.roi_h * scale_y)
 
         # Draw ROI rectangle
-        pen = QPen(QColor(0, 255, 0), 2)  # Green, 2px width
+        pen = QPen(QColor(0, 255, 0), 2)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(roi_x, roi_y, roi_w, roi_h)
@@ -246,6 +249,61 @@ class CameraPreviewWidget(QLabel):
         painter.setPen(QColor(0, 255, 0))
         info_text = f"ROI: {self.roi_w}x{self.roi_h}"
         painter.drawText(roi_x + 5, roi_y - 5, info_text)
+
+        painter.end()
+
+        self.setPixmap(display_pixmap)
+
+    def set_roi(self, x, y, w, h):
+        """Set ROI coordinates with constraints"""
+        # Constrain ROI to frame boundaries
+        self.roi_x = max(0, min(x, self.frame_width - self.min_roi_width))
+        self.roi_y = max(0, min(y, self.frame_height - self.min_roi_height))
+        self.roi_w = max(self.min_roi_width, min(w, self.frame_width - self.roi_x))
+        self.roi_h = max(self.min_roi_height, min(h, self.frame_height - self.roi_y))
+
+        self.draw_roi()
+        self.roi_changed.emit(self.roi_x, self.roi_y, self.roi_w, self.roi_h)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        """Handle mouse press for ROI dragging"""
+        if event.button() == Qt.LeftButton:
+            self.dragging = True
+            self.drag_start = event.pos()
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        """Handle mouse move for ROI dragging with constraints"""
+        if self.dragging and self.drag_start:
+            # Calculate movement
+            delta = event.pos() - self.drag_start
+
+            # Convert to frame coordinates
+            if self.current_pixmap:
+                scale_x = self.frame_width / self.current_pixmap.width()
+                scale_y = self.frame_height / self.current_pixmap.height()
+
+                new_x = self.roi_x + int(delta.x() * scale_x)
+                new_y = self.roi_y + int(delta.y() * scale_y)
+
+                # Apply constraints to keep ROI within frame
+                new_x = max(0, min(new_x, self.frame_width - self.roi_w))
+                new_y = max(0, min(new_y, self.frame_height - self.roi_h))
+
+                self.roi_x = new_x
+                self.roi_y = new_y
+
+                self.drag_start = event.pos()
+                self.draw_roi()
+                self.roi_changed.emit(self.roi_x, self.roi_y, self.roi_w, self.roi_h)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        """Handle mouse release"""
+        if event.button() == Qt.LeftButton:
+            self.dragging = False
+            self.drag_start = None
+
+
+# ============= Configuration Screen =============
 
 class ConfigurationScreen(QWidget):
     """Main configuration screen with all settings"""
@@ -256,14 +314,17 @@ class ConfigurationScreen(QWidget):
         super().__init__()
         self.config_manager = config_manager
 
+        # Selected camera index
+        self.selected_camera_index = 0
+
         # Initialize category database from sorting manager
         self.category_database = None
         self.init_category_database()
 
-        # Camera thread
+        # Camera thread for preview
         self.camera_thread = None
 
-        # Initialize actual camera frame dimensions (will be updated when camera starts)
+        # Frame dimensions
         self.actual_frame_width = 1920
         self.actual_frame_height = 1080
 
@@ -273,38 +334,34 @@ class ConfigurationScreen(QWidget):
     def init_category_database(self):
         """Initialize category database from config manager's CSV parser"""
         try:
-            # Use the new parse_categories_from_csv function
             hierarchy = self.config_manager.parse_categories_from_csv()
 
-            # Convert to the format the GUI expects
             self.category_database = {
                 "primary": set(hierarchy.get("primary", [])),
                 "primary_to_secondary": {},
                 "secondary_to_tertiary": {}
             }
 
-            # Convert lists back to sets for the GUI's existing methods
             for primary, secondaries in hierarchy.get("primary_to_secondary", {}).items():
                 self.category_database["primary_to_secondary"][primary] = set(secondaries)
 
             for key, tertiaries in hierarchy.get("secondary_to_tertiary", {}).items():
                 self.category_database["secondary_to_tertiary"][key] = set(tertiaries)
 
-            print(f"Loaded category hierarchy from CSV:")
-            print(f"  - {len(self.category_database['primary'])} primary categories")
+            logger.info(f"Loaded {len(self.category_database['primary'])} primary categories")
 
         except Exception as e:
-            print(f"Error initializing category database: {e}")
+            logger.error(f"Error initializing category database: {e}")
             self.category_database = None
 
     def init_ui(self):
         """Initialize the user interface"""
         main_layout = QVBoxLayout()
 
-        # Create tab widget for different settings groups
+        # Create tab widget
         self.tab_widget = QTabWidget()
 
-        # Add tabs - Camera/ROI combined, Sorting/Bins combined, Servo separate
+        # Add tabs
         self.tab_widget.addTab(self.create_camera_roi_tab(), "Camera & ROI")
         self.tab_widget.addTab(self.create_sorting_bins_tab(), "Sorting Strategy & Bins")
         self.tab_widget.addTab(self.create_servo_tab(), "Servo Control")
@@ -332,7 +389,7 @@ class ConfigurationScreen(QWidget):
         self.setLayout(main_layout)
 
     def create_camera_roi_tab(self):
-        """Create combined camera and ROI settings tab with live preview"""
+        """Create camera and ROI settings tab with camera selection"""
         widget = QWidget()
         main_layout = QHBoxLayout()
 
@@ -350,6 +407,11 @@ class ConfigurationScreen(QWidget):
         # Camera control buttons
         cam_controls = QHBoxLayout()
 
+        # Camera selection button
+        self.select_camera_btn = QPushButton("Select Camera")
+        self.select_camera_btn.clicked.connect(self.select_camera)
+        cam_controls.addWidget(self.select_camera_btn)
+
         self.start_camera_btn = QPushButton("Start Camera")
         self.start_camera_btn.clicked.connect(self.start_camera)
         cam_controls.addWidget(self.start_camera_btn)
@@ -360,89 +422,53 @@ class ConfigurationScreen(QWidget):
         cam_controls.addWidget(self.stop_camera_btn)
 
         preview_layout.addLayout(cam_controls)
-
-        main_layout.addLayout(preview_layout, 2)  # Give more space to preview
+        main_layout.addLayout(preview_layout, 2)
 
         # Right side - Settings
         settings_layout = QVBoxLayout()
 
-        # Camera settings
-        cam_group = QGroupBox("Camera Settings")
-        cam_layout = QGridLayout()
+        # Camera info
+        camera_group = QGroupBox("Camera Settings")
+        camera_layout = QGridLayout()
 
-        cam_layout.addWidget(QLabel("Camera Device:"), 0, 0)
-        self.camera_combo = QComboBox()
-        self.camera_combo.addItems(["0 - Default", "1 - USB Camera", "2 - External"])
-        self.camera_combo.currentIndexChanged.connect(self.on_camera_changed)
-        cam_layout.addWidget(self.camera_combo, 0, 1)
+        camera_layout.addWidget(QLabel("Device:"), 0, 0)
+        self.camera_device_label = QLabel("Camera 0")
+        camera_layout.addWidget(self.camera_device_label, 0, 1)
 
-        cam_layout.addWidget(QLabel("Resolution:"), 1, 0)
-        self.resolution_combo = QComboBox()
-        self.resolution_combo.addItems(["1920x1080", "1280x720", "640x480"])
-        self.resolution_combo.currentTextChanged.connect(self.on_resolution_changed)
-        cam_layout.addWidget(self.resolution_combo, 1, 1)
+        camera_layout.addWidget(QLabel("Resolution:"), 1, 0)
+        self.camera_resolution_label = QLabel("Unknown")
+        camera_layout.addWidget(self.camera_resolution_label, 1, 1)
 
-        cam_layout.addWidget(QLabel("FPS:"), 2, 0)
-        self.fps_spin = QSpinBox()
-        self.fps_spin.setRange(1, 60)
-        self.fps_spin.setValue(30)
-        cam_layout.addWidget(self.fps_spin, 2, 1)
+        camera_group.setLayout(camera_layout)
+        settings_layout.addWidget(camera_group)
 
-        cam_layout.addWidget(QLabel("Auto Exposure:"), 3, 0)
-        self.auto_exposure_check = QCheckBox()
-        self.auto_exposure_check.setChecked(True)
-        cam_layout.addWidget(self.auto_exposure_check, 3, 1)
-
-        # Camera status
-        cam_layout.addWidget(QLabel("Status:"), 4, 0)
-        self.camera_status_label = QLabel("Not connected")
-        self.camera_status_label.setStyleSheet("color: #666;")
-        cam_layout.addWidget(self.camera_status_label, 4, 1)
-
-        cam_group.setLayout(cam_layout)
-        settings_layout.addWidget(cam_group)
-
-        # ROI settings
-        roi_group = QGroupBox("Region of Interest (ROI)")
+        # ROI settings with constraints
+        roi_group = QGroupBox("ROI Settings")
         roi_layout = QGridLayout()
 
         roi_layout.addWidget(QLabel("X Position:"), 0, 0)
         self.roi_x_spin = QSpinBox()
-        self.roi_x_spin.setRange(0, 3840)  # Support up to 4K width
+        self.roi_x_spin.setRange(0, 3840)
         self.roi_x_spin.valueChanged.connect(self.on_roi_changed)
         roi_layout.addWidget(self.roi_x_spin, 0, 1)
 
         roi_layout.addWidget(QLabel("Y Position:"), 1, 0)
         self.roi_y_spin = QSpinBox()
-        self.roi_y_spin.setRange(0, 2160)  # Support up to 4K height
+        self.roi_y_spin.setRange(0, 2160)
         self.roi_y_spin.valueChanged.connect(self.on_roi_changed)
         roi_layout.addWidget(self.roi_y_spin, 1, 1)
 
         roi_layout.addWidget(QLabel("Width:"), 2, 0)
         self.roi_w_spin = QSpinBox()
-        self.roi_w_spin.setRange(100, 3840)  # Support up to 4K width
+        self.roi_w_spin.setRange(100, 3840)
         self.roi_w_spin.valueChanged.connect(self.on_roi_changed)
         roi_layout.addWidget(self.roi_w_spin, 2, 1)
 
         roi_layout.addWidget(QLabel("Height:"), 3, 0)
         self.roi_h_spin = QSpinBox()
-        self.roi_h_spin.setRange(100, 2160)  # Support up to 4K height
+        self.roi_h_spin.setRange(100, 2160)
         self.roi_h_spin.valueChanged.connect(self.on_roi_changed)
         roi_layout.addWidget(self.roi_h_spin, 3, 1)
-
-        # ROI quick actions
-        roi_layout.addWidget(QLabel("Quick Actions:"), 4, 0)
-        roi_actions = QHBoxLayout()
-
-        self.center_roi_btn = QPushButton("Center")
-        self.center_roi_btn.clicked.connect(self.center_roi)
-        roi_actions.addWidget(self.center_roi_btn)
-
-        self.maximize_roi_btn = QPushButton("Maximize")
-        self.maximize_roi_btn.clicked.connect(self.maximize_roi)
-        roi_actions.addWidget(self.maximize_roi_btn)
-
-        roi_layout.addLayout(roi_actions, 4, 1)
 
         roi_group.setLayout(roi_layout)
         settings_layout.addWidget(roi_group)
@@ -471,7 +497,7 @@ class ConfigurationScreen(QWidget):
         return widget
 
     def create_sorting_bins_tab(self):
-        """Create combined sorting strategy and bin assignment tab"""
+        """Create sorting strategy and bin assignment tab with proper bin 0 handling"""
         widget = QWidget()
         main_layout = QHBoxLayout()
 
@@ -479,115 +505,77 @@ class ConfigurationScreen(QWidget):
         strategy_layout = QVBoxLayout()
 
         strategy_group = QGroupBox("Sorting Strategy")
-        strat_layout = QGridLayout()
+        strategy_inner = QVBoxLayout()
 
-        strat_layout.addWidget(QLabel("Strategy:"), 0, 0)
         self.strategy_combo = QComboBox()
         self.strategy_combo.addItems(["primary", "secondary", "tertiary"])
         self.strategy_combo.currentTextChanged.connect(self.on_strategy_changed)
-        strat_layout.addWidget(self.strategy_combo, 0, 1)
+        strategy_inner.addWidget(QLabel("Strategy:"))
+        strategy_inner.addWidget(self.strategy_combo)
 
-        # "Within" selectors for hierarchical sorting
-        strat_layout.addWidget(QLabel("Within Primary:"), 1, 0)
+        # Category selection (hidden by default)
         self.primary_combo = QComboBox()
-        self.primary_combo.setEnabled(False)  # Disabled for primary strategy
+        self.primary_label = QLabel("Primary Category:")
+        self.primary_label.hide()
+        self.primary_combo.hide()
         self.primary_combo.currentTextChanged.connect(self.on_primary_changed)
-        strat_layout.addWidget(self.primary_combo, 1, 1)
+        strategy_inner.addWidget(self.primary_label)
+        strategy_inner.addWidget(self.primary_combo)
 
-        strat_layout.addWidget(QLabel("Within Secondary:"), 2, 0)
         self.secondary_combo = QComboBox()
-        self.secondary_combo.setEnabled(False)  # Disabled for primary/secondary strategies
-        self.secondary_combo.currentTextChanged.connect(self.on_secondary_changed)
-        strat_layout.addWidget(self.secondary_combo, 2, 1)
+        self.secondary_label = QLabel("Secondary Category:")
+        self.secondary_label.hide()
+        self.secondary_combo.hide()
+        strategy_inner.addWidget(self.secondary_label)
+        strategy_inner.addWidget(self.secondary_combo)
 
-        # Max bins and overflow
-        strat_layout.addWidget(QLabel("Max Bins:"), 3, 0)
+        # Max bins (not including overflow bin 0)
+        strategy_inner.addWidget(QLabel("Max Category Bins:"))
         self.max_bins_spin = QSpinBox()
-        self.max_bins_spin.setRange(1, 9)
+        self.max_bins_spin.setRange(1, 7)  # Bins 1-7 for categories
         self.max_bins_spin.setValue(7)
-        self.max_bins_spin.valueChanged.connect(self.on_max_bins_changed)
-        strat_layout.addWidget(self.max_bins_spin, 3, 1)
+        self.max_bins_spin.setToolTip("Number of bins for categories (Bin 0 is reserved for overflow)")
+        strategy_inner.addWidget(self.max_bins_spin)
 
-        strat_layout.addWidget(QLabel("Overflow Bin:"), 4, 0)
-        overflow_label = QLabel("Bin 0 (Fixed)")
-        overflow_label.setStyleSheet("color: #666;")
-        strat_layout.addWidget(overflow_label, 4, 1)
-
-        # Strategy description
-        self.strategy_desc = QLabel("")
-        self.strategy_desc.setWordWrap(True)
-        self.strategy_desc.setStyleSheet("color: #0066cc; font-style: italic;")
-        strat_layout.addWidget(self.strategy_desc, 5, 0, 1, 2)
-
-        strategy_group.setLayout(strat_layout)
+        strategy_group.setLayout(strategy_inner)
         strategy_layout.addWidget(strategy_group)
 
         strategy_layout.addStretch()
         main_layout.addLayout(strategy_layout, 1)
 
         # Right side - Bin Assignments
-        assignment_layout = QVBoxLayout()
+        bins_layout = QVBoxLayout()
 
-        assignment_group = QGroupBox("Bin Pre-Assignments")
-        assign_layout = QVBoxLayout()
+        bins_group = QGroupBox("Bin Pre-Assignments")
+        bins_inner = QGridLayout()
 
-        # Instructions
-        instructions = QLabel(
-            "Pre-assign categories to specific bins. Unassigned categories "
-            "will be dynamically assigned during sorting."
-        )
-        instructions.setWordWrap(True)
-        instructions.setStyleSheet("font-size: 11px; color: #666;")
-        assign_layout.addWidget(instructions)
+        # Add overflow bin 0 label (not assignable)
+        overflow_label = QLabel("Bin 0:")
+        overflow_label.setStyleSheet("font-weight: bold; color: #ff5555;")
+        bins_inner.addWidget(overflow_label, 0, 0)
+        overflow_info = QLabel("OVERFLOW (Auto)")
+        overflow_info.setStyleSheet("color: #ff5555;")
+        overflow_info.setToolTip("Bin 0 is reserved for overflow/errors/uncertainty")
+        bins_inner.addWidget(overflow_info, 0, 1)
 
-        # Bin assignment grid
-        grid_widget = QWidget()
-        grid_layout = QGridLayout()
+        # Add separator
+        separator = QFrame()
+        separator.setFrameStyle(QFrame.HLine)
+        bins_inner.addWidget(separator, 1, 0, 1, 2)
 
-        # Headers
-        header_bin = QLabel("Bin")
-        header_bin.setStyleSheet("font-weight: bold;")
-        grid_layout.addWidget(header_bin, 0, 0)
-
-        header_cat = QLabel("Category")
-        header_cat.setStyleSheet("font-weight: bold;")
-        grid_layout.addWidget(header_cat, 0, 1)
-
-        # Create dropdowns for bins
+        # Category bins (1-7)
         self.bin_combos = {}
-        for i in range(1, 10):  # Max 9 bins
-            label = QLabel(f"Bin {i}:")
-            grid_layout.addWidget(label, i, 0)
-
+        for i in range(1, 8):  # Bins 1-7 for categories
+            bins_inner.addWidget(QLabel(f"Bin {i}:"), i + 1, 0)
             combo = QComboBox()
-            combo.addItem("(Unassigned)")
-            combo.currentTextChanged.connect(self.on_assignment_changed)
-            grid_layout.addWidget(combo, i, 1)
-
+            combo.addItem("Auto-assign")
             self.bin_combos[i] = combo
+            bins_inner.addWidget(combo, i + 1, 1)
 
-            # Hide bins beyond max_bins initially
-            if i > 7:  # Default max_bins is 7
-                label.setVisible(False)
-                combo.setVisible(False)
+        bins_group.setLayout(bins_inner)
+        bins_layout.addWidget(bins_group)
 
-        grid_widget.setLayout(grid_layout)
-
-        # Scroll area for many bins
-        scroll = QScrollArea()
-        scroll.setWidget(grid_widget)
-        scroll.setWidgetResizable(True)
-        assign_layout.addWidget(scroll)
-
-        # Clear button
-        clear_btn = QPushButton("Clear All Assignments")
-        clear_btn.clicked.connect(self.clear_all_assignments)
-        assign_layout.addWidget(clear_btn)
-
-        assignment_group.setLayout(assign_layout)
-        assignment_layout.addWidget(assignment_group)
-
-        main_layout.addLayout(assignment_layout, 1)
+        main_layout.addLayout(bins_layout, 1)
 
         widget.setLayout(main_layout)
         return widget
@@ -597,33 +585,22 @@ class ConfigurationScreen(QWidget):
         widget = QWidget()
         layout = QVBoxLayout()
 
-        # Servo settings
-        servo_group = QGroupBox("Servo Configuration")
+        servo_group = QGroupBox("Servo Settings")
         servo_layout = QGridLayout()
 
-        servo_layout.addWidget(QLabel("Min Pulse (μs):"), 0, 0)
-        self.min_pulse_spin = QSpinBox()
-        self.min_pulse_spin.setRange(100, 2000)
-        self.min_pulse_spin.setValue(500)
-        servo_layout.addWidget(self.min_pulse_spin, 0, 1)
+        # Servo positions for bins 0-7
+        for i in range(8):  # 0-7
+            if i == 0:
+                label = QLabel("Bin 0 (Overflow):")
+                label.setStyleSheet("font-weight: bold;")
+            else:
+                label = QLabel(f"Bin {i} Position:")
+            servo_layout.addWidget(label, i, 0)
 
-        servo_layout.addWidget(QLabel("Max Pulse (μs):"), 1, 0)
-        self.max_pulse_spin = QSpinBox()
-        self.max_pulse_spin.setRange(1000, 3000)
-        self.max_pulse_spin.setValue(2500)
-        servo_layout.addWidget(self.max_pulse_spin, 1, 1)
-
-        servo_layout.addWidget(QLabel("Default Angle:"), 2, 0)
-        self.default_angle_spin = QSpinBox()
-        self.default_angle_spin.setRange(0, 180)
-        self.default_angle_spin.setValue(90)
-        servo_layout.addWidget(self.default_angle_spin, 2, 1)
-
-        servo_layout.addWidget(QLabel("Move Duration (ms):"), 3, 0)
-        self.move_duration_spin = QSpinBox()
-        self.move_duration_spin.setRange(100, 2000)
-        self.move_duration_spin.setValue(500)
-        servo_layout.addWidget(self.move_duration_spin, 3, 1)
+            spin = QSpinBox()
+            spin.setRange(0, 180)
+            spin.setValue(20 * i if i > 0 else 0)  # Bin 0 at 0 degrees
+            servo_layout.addWidget(spin, i, 1)
 
         servo_group.setLayout(servo_layout)
         layout.addWidget(servo_group)
@@ -632,423 +609,200 @@ class ConfigurationScreen(QWidget):
         widget.setLayout(layout)
         return widget
 
+    def select_camera(self):
+        """Show camera selection dialog"""
+        dialog = CameraSelectionDialog(self)
+        if dialog.exec_():
+            self.selected_camera_index = dialog.get_selected_camera()
+            self.camera_device_label.setText(f"Camera {self.selected_camera_index}")
+
+            # Update config
+            self.config_manager.update_module_config(
+                ModuleConfig.CAMERA.value,
+                {"device_id": self.selected_camera_index}
+            )
+
+            # Restart camera if running
+            if self.camera_thread:
+                self.stop_camera()
+                self.start_camera()
+
     def start_camera(self):
-        """Start camera preview using unified camera module"""
-        # Get the singleton camera instance
-        from camera_module import create_camera
-        self.camera = create_camera(config_manager=self.config_manager)
+        """Start camera preview with selected device"""
+        if not self.camera_thread:
+            # Get selected camera index
+            camera_index = getattr(self, 'selected_camera_index', 0)
 
-        # Register GUI as a frame consumer
-        self.camera.register_consumer(
-            name="gui_preview",
-            callback=self.on_frame_received,
-            processing_type="async",
-            priority=10  # High priority for responsive display
-        )
+            self.camera_thread = CameraThread(camera_index)
+            self.camera_thread.frame_ready.connect(self.on_frame_received)
+            self.camera_thread.start()
 
-        # Start capture if not already running
-        if self.camera.start_capture():
             self.start_camera_btn.setEnabled(False)
             self.stop_camera_btn.setEnabled(True)
 
+    def on_frame_received(self, frame):
+        """Handle received frame and update resolution info"""
+        self.camera_preview.update_frame(frame)
+
+        # Update resolution label on first frame
+        if self.camera_resolution_label.text() == "Unknown":
+            h, w = frame.shape[:2]
+            self.camera_resolution_label.setText(f"{w}x{h}")
+
+            # Update ROI constraints based on actual frame size
+            self.camera_preview.frame_width = w
+            self.camera_preview.frame_height = h
+
+            # Update spinbox ranges
+            self.roi_x_spin.setRange(0, w - 100)
+            self.roi_y_spin.setRange(0, h - 100)
+            self.roi_w_spin.setRange(100, w)
+            self.roi_h_spin.setRange(100, h)
+
     def stop_camera(self):
         """Stop camera preview"""
-        if hasattr(self, 'camera'):
-            # Unregister GUI consumer (camera keeps running for other consumers)
-            self.camera.unregister_consumer("gui_preview")
+        if self.camera_thread:
+            self.camera_thread.stop()
+            self.camera_thread = None
 
-            # Only stop capture if no other consumers
-            if not self.camera.consumers:
-                self.camera.stop_capture()
+            self.start_camera_btn.setEnabled(True)
+            self.stop_camera_btn.setEnabled(False)
+            self.camera_resolution_label.setText("Unknown")
 
-    def on_camera_changed(self):
-        """Handle camera device change"""
-        # Restart camera if it's running
-        if self.camera_thread and self.camera_thread.isRunning():
-            self.stop_camera()
-            self.start_camera()
+    def on_roi_dragged(self, x, y, w, h):
+        """Handle ROI dragging from preview"""
+        self.roi_x_spin.setValue(x)
+        self.roi_y_spin.setValue(y)
+        self.roi_w_spin.setValue(w)
+        self.roi_h_spin.setValue(h)
 
-    def on_resolution_changed(self):
-        """Handle resolution change"""
-        # Update camera if running
-        if self.camera_thread and self.camera_thread.isRunning():
-            resolution = self.resolution_combo.currentText()
-            if "x" in resolution:
-                width, height = resolution.split("x")
-                self.camera_thread.set_resolution(int(width), int(height))
+    def on_roi_changed(self):
+        """Handle ROI spinbox changes with constraints"""
+        # Get current frame dimensions
+        frame_w = self.camera_preview.frame_width
+        frame_h = self.camera_preview.frame_height
 
-    def on_camera_resolution_changed(self, width, height):
-        """Handle actual camera resolution from camera thread"""
-        print(f"Camera resolution: {width}x{height}")
-
-        # Store actual frame dimensions
-        self.actual_frame_width = width
-        self.actual_frame_height = height
-
-        # Update status label
-        requested = self.resolution_combo.currentText()
-        actual = f"{width}x{height}"
-        if requested == actual:
-            self.camera_status_label.setText(f"Connected @ {actual}")
-            self.camera_status_label.setStyleSheet("color: green;")
-        else:
-            self.camera_status_label.setText(f"Connected @ {actual} (requested {requested})")
-            self.camera_status_label.setStyleSheet("color: orange;")
-
-        # Update preview widget frame size
-        self.camera_preview.set_frame_size(width, height)
-
-        # Update ROI spinbox limits
-        self.roi_x_spin.setMaximum(max(0, width - 100))
-        self.roi_y_spin.setMaximum(max(0, height - 100))
-        self.roi_w_spin.setMaximum(width)
-        self.roi_h_spin.setMaximum(height)
-
-        # Constrain current ROI values
-        self.constrain_roi_values(width, height)
-
-    def constrain_roi_values(self, frame_width, frame_height):
-        """Constrain ROI values to frame bounds"""
-        # Get current values
+        # Get spinbox values
         x = self.roi_x_spin.value()
         y = self.roi_y_spin.value()
         w = self.roi_w_spin.value()
         h = self.roi_h_spin.value()
 
-        # Constrain to frame
-        x = min(x, max(0, frame_width - w))
-        y = min(y, max(0, frame_height - h))
-        w = min(w, frame_width - x)
-        h = min(h, frame_height - y)
+        # Apply constraints
+        x = max(0, min(x, frame_w - 100))
+        y = max(0, min(y, frame_h - 100))
+        w = max(100, min(w, frame_w - x))
+        h = max(100, min(h, frame_h - y))
 
-        # Update spinboxes
+        # Update spinboxes if values were constrained
+        self.roi_x_spin.blockSignals(True)
+        self.roi_y_spin.blockSignals(True)
+        self.roi_w_spin.blockSignals(True)
+        self.roi_h_spin.blockSignals(True)
+
         self.roi_x_spin.setValue(x)
         self.roi_y_spin.setValue(y)
         self.roi_w_spin.setValue(w)
         self.roi_h_spin.setValue(h)
+
+        self.roi_x_spin.blockSignals(False)
+        self.roi_y_spin.blockSignals(False)
+        self.roi_w_spin.blockSignals(False)
+        self.roi_h_spin.blockSignals(False)
 
         # Update preview
         self.camera_preview.set_roi(x, y, w, h)
 
-    def on_frame_received(self, frame):
-        """Callback when new frame is available from camera module"""
-        # Don't try to draw ROI here - just pass frame to preview widget
-        # The CameraPreviewWidget will handle ROI overlay in its paintEvent
-
-        # Convert frame for Qt display
-        height, width, channel = frame.shape
-        bytes_per_line = 3 * width
-
-        # Convert BGR (OpenCV) to RGB (Qt)
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        # Create QImage
-        q_image = QImage(frame_rgb.data, width, height, bytes_per_line, QImage.Format_RGB888)
-
-        # Convert to QPixmap and update the preview widget
-        pixmap = QPixmap.fromImage(q_image)
-
-        # Update the camera preview widget with the new frame
-        self.camera_preview.update_frame(pixmap, width, height)
-
-    def on_roi_changed(self):
-        """Handle ROI spinbox changes"""
-        x = self.roi_x_spin.value()
-        y = self.roi_y_spin.value()
-        w = self.roi_w_spin.value()
-        h = self.roi_h_spin.value()
-
-        # Ensure ROI stays within frame bounds
-        frame_w = self.camera_preview.frame_width
-        frame_h = self.camera_preview.frame_height
-
-        # Constrain position
-        if x + w > frame_w:
-            x = max(0, frame_w - w)
-            self.roi_x_spin.setValue(x)
-
-        if y + h > frame_h:
-            y = max(0, frame_h - h)
-            self.roi_y_spin.setValue(y)
-
-        self.camera_preview.set_roi(x, y, w, h)
-
-    def on_roi_dragged(self, x, y, w, h):
-        """Handle ROI drag in preview"""
-        self.roi_x_spin.setValue(x)
-        self.roi_y_spin.setValue(y)
-        self.roi_w_spin.setValue(w)
-        self.roi_h_spin.setValue(h)
-
-    def center_roi(self):
-        """Center ROI in frame"""
-        # Get current ROI size
-        w = self.roi_w_spin.value()
-        h = self.roi_h_spin.value()
-
-        # Get actual frame size from preview
-        frame_w = self.camera_preview.frame_width
-        frame_h = self.camera_preview.frame_height
-
-        # Calculate center position
-        x = max(0, (frame_w - w) // 2)
-        y = max(0, (frame_h - h) // 2)
-
-        self.roi_x_spin.setValue(x)
-        self.roi_y_spin.setValue(y)
-        self.on_roi_changed()
-
-    def maximize_roi(self):
-        """Maximize ROI with small margin"""
-        margin = 50
-
-        # Get actual frame size from preview
-        frame_w = self.camera_preview.frame_width
-        frame_h = self.camera_preview.frame_height
-
-        # Set to nearly full frame
-        x = min(margin, frame_w // 2)
-        y = min(margin, frame_h // 2)
-        w = max(100, frame_w - 2 * x)
-        h = max(100, frame_h - 2 * y)
-
-        self.roi_x_spin.setValue(x)
-        self.roi_y_spin.setValue(y)
-        self.roi_w_spin.setValue(w)
-        self.roi_h_spin.setValue(h)
-        self.on_roi_changed()
-
     def on_strategy_changed(self, strategy):
         """Handle sorting strategy change"""
         if strategy == "primary":
-            # Disable category selectors
-            self.primary_combo.setEnabled(False)
-            self.primary_combo.clear()
-            self.secondary_combo.setEnabled(False)
-            self.secondary_combo.clear()
-            self.strategy_desc.setText("Sorting all primary categories into bins")
-
+            self.primary_label.hide()
+            self.primary_combo.hide()
+            self.secondary_label.hide()
+            self.secondary_combo.hide()
         elif strategy == "secondary":
-            # Need to select primary category
-            self.primary_combo.setEnabled(True)
-            self.secondary_combo.setEnabled(False)
-            self.secondary_combo.clear()
-            self.update_primary_options()
-            self.strategy_desc.setText("Select which primary category to sort within")
-
+            self.primary_label.show()
+            self.primary_combo.show()
+            self.secondary_label.hide()
+            self.secondary_combo.hide()
+            self.update_primary_categories()
         elif strategy == "tertiary":
-            # Need to select both primary and secondary
-            self.primary_combo.setEnabled(True)
-            self.secondary_combo.setEnabled(True)
-            self.update_primary_options()
-            self.strategy_desc.setText("Select primary and secondary categories to sort within")
+            self.primary_label.show()
+            self.primary_combo.show()
+            self.secondary_label.show()
+            self.secondary_combo.show()
+            self.update_primary_categories()
 
-        # Update bin assignment options
-        self.update_bin_assignment_options()
+        self.update_bin_categories()
 
     def on_primary_changed(self, primary):
         """Handle primary category change"""
-        strategy = self.strategy_combo.currentText()
-
-        if strategy in ["secondary", "tertiary"]:
-            if strategy == "tertiary":
-                # Update secondary options for tertiary strategy
-                self.update_secondary_options()
-
-            # Update description with selected category
-            if primary:
-                if strategy == "secondary":
-                    self.strategy_desc.setText(f"Sorting secondary categories within '{primary}'")
-                else:
-                    self.strategy_desc.setText(f"Sorting tertiary categories within '{primary}' → ...")
-
-        # Update bin assignments
-        self.update_bin_assignment_options()
-
-    def on_secondary_changed(self, secondary):
-        """Handle secondary category change"""
         if self.strategy_combo.currentText() == "tertiary":
-            primary = self.primary_combo.currentText()
-            if primary and secondary:
-                self.strategy_desc.setText(
-                    f"Sorting tertiary categories within '{primary}' → '{secondary}'"
-                )
-            elif primary:
-                self.strategy_desc.setText(
-                    f"Select secondary category within '{primary}'"
-                )
+            self.update_secondary_categories()
+        self.update_bin_categories()
 
-        # Update bin assignments
-        self.update_bin_assignment_options()
-
-    def on_max_bins_changed(self, value):
-        """Handle max bins change - show/hide bin dropdowns"""
-        for i in range(1, 10):
-            if i in self.bin_combos:
-                # Show bins up to max_bins, hide others
-                visible = i <= value
-
-                # Find the label for this bin
-                grid_layout = self.bin_combos[i].parent().layout()
-                for row in range(grid_layout.rowCount()):
-                    item = grid_layout.itemAtPosition(row, 0)
-                    if item and item.widget():
-                        label_widget = item.widget()
-                        if isinstance(label_widget, QLabel) and f"Bin {i}:" in label_widget.text():
-                            label_widget.setVisible(visible)
-                            break
-
-                self.bin_combos[i].setVisible(visible)
-
-    def update_primary_options(self):
-        """Update primary category dropdown options"""
+    def update_primary_categories(self):
+        """Update primary category combo"""
         if not self.category_database:
             return
 
-        self.primary_combo.blockSignals(True)
         self.primary_combo.clear()
-        self.primary_combo.addItem("")  # Empty option
+        self.primary_combo.addItems(sorted(self.category_database["primary"]))
 
-        primaries = sorted(self.category_database["primary"])
-        self.primary_combo.addItems(primaries)
-
-        self.primary_combo.blockSignals(False)
-
-    def update_secondary_options(self):
-        """Update secondary category dropdown based on selected primary"""
+    def update_secondary_categories(self):
+        """Update secondary category combo"""
         if not self.category_database:
             return
 
         primary = self.primary_combo.currentText()
+        if primary in self.category_database["primary_to_secondary"]:
+            secondaries = self.category_database["primary_to_secondary"][primary]
+            self.secondary_combo.clear()
+            self.secondary_combo.addItems(sorted(secondaries))
 
-        self.secondary_combo.blockSignals(True)
-        self.secondary_combo.clear()
-
-        if primary and primary in self.category_database["primary_to_secondary"]:
-            self.secondary_combo.addItem("")  # Empty option
-            secondaries = sorted(self.category_database["primary_to_secondary"][primary])
-            self.secondary_combo.addItems(secondaries)
-
-        self.secondary_combo.blockSignals(False)
-
-    def update_bin_assignment_options(self):
-        """Update available categories in bin assignment dropdowns"""
-        if not self.category_database:
-            return
-
+    def update_bin_categories(self):
+        """Update available categories for bin assignment"""
         strategy = self.strategy_combo.currentText()
-        primary = self.primary_combo.currentText()
-        secondary = self.secondary_combo.currentText()
 
-        # Get available categories based on current strategy
-        available_categories = set()
+        categories = []
+        if strategy == "primary" and self.category_database:
+            categories = sorted(self.category_database["primary"])
+        elif strategy == "secondary":
+            primary = self.primary_combo.currentText()
+            if primary in self.category_database["primary_to_secondary"]:
+                categories = sorted(self.category_database["primary_to_secondary"][primary])
+        elif strategy == "tertiary":
+            primary = self.primary_combo.currentText()
+            secondary = self.secondary_combo.currentText()
+            key = f"{primary}_{secondary}"
+            if key in self.category_database["secondary_to_tertiary"]:
+                categories = sorted(self.category_database["secondary_to_tertiary"][key])
 
-        if strategy == "primary":
-            available_categories = self.category_database["primary"]
-
-        elif strategy == "secondary" and primary:
-            available_categories = self.category_database["primary_to_secondary"].get(primary, set())
-
-        elif strategy == "tertiary" and primary and secondary:
-            key = (primary, secondary)
-            available_categories = self.category_database["secondary_to_tertiary"].get(key, set())
-
-        # Update each visible bin combo
-        max_bins = self.max_bins_spin.value()
-        for bin_num in range(1, max_bins + 1):
-            if bin_num in self.bin_combos:
-                combo = self.bin_combos[bin_num]
-                current_selection = combo.currentText()
-
-                combo.blockSignals(True)
-                combo.clear()
-                combo.addItem("(Unassigned)")
-
-                for category in sorted(available_categories):
-                    combo.addItem(category)
-
-                # Restore selection if still valid
-                if current_selection in available_categories or current_selection == "(Unassigned)":
-                    combo.setCurrentText(current_selection)
-                else:
-                    combo.setCurrentText("(Unassigned)")
-
-                combo.blockSignals(False)
-
-    def clear_all_assignments(self):
-        """Clear all bin assignments"""
+        # Update all bin combos (excluding bin 0)
         for combo in self.bin_combos.values():
-            combo.setCurrentText("(Unassigned)")
+            current = combo.currentText()
+            combo.clear()
+            combo.addItem("Auto-assign")
+            combo.addItems(categories)
 
-    def on_assignment_changed(self):
-        """Handle when a bin assignment changes - check for duplicates"""
-        assigned_categories = {}
-
-        for bin_num, combo in self.bin_combos.items():
-            if not combo.isVisible():
-                continue
-
-            category = combo.currentText()
-            if category != "(Unassigned)":
-                if category in assigned_categories:
-                    # Duplicate found - clear this assignment
-                    combo.blockSignals(True)
-                    combo.setCurrentText("(Unassigned)")
-                    combo.blockSignals(False)
-
-                    QMessageBox.warning(
-                        self,
-                        "Duplicate Assignment",
-                        f"Category '{category}' is already assigned to Bin {assigned_categories[category]}."
-                    )
-                else:
-                    assigned_categories[category] = bin_num
+            # Restore selection if possible
+            index = combo.findText(current)
+            if index >= 0:
+                combo.setCurrentIndex(index)
 
     def load_settings(self):
         """Load settings from config manager"""
         # Camera settings
         camera_config = self.config_manager.get_module_config(ModuleConfig.CAMERA.value)
-        self.camera_combo.setCurrentIndex(camera_config.get("device_id", 0))
-
-        width = camera_config.get("width", 1920)
-        height = camera_config.get("height", 1080)
-        resolution_text = f"{width}x{height}"
-        index = self.resolution_combo.findText(resolution_text)
-        if index >= 0:
-            self.resolution_combo.setCurrentIndex(index)
-
-        self.fps_spin.setValue(camera_config.get("fps", 30))
-        self.auto_exposure_check.setChecked(camera_config.get("auto_exposure", True))
-
-        # Set camera preview frame size even before camera starts
-        self.camera_preview.set_frame_size(width, height)
-
-        # Update ROI spinbox limits based on configured resolution
-        self.roi_x_spin.setMaximum(max(0, width - 100))
-        self.roi_y_spin.setMaximum(max(0, height - 100))
-        self.roi_w_spin.setMaximum(width)
-        self.roi_h_spin.setMaximum(height)
+        self.selected_camera_index = camera_config.get("device_id", 0)
+        self.camera_device_label.setText(f"Camera {self.selected_camera_index}")
 
         # ROI settings
         roi_config = self.config_manager.get_module_config(ModuleConfig.DETECTOR_ROI.value)
-        roi_x = roi_config.get("x", 125)
-        roi_y = roi_config.get("y", 200)
-        roi_w = roi_config.get("w", 1550)
-        roi_h = roi_config.get("h", 500)
-
-        # Constrain ROI to frame bounds
-        roi_x = min(roi_x, max(0, width - roi_w))
-        roi_y = min(roi_y, max(0, height - roi_h))
-        roi_w = min(roi_w, width - roi_x)
-        roi_h = min(roi_h, height - roi_y)
-
-        self.roi_x_spin.setValue(roi_x)
-        self.roi_y_spin.setValue(roi_y)
-        self.roi_w_spin.setValue(roi_w)
-        self.roi_h_spin.setValue(roi_h)
-
-        # Update camera preview ROI
-        self.camera_preview.set_roi(roi_x, roi_y, roi_w, roi_h)
+        self.roi_x_spin.setValue(roi_config.get("x", 100))
+        self.roi_y_spin.setValue(roi_config.get("y", 100))
+        self.roi_w_spin.setValue(roi_config.get("w", 400))
+        self.roi_h_spin.setValue(roi_config.get("h", 300))
 
         # Detection settings
         detector_config = self.config_manager.get_module_config(ModuleConfig.DETECTOR.value)
@@ -1058,236 +812,570 @@ class ConfigurationScreen(QWidget):
         # Sorting settings
         sorting_config = self.config_manager.get_module_config(ModuleConfig.SORTING.value)
         strategy = sorting_config.get("strategy", "primary")
-
-        # Set max bins first
-        self.max_bins_spin.setValue(sorting_config.get("max_bins", 7))
-
-        # Set strategy (this will trigger updates)
         index = self.strategy_combo.findText(strategy)
         if index >= 0:
             self.strategy_combo.setCurrentIndex(index)
 
-        # Set target categories after strategy is set
-        if strategy in ["secondary", "tertiary"]:
-            primary = sorting_config.get("target_primary_category", "")
-            if primary:
-                index = self.primary_combo.findText(primary)
-                if index >= 0:
-                    self.primary_combo.setCurrentIndex(index)
-
-        if strategy == "tertiary":
-            secondary = sorting_config.get("target_secondary_category", "")
-            if secondary:
-                index = self.secondary_combo.findText(secondary)
-                if index >= 0:
-                    self.secondary_combo.setCurrentIndex(index)
-
-        # Load pre-assignments
-        pre_assignments = sorting_config.get("pre_assignments", {})
-        for category, bin_num in pre_assignments.items():
-            if bin_num in self.bin_combos and self.bin_combos[bin_num].isVisible():
-                combo = self.bin_combos[bin_num]
-                index = combo.findText(category)
-                if index >= 0:
-                    combo.setCurrentIndex(index)
-
-        # Servo settings
-        servo_config = self.config_manager.get_module_config(ModuleConfig.SERVO.value)
-        self.min_pulse_spin.setValue(servo_config.get("min_pulse", 500))
-        self.max_pulse_spin.setValue(servo_config.get("max_pulse", 2500))
-        self.default_angle_spin.setValue(servo_config.get("default_angle", 90))
-        self.move_duration_spin.setValue(servo_config.get("move_duration", 500))
-
     def save_settings(self):
         """Save settings to config manager"""
-        # Camera settings
-        camera_updates = {
-            "device_id": self.camera_combo.currentIndex(),
-            "fps": self.fps_spin.value(),
-            "auto_exposure": self.auto_exposure_check.isChecked()
-        }
+        # Update camera config
+        self.config_manager.update_module_config(
+            ModuleConfig.CAMERA.value,
+            {"device_id": self.selected_camera_index}
+        )
 
-        # Parse resolution
-        resolution = self.resolution_combo.currentText()
-        if "x" in resolution:
-            width, height = resolution.split("x")
-            camera_updates["width"] = int(width)
-            camera_updates["height"] = int(height)
+        # Update ROI config
+        self.config_manager.update_module_config(
+            ModuleConfig.DETECTOR_ROI.value,
+            {
+                "x": self.roi_x_spin.value(),
+                "y": self.roi_y_spin.value(),
+                "w": self.roi_w_spin.value(),
+                "h": self.roi_h_spin.value()
+            }
+        )
 
-        self.config_manager.update_module_config(ModuleConfig.CAMERA.value, camera_updates)
+        # Update detector config
+        self.config_manager.update_module_config(
+            ModuleConfig.DETECTOR.value,
+            {
+                "min_area": self.min_area_spin.value(),
+                "max_area": self.max_area_spin.value()
+            }
+        )
 
-        # ROI settings
-        roi_updates = {
-            "x": self.roi_x_spin.value(),
-            "y": self.roi_y_spin.value(),
-            "w": self.roi_w_spin.value(),
-            "h": self.roi_h_spin.value()
-        }
-        self.config_manager.update_module_config(ModuleConfig.DETECTOR_ROI.value, roi_updates)
-
-        # Detection settings
-        detector_updates = {
-            "min_area": self.min_area_spin.value(),
-            "max_area": self.max_area_spin.value()
-        }
-        self.config_manager.update_module_config(ModuleConfig.DETECTOR.value, detector_updates)
-
-        # Sorting settings
-        sorting_updates = {
+        # Update sorting config
+        sorting_config = {
             "strategy": self.strategy_combo.currentText(),
             "max_bins": self.max_bins_spin.value(),
-            "overflow_bin": 0
+            "overflow_bin": 0  # Always use bin 0 as overflow
         }
 
-        # Add target categories if needed
-        strategy = self.strategy_combo.currentText()
-        if strategy in ["secondary", "tertiary"]:
-            sorting_updates["target_primary_category"] = self.primary_combo.currentText()
-        else:
-            sorting_updates["target_primary_category"] = ""
+        if self.strategy_combo.currentText() in ["secondary", "tertiary"]:
+            sorting_config["target_primary_category"] = self.primary_combo.currentText()
 
-        if strategy == "tertiary":
-            sorting_updates["target_secondary_category"] = self.secondary_combo.currentText()
-        else:
-            sorting_updates["target_secondary_category"] = ""
+        if self.strategy_combo.currentText() == "tertiary":
+            sorting_config["target_secondary_category"] = self.secondary_combo.currentText()
 
-        # Collect pre-assignments (only from visible bins)
+        # Save pre-assignments (excluding bin 0)
         pre_assignments = {}
-        max_bins = self.max_bins_spin.value()
-        for bin_num in range(1, max_bins + 1):
-            if bin_num in self.bin_combos:
-                combo = self.bin_combos[bin_num]
-                category = combo.currentText()
-                if category != "(Unassigned)":
-                    pre_assignments[category] = bin_num
+        for bin_num, combo in self.bin_combos.items():
+            if combo.currentText() != "Auto-assign":
+                pre_assignments[combo.currentText()] = bin_num
 
-        sorting_updates["pre_assignments"] = pre_assignments
+        sorting_config["pre_assignments"] = pre_assignments
 
-        self.config_manager.update_module_config(ModuleConfig.SORTING.value, sorting_updates)
+        self.config_manager.update_module_config(
+            ModuleConfig.SORTING.value,
+            sorting_config
+        )
 
-        # Servo settings
-        servo_updates = {
-            "min_pulse": self.min_pulse_spin.value(),
-            "max_pulse": self.max_pulse_spin.value(),
-            "default_angle": self.default_angle_spin.value(),
-            "move_duration": self.move_duration_spin.value()
-        }
-        self.config_manager.update_module_config(ModuleConfig.SERVO.value, servo_updates)
-
-        # Save to file
+        # Save configuration to file
         self.config_manager.save_config()
 
-        QMessageBox.information(self, "Success", "Configuration saved successfully!")
+        QMessageBox.information(self, "Configuration Saved", "Settings have been saved successfully.")
 
     def validate_configuration(self):
-        """Validate the current configuration"""
-        # Get validation report
-        report = self.config_manager.get_validation_report()
+        """Validate current configuration"""
+        # Check ROI
+        if self.roi_w_spin.value() < 100 or self.roi_h_spin.value() < 100:
+            QMessageBox.warning(self, "Invalid ROI", "ROI dimensions too small.")
+            return False
 
-        if report["valid"]:
-            QMessageBox.information(
-                self,
-                "Configuration Valid",
-                "All configuration settings are valid."
-            )
-        else:
-            # Build error message
-            error_msg = "Configuration validation failed:\n\n"
-
-            for module, result in report["modules"].items():
-                if not result["valid"]:
-                    error_msg += f"{module}:\n"
-                    for error in result["errors"]:
-                        error_msg += f"  • {error}\n"
-                    error_msg += "\n"
-
-            QMessageBox.warning(
-                self,
-                "Configuration Invalid",
-                error_msg
-            )
-
-    def start_system(self):
-        """Start the sorting system if configuration is valid"""
-        # First save current settings
-        self.save_settings()
-
-        # Validate configuration
-        report = self.config_manager.get_validation_report()
-
-        if not report["valid"]:
-            # Show validation errors
-            error_msg = "Cannot start system - configuration is invalid:\n\n"
-
-            for module, result in report["modules"].items():
-                if not result["valid"]:
-                    error_msg += f"{module}:\n"
-                    for error in result["errors"]:
-                        error_msg += f"  • {error}\n"
-                    error_msg += "\n"
-
-            QMessageBox.critical(
-                self,
-                "Cannot Start System",
-                error_msg
-            )
-            return
-
-        # Additional validation for sorting strategy
+        # Check strategy-specific requirements
         strategy = self.strategy_combo.currentText()
         if strategy == "secondary" and not self.primary_combo.currentText():
-            QMessageBox.critical(
-                self,
-                "Invalid Configuration",
-                "Secondary sorting requires selecting a primary category to sort within."
-            )
-            return
+            QMessageBox.warning(self, "Invalid Configuration",
+                                "Secondary sorting requires selecting a primary category.")
+            return False
 
         if strategy == "tertiary":
             if not self.primary_combo.currentText() or not self.secondary_combo.currentText():
-                QMessageBox.critical(
-                    self,
-                    "Invalid Configuration",
-                    "Tertiary sorting requires selecting both primary and secondary categories to sort within."
-                )
-                return
+                QMessageBox.warning(self, "Invalid Configuration",
+                                    "Tertiary sorting requires selecting both primary and secondary categories.")
+                return False
+
+        QMessageBox.information(self, "Configuration Valid", "All settings are valid.")
+        return True
+
+    def start_system(self):
+        """Start the sorting system"""
+        if not self.validate_configuration():
+            return
+
+        self.save_settings()
 
         # Stop camera if running
         if self.camera_thread:
             self.stop_camera()
 
-        # Configuration is valid - emit signal to start system
+        # Emit signal to start system
         self.config_confirmed.emit()
 
+    def cleanup(self):
+        """Clean up resources"""
+        if self.camera_thread:
+            self.stop_camera()
+
+
+# ============= Sorting Operation GUI Components =============
+
+@dataclass
+class TrackedPieceDisplay:
+    """Display data for a tracked piece"""
+    id: int
+    bbox: tuple
+    status: str
+    update_count: int
+    center: tuple
+
+
+class MetricsPanel(QGroupBox):
+    """Real-time metrics display panel"""
+
+    def __init__(self):
+        super().__init__("System Metrics")
+        self.init_ui()
+        self.metrics = {}
+
+    def init_ui(self):
+        layout = QGridLayout()
+
+        self.labels = {
+            'fps': QLabel("FPS: --"),
+            'queue_size': QLabel("Queue: --"),
+            'processed': QLabel("Processed: 0"),
+            'detected': QLabel("Detected: 0"),
+            'errors': QLabel("Errors: 0"),
+            'uptime': QLabel("Uptime: 00:00:00"),
+            'throughput': QLabel("Throughput: --/min"),
+            'efficiency': QLabel("Efficiency: --%")
+        }
+
+        row = 0
+        for key, label in self.labels.items():
+            label.setStyleSheet("QLabel { color: #00ff00; font-family: monospace; }")
+            layout.addWidget(label, row % 4, row // 4)
+            row += 1
+
+        self.setLayout(layout)
+        self.setMaximumHeight(150)
+
+    def update_metrics(self, metrics: Dict[str, Any]):
+        """Update displayed metrics"""
+        self.metrics.update(metrics)
+
+        if 'fps' in metrics:
+            self.labels['fps'].setText(f"FPS: {metrics['fps']:.1f}")
+
+        if 'queue_size' in metrics:
+            self.labels['queue_size'].setText(f"Queue: {metrics['queue_size']}")
+
+        if 'processed_count' in metrics:
+            self.labels['processed'].setText(f"Processed: {metrics['processed_count']}")
+
+        if 'detected_count' in metrics:
+            self.labels['detected'].setText(f"Detected: {metrics['detected_count']}")
+
+        if 'error_count' in metrics:
+            self.labels['errors'].setText(f"Errors: {metrics['error_count']}")
+
+        if 'uptime' in metrics:
+            uptime = int(metrics['uptime'])
+            hours = uptime // 3600
+            minutes = (uptime % 3600) // 60
+            seconds = uptime % 60
+            self.labels['uptime'].setText(f"Uptime: {hours:02d}:{minutes:02d}:{seconds:02d}")
+
+        # Calculate throughput
+        if 'processed_count' in metrics and 'uptime' in metrics:
+            if metrics['uptime'] > 0:
+                throughput = (metrics['processed_count'] / metrics['uptime']) * 60
+                self.labels['throughput'].setText(f"Throughput: {throughput:.1f}/min")
+
+        # Calculate efficiency
+        if 'detected_count' in metrics and 'processed_count' in metrics:
+            if metrics['detected_count'] > 0:
+                efficiency = (metrics['processed_count'] / metrics['detected_count']) * 100
+                self.labels['efficiency'].setText(f"Efficiency: {efficiency:.1f}%")
+
+
+class ProcessedPiecePanel(QGroupBox):
+    """Display recently processed piece information"""
+
+    def __init__(self):
+        super().__init__("Recently Processed")
+        self.init_ui()
+        self.current_piece = None
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+
+        # Image display
+        self.image_label = QLabel()
+        self.image_label.setFixedSize(250, 150)
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setStyleSheet("QLabel { background-color: #1e1e1e; border: 1px solid #555; }")
+        self.image_label.setText("No piece processed")
+        layout.addWidget(self.image_label)
+
+        # Piece information
+        self.info_layout = QGridLayout()
+
+        self.info_labels = {
+            'id': QLabel("ID: --"),
+            'element': QLabel("Element: --"),
+            'name': QLabel("Name: --"),
+            'category': QLabel("Category: --"),
+            'bin': QLabel("Bin: --"),
+            'time': QLabel("Time: --"),
+            'confidence': QLabel("Confidence: --%")
+        }
+
+        row = 0
+        for key, label in self.info_labels.items():
+            label.setStyleSheet("QLabel { color: #ffffff; font-size: 10pt; }")
+            self.info_layout.addWidget(label, row, 0)
+            row += 1
+
+        layout.addLayout(self.info_layout)
+        self.setLayout(layout)
+        self.setMaximumWidth(300)
+
+    def update_piece(self, piece_data: Dict[str, Any]):
+        """Update display with new piece data"""
+        self.current_piece = piece_data
+
+        # Update image if available
+        if 'image' in piece_data and piece_data['image'] is not None:
+            self.display_piece_image(piece_data['image'])
+
+        # Update information labels
+        if 'piece_id' in piece_data:
+            self.info_labels['id'].setText(f"ID: {piece_data['piece_id']}")
+
+        if 'element_id' in piece_data:
+            self.info_labels['element'].setText(f"Element: {piece_data['element_id']}")
+
+        if 'name' in piece_data:
+            name = piece_data['name']
+            if len(name) > 25:
+                name = name[:22] + "..."
+            self.info_labels['name'].setText(f"Name: {name}")
+
+        if 'primary_category' in piece_data:
+            self.info_labels['category'].setText(f"Category: {piece_data['primary_category']}")
+
+        if 'bin_number' in piece_data:
+            bin_num = piece_data['bin_number']
+            if bin_num == 0:
+                self.info_labels['bin'].setText("Bin: 0 (OVERFLOW)")
+            else:
+                self.info_labels['bin'].setText(f"Bin: {bin_num}")
+
+        if 'processing_time' in piece_data:
+            self.info_labels['time'].setText(f"Time: {piece_data['processing_time']:.2f}s")
+
+        if 'confidence' in piece_data:
+            self.info_labels['confidence'].setText(f"Confidence: {piece_data['confidence']:.1f}%")
+
+    def display_piece_image(self, image: np.ndarray):
+        """Display piece image in the panel"""
+        height, width = image.shape[:2]
+
+        if len(image.shape) == 3:
+            bytes_per_line = 3 * width
+            q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
+        else:
+            bytes_per_line = width
+            q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+
+        pixmap = QPixmap.fromImage(q_image)
+        scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_label.setPixmap(scaled_pixmap)
+
+
+class BinStatusPanel(QGroupBox):
+    """Display bin assignments and status with bin 0 as overflow"""
+
+    def __init__(self):
+        super().__init__("Bin Assignments")
+        self.init_ui()
+        self.bin_assignments = {}
+        self.bin_counts = {}
+
+    def init_ui(self):
+        layout = QGridLayout()
+
+        # Create bin widgets (0-7: bin 0 is overflow, 1-7 are categories)
+        self.bin_widgets = {}
+        for i in range(8):  # 0-7
+            bin_frame = QFrame()
+            bin_frame.setFrameStyle(QFrame.Box)
+
+            # Special styling for overflow bin
+            if i == 0:
+                bin_frame.setStyleSheet("QFrame { background-color: #3b2b2b; border: 2px solid #aa5555; }")
+            else:
+                bin_frame.setStyleSheet("QFrame { background-color: #2b2b2b; border: 2px solid #555; }")
+
+            bin_layout = QVBoxLayout()
+
+            # Bin number with special label for overflow
+            if i == 0:
+                bin_label = QLabel("Bin 0 (OVERFLOW)")
+                bin_label.setStyleSheet("QLabel { color: #ff5555; font-weight: bold; }")
+            else:
+                bin_label = QLabel(f"Bin {i}")
+                bin_label.setStyleSheet("QLabel { color: #ffffff; font-weight: bold; }")
+
+            bin_label.setAlignment(Qt.AlignCenter)
+            bin_layout.addWidget(bin_label)
+
+            # Category assignment
+            if i == 0:
+                category_label = QLabel("Errors/Unknown")
+                category_label.setStyleSheet("QLabel { color: #ff8888; }")
+            else:
+                category_label = QLabel("Unassigned")
+                category_label.setStyleSheet("QLabel { color: #888888; }")
+
+            category_label.setAlignment(Qt.AlignCenter)
+            bin_layout.addWidget(category_label)
+
+            # Count
+            count_label = QLabel("Count: 0")
+            count_label.setAlignment(Qt.AlignCenter)
+            count_label.setStyleSheet("QLabel { color: #00ff00; }")
+            bin_layout.addWidget(count_label)
+
+            # Progress bar
+            progress = QProgressBar()
+            progress.setMaximum(100)
+            progress.setValue(0)
+            progress.setTextVisible(False)
+            progress.setMaximumHeight(10)
+            bin_layout.addWidget(progress)
+
+            bin_frame.setLayout(bin_layout)
+
+            self.bin_widgets[i] = {
+                'frame': bin_frame,
+                'category': category_label,
+                'count': count_label,
+                'progress': progress
+            }
+
+            # Add to grid (2 rows of 4 bins)
+            row = i // 4
+            col = i % 4
+            layout.addWidget(bin_frame, row, col)
+
+        self.setLayout(layout)
+
+    def update_assignments(self, assignments: Dict[int, str]):
+        """Update bin category assignments"""
+        self.bin_assignments = assignments
+
+        for bin_num, category in assignments.items():
+            if bin_num in self.bin_widgets and bin_num != 0:  # Don't update overflow bin
+                self.bin_widgets[bin_num]['category'].setText(category)
+                self.bin_widgets[bin_num]['category'].setStyleSheet("QLabel { color: #ffffff; }")
+
+    def update_bin_count(self, bin_num: int, count: int):
+        """Update count for a specific bin"""
+        if bin_num in self.bin_widgets:
+            self.bin_counts[bin_num] = count
+            self.bin_widgets[bin_num]['count'].setText(f"Count: {count}")
+
+            # Update progress bar
+            progress = min(100, (count / 50) * 100)
+            self.bin_widgets[bin_num]['progress'].setValue(int(progress))
+
+            # Change color based on fill level (except overflow bin)
+            if bin_num != 0:
+                if progress > 80:
+                    self.bin_widgets[bin_num]['frame'].setStyleSheet(
+                        "QFrame { background-color: #4b2b2b; border: 2px solid #ff5555; }"
+                    )
+                elif progress > 60:
+                    self.bin_widgets[bin_num]['frame'].setStyleSheet(
+                        "QFrame { background-color: #4b4b2b; border: 2px solid #ffff55; }"
+                    )
+
+    def increment_bin(self, bin_num: int):
+        """Increment count for a bin"""
+        current = self.bin_counts.get(bin_num, 0)
+        self.update_bin_count(bin_num, current + 1)
+
+
+class VideoDisplayWidget(QLabel):
+    """Widget for displaying video feed with detection overlays"""
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(800, 600)
+        self.setStyleSheet("QLabel { background-color: #000000; border: 2px solid #555; }")
+        self.setAlignment(Qt.AlignCenter)
+        self.setText("Waiting for video feed...")
+
+        # Detection data
+        self.detector_data = None
+        self.show_overlays = True
+        self.overlay_options = {
+            'roi': True,
+            'zones': True,
+            'pieces': True,
+            'ids': True,
+            'fps': True
+        }
+
+        # Thread safety
+        self.mutex = QMutex()
+
+    def update_frame(self, frame: np.ndarray, detector_data: Optional[Dict] = None):
+        """Update displayed frame with optional detection data"""
+        with QMutexLocker(self.mutex):
+            if detector_data:
+                self.detector_data = detector_data
+
+            # Apply overlays if enabled
+            if self.show_overlays and self.detector_data:
+                frame = self.apply_detection_overlays(frame)
+
+            # Convert to QPixmap and display
+            height, width = frame.shape[:2]
+
+            if len(frame.shape) == 3:
+                bytes_per_line = 3 * width
+                q_image = QImage(frame.data, width, height, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
+            else:
+                bytes_per_line = width
+                q_image = QImage(frame.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+
+            pixmap = QPixmap.fromImage(q_image)
+            scaled_pixmap = pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.setPixmap(scaled_pixmap)
+
+    def apply_detection_overlays(self, frame: np.ndarray) -> np.ndarray:
+        """Apply detection overlays to frame"""
+        display = frame.copy()
+
+        # Draw ROI rectangle
+        if self.overlay_options['roi'] and 'roi' in self.detector_data:
+            x, y, w, h = self.detector_data['roi']
+            cv2.rectangle(display, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(display, "ROI", (x + 5, y - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+        # Draw entry/exit zones
+        if self.overlay_options['zones'] and 'entry_zone' in self.detector_data:
+            roi_y = self.detector_data['roi'][1]
+            roi_h = self.detector_data['roi'][3]
+
+            entry_x = self.detector_data['entry_zone'][1]
+            cv2.line(display, (entry_x, roi_y), (entry_x, roi_y + roi_h), (255, 0, 0), 2)
+
+            if 'exit_zone' in self.detector_data:
+                exit_x = self.detector_data['exit_zone'][0]
+                cv2.line(display, (exit_x, roi_y), (exit_x, roi_y + roi_h), (0, 0, 255), 2)
+
+                exit_end = self.detector_data['exit_zone'][1]
+                overlay = display.copy()
+                cv2.rectangle(overlay, (exit_x, roi_y), (exit_end, roi_y + roi_h), (0, 0, 255), -1)
+                cv2.addWeighted(overlay, 0.1, display, 0.9, 0, display)
+
+        # Draw tracked pieces
+        if self.overlay_options['pieces'] and 'tracked_pieces' in self.detector_data:
+            roi_x = self.detector_data.get('roi', [0, 0, 0, 0])[0]
+            roi_y = self.detector_data.get('roi', [0, 0, 0, 0])[1]
+
+            for piece in self.detector_data['tracked_pieces']:
+                px, py, pw, ph = piece['bbox']
+                px += roi_x
+                py += roi_y
+
+                # Color based on status
+                color = self.get_piece_color(piece)
+
+                cv2.rectangle(display, (px, py), (px + pw, py + ph), color, 2)
+
+                cx = px + pw // 2
+                cy = py + ph // 2
+                cv2.circle(display, (cx, cy), 3, color, -1)
+
+                if self.overlay_options['ids']:
+                    label = self.get_piece_label(piece)
+                    cv2.putText(display, label, (px, py - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+        # Add FPS overlay
+        if self.overlay_options['fps'] and 'fps' in self.detector_data:
+            fps_text = f"FPS: {self.detector_data['fps']:.1f}"
+            cv2.putText(display, fps_text, (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+        return display
+
+    def get_piece_color(self, piece: Dict) -> tuple:
+        """Get color for piece based on status"""
+        if piece.get('being_processed'):
+            return (255, 0, 255)  # Purple
+        elif piece.get('in_exit_zone'):
+            return (0, 165, 255)  # Orange
+        elif piece.get('captured'):
+            return (0, 255, 0)  # Green
+        else:
+            return (0, 0, 255)  # Red
+
+    def get_piece_label(self, piece: Dict) -> str:
+        """Get label for piece"""
+        piece_id = piece.get('id', 0)
+
+        if piece.get('being_processed'):
+            return f"ID:{piece_id} PROCESSING"
+        elif piece.get('in_exit_zone'):
+            return f"ID:{piece_id} EXIT"
+        else:
+            update_count = piece.get('update_count', 0)
+            return f"ID:{piece_id} U:{update_count}"
+
+
+# ============= Main Sorting GUI =============
 
 class LegoSortingGUI(QMainWindow):
-    """Main GUI window for active sorting operation
+    """Main GUI window for sorting operation"""
 
-    This class should be added to GUI_module.py to provide the sorting
-    interface that Lego_Sorting_006 expects.
-    """
-
-    # Signals for communication with main application
+    # Signals
     pause_requested = pyqtSignal()
     resume_requested = pyqtSignal()
     stop_requested = pyqtSignal()
 
-    def __init__(self, config_manager):
+    def __init__(self, config_manager=None):
         super().__init__()
         self.config_manager = config_manager
         self.is_paused = False
+        self.start_time = time.time()
+
+        # Camera registration
+        self.camera = None
+        self.is_registered = False
+
+        # System modules
+        self.detector = None
+        self.sorting_manager = None
+        self.piece_history = None
+        self.thread_manager = None
 
         self.setWindowTitle("LEGO Sorting System - Active Sorting")
         self.setGeometry(100, 100, 1400, 900)
 
-        # Apply consistent styling
-        self.apply_theme()
-
-        # Initialize UI
+        self.apply_dark_theme()
         self.init_ui()
+        self.setup_timers()
 
-    def apply_theme(self):
-        """Apply dark theme consistent with configuration screen"""
+    def apply_dark_theme(self):
+        """Apply dark theme to the window"""
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #2b2b2b;
@@ -1314,7 +1402,6 @@ class LegoSortingGUI(QMainWindow):
                 padding: 8px;
                 border-radius: 4px;
                 font-weight: bold;
-                min-height: 30px;
             }
             QPushButton:hover {
                 background-color: #666;
@@ -1322,431 +1409,264 @@ class LegoSortingGUI(QMainWindow):
             QPushButton:pressed {
                 background-color: #444;
             }
-            QPushButton#stopButton {
-                background-color: #aa3333;
-            }
-            QPushButton#stopButton:hover {
-                background-color: #cc4444;
-            }
-            QTextEdit {
-                background-color: #1e1e1e;
-                color: #00ff00;
-                border: 1px solid #555;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 10pt;
-            }
-            QStatusBar {
-                color: #ffffff;
-                background-color: #1e1e1e;
-                border-top: 1px solid #555;
+            QPushButton:disabled {
+                background-color: #333;
+                color: #888;
             }
         """)
 
     def init_ui(self):
         """Initialize the user interface"""
-        # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # Main layout
-        main_layout = QHBoxLayout(central_widget)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout = QVBoxLayout()
 
-        # Left panel - Video feed and controls
-        self.create_video_panel(main_layout)
-
-        # Right panel - Information displays
-        self.create_info_panel(main_layout)
-
-        # Status bar
-        self.create_status_bar()
-
-        # Menu bar (optional)
-        self.create_menu_bar()
-
-    def create_video_panel(self, parent_layout):
-        """Create video display panel with controls"""
-        left_panel = QVBoxLayout()
-        parent_layout.addLayout(left_panel, stretch=3)
-
-        # Video display label
-        self.video_label = QLabel()
-        self.video_label.setMinimumSize(800, 600)
-        self.video_label.setStyleSheet("""
-            QLabel {
-                border: 2px solid #555;
-                background-color: #000;
-                color: #888;
-                font-size: 14pt;
-            }
-        """)
-        self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setText("Waiting for camera feed...")
-        self.video_label.setScaledContents(False)
-        left_panel.addWidget(self.video_label)
-
-        # Control buttons
+        # Control bar
         control_layout = QHBoxLayout()
-        control_layout.setSpacing(10)
-        left_panel.addLayout(control_layout)
 
-        # Pause/Resume button
-        self.pause_button = QPushButton("Pause")
-        self.pause_button.clicked.connect(self.toggle_pause)
-        self.pause_button.setMinimumHeight(40)
-        control_layout.addWidget(self.pause_button)
+        self.pause_btn = QPushButton("Pause")
+        self.pause_btn.clicked.connect(self.toggle_pause)
+        control_layout.addWidget(self.pause_btn)
 
-        # Stop button
-        self.stop_button = QPushButton("Stop Sorting")
-        self.stop_button.setObjectName("stopButton")
-        self.stop_button.clicked.connect(self.stop_sorting)
-        self.stop_button.setMinimumHeight(40)
-        control_layout.addWidget(self.stop_button)
+        self.stop_btn = QPushButton("Stop Sorting")
+        self.stop_btn.clicked.connect(self.stop_sorting)
+        self.stop_btn.setStyleSheet("QPushButton { background-color: #aa4444; }")
+        control_layout.addWidget(self.stop_btn)
 
-        # Add spacer
         control_layout.addStretch()
 
-    def create_info_panel(self, parent_layout):
-        """Create information display panel"""
-        right_panel = QVBoxLayout()
-        right_panel.setSpacing(10)
-        parent_layout.addLayout(right_panel, stretch=1)
+        # Overlay toggles
+        self.overlay_checks = {
+            'roi': QCheckBox("ROI"),
+            'zones': QCheckBox("Zones"),
+            'pieces': QCheckBox("Pieces"),
+            'ids': QCheckBox("IDs")
+        }
 
-        # System metrics
-        self.metrics_group = QGroupBox("System Metrics")
-        metrics_layout = QGridLayout()
-        metrics_layout.setSpacing(5)
-        self.metrics_group.setLayout(metrics_layout)
-        right_panel.addWidget(self.metrics_group)
+        for check in self.overlay_checks.values():
+            check.setChecked(True)
+            check.stateChanged.connect(self.update_overlay_settings)
+            control_layout.addWidget(check)
 
-        # Create metric labels
-        self.metric_labels = {}
-        metrics = [
-            ('pieces_detected', 'Pieces Detected:', '0'),
-            ('pieces_sorted', 'Pieces Sorted:', '0'),
-            ('efficiency', 'Efficiency:', '0%'),
-            ('average_processing_time', 'Avg Process Time:', '0.0s'),
-            ('servo_movements', 'Servo Movements:', '0'),
-            ('uptime', 'Uptime:', '00:00:00'),
-            ('errors', 'Errors:', '0')
-        ]
+        main_layout.addLayout(control_layout)
 
-        for i, (key, label_text, default_value) in enumerate(metrics):
-            label = QLabel(label_text)
-            value = QLabel(default_value)
-            value.setAlignment(Qt.AlignRight)
-            value.setStyleSheet("color: #0ff; font-weight: bold;")
-            metrics_layout.addWidget(label, i, 0)
-            metrics_layout.addWidget(value, i, 1)
-            self.metric_labels[key] = value
+        # Content area
+        content_splitter = QSplitter(Qt.Horizontal)
 
-        # Recent pieces display
-        self.recent_pieces_group = QGroupBox("Recent Pieces")
-        recent_layout = QVBoxLayout()
-        self.recent_pieces_group.setLayout(recent_layout)
-        right_panel.addWidget(self.recent_pieces_group)
+        # Left side - Video and metrics
+        left_widget = QWidget()
+        left_layout = QVBoxLayout()
 
-        self.recent_pieces_text = QTextEdit()
-        self.recent_pieces_text.setReadOnly(True)
-        self.recent_pieces_text.setMaximumHeight(250)
-        recent_layout.addWidget(self.recent_pieces_text)
+        self.video_display = VideoDisplayWidget()
+        left_layout.addWidget(self.video_display, 1)
 
-        # Processing history
-        history_label = QLabel("Processing History:")
-        history_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
-        right_panel.addWidget(history_label)
+        self.metrics_panel = MetricsPanel()
+        left_layout.addWidget(self.metrics_panel)
 
-        self.history_text = QTextEdit()
-        self.history_text.setReadOnly(True)
-        self.history_text.setMaximumHeight(150)
-        right_panel.addWidget(self.history_text)
+        left_widget.setLayout(left_layout)
+        content_splitter.addWidget(left_widget)
 
-        # Add stretch to push everything to top
-        right_panel.addStretch()
+        # Right side - Piece info and bin status
+        right_widget = QWidget()
+        right_layout = QVBoxLayout()
 
-    def create_status_bar(self):
-        """Create status bar"""
+        self.piece_panel = ProcessedPiecePanel()
+        right_layout.addWidget(self.piece_panel)
+
+        self.bin_panel = BinStatusPanel()
+        right_layout.addWidget(self.bin_panel, 1)
+
+        right_widget.setLayout(right_layout)
+        content_splitter.addWidget(right_widget)
+
+        content_splitter.setSizes([980, 420])
+
+        main_layout.addWidget(content_splitter, 1)
+
+        # Status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("System Ready")
 
-        # Add permanent widgets to status bar
-        self.fps_label = QLabel("FPS: 0")
-        self.fps_label.setStyleSheet("color: #0ff; padding: 0 10px;")
-        self.status_bar.addPermanentWidget(self.fps_label)
+        central_widget.setLayout(main_layout)
 
-        self.camera_status = QLabel("Camera: Active")
-        self.camera_status.setStyleSheet("color: #0f0; padding: 0 10px;")
-        self.status_bar.addPermanentWidget(self.camera_status)
+    def setup_timers(self):
+        """Setup periodic update timers"""
+        self.metrics_timer = QTimer()
+        self.metrics_timer.timeout.connect(self.update_metrics)
+        self.metrics_timer.start(1000)
 
-    def create_menu_bar(self):
-        """Create menu bar with additional options"""
-        menubar = self.menuBar()
-        menubar.setStyleSheet("""
-            QMenuBar {
-                background-color: #2b2b2b;
-                color: white;
-            }
-            QMenuBar::item:selected {
-                background-color: #555;
-            }
-        """)
+        self.status_timer = QTimer()
+        self.status_timer.timeout.connect(self.update_status)
+        self.status_timer.start(500)
 
-        # File menu
-        file_menu = menubar.addMenu('File')
+    def register_camera_consumer(self, camera):
+        """Register as a frame consumer with the camera module"""
+        self.camera = camera
 
-        save_action = QAction('Save Configuration', self)
-        save_action.triggered.connect(self.save_configuration)
-        file_menu.addAction(save_action)
+        if not self.is_registered:
+            try:
+                success = camera.register_consumer(
+                    name="sorting_gui",
+                    callback=self.process_frame,
+                    processing_type="async",
+                    priority=80
+                )
 
-        export_action = QAction('Export History', self)
-        export_action.triggered.connect(self.export_history)
-        file_menu.addAction(export_action)
+                if success:
+                    self.is_registered = True
+                    self.status_bar.showMessage("Camera feed connected")
+                else:
+                    self.status_bar.showMessage("Failed to connect camera feed")
+            except Exception as e:
+                logger.error(f"Failed to register camera consumer: {e}")
+                self.status_bar.showMessage(f"Camera error: {str(e)}")
 
-        file_menu.addSeparator()
+    def unregister_camera_consumer(self):
+        """Unregister from camera module"""
+        if self.camera and self.is_registered:
+            try:
+                self.camera.unregister_consumer("sorting_gui")
+                self.is_registered = False
+            except Exception as e:
+                logger.warning(f"Error unregistering camera consumer: {e}")
 
-        exit_action = QAction('Exit', self)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+    def process_frame(self, frame: np.ndarray):
+        """Frame consumer callback"""
+        if self.is_paused:
+            return
 
-        # View menu
-        view_menu = menubar.addMenu('View')
+        # Get detector data if available
+        detector_data = None
+        if self.detector:
+            try:
+                detector_data = self.detector.get_visualization_data()
+            except Exception as e:
+                logger.warning(f"Failed to get detector data: {e}")
 
-        fullscreen_action = QAction('Toggle Fullscreen', self)
-        fullscreen_action.setShortcut('F11')
-        fullscreen_action.triggered.connect(self.toggle_fullscreen)
-        view_menu.addAction(fullscreen_action)
+        # Update video display
+        self.video_display.update_frame(frame, detector_data)
 
-        # Tools menu
-        tools_menu = menubar.addMenu('Tools')
+    def set_modules(self, modules: Dict[str, Any]):
+        """Set references to system modules"""
+        self.detector = modules.get('detector')
+        self.sorting_manager = modules.get('sorting_manager')
+        self.piece_history = modules.get('piece_history')
+        self.thread_manager = modules.get('thread_manager')
 
-        calibrate_action = QAction('Calibrate System', self)
-        calibrate_action.triggered.connect(self.open_calibration)
-        tools_menu.addAction(calibrate_action)
+        # Update bin assignments
+        if self.sorting_manager:
+            try:
+                assignments = self.sorting_manager.get_bin_mapping()
+                self.bin_panel.update_assignments(assignments)
+            except Exception as e:
+                logger.error(f"Failed to get bin assignments: {e}")
+
+    def update_metrics(self):
+        """Update metrics display"""
+        uptime = time.time() - self.start_time
+
+        metrics = {
+            'uptime': uptime
+        }
+
+        # Get metrics from thread manager
+        if self.thread_manager:
+            try:
+                metrics['queue_size'] = self.thread_manager.get_queue_size()
+            except:
+                pass
+
+        # Get metrics from detector
+        if self.detector:
+            try:
+                detector_data = self.detector.get_visualization_data()
+                if 'fps' in detector_data:
+                    metrics['fps'] = detector_data['fps']
+                if 'tracked_pieces' in detector_data:
+                    metrics['detected_count'] = len(detector_data['tracked_pieces'])
+            except:
+                pass
+
+        # Get processed count from piece history
+        if self.piece_history:
+            try:
+                metrics['processed_count'] = self.piece_history.get_total_count()
+                metrics['error_count'] = self.piece_history.get_error_count()
+
+                # Get latest piece
+                latest_piece = self.piece_history.get_latest_piece()
+                if latest_piece:
+                    self.piece_panel.update_piece(latest_piece)
+
+                    # Update bin count
+                    bin_num = latest_piece.get('bin_number', 0)
+                    self.bin_panel.increment_bin(bin_num)
+            except Exception as e:
+                logger.warning(f"Failed to get piece history data: {e}")
+
+        self.metrics_panel.update_metrics(metrics)
+
+    def update_status(self):
+        """Update status bar"""
+        if self.is_paused:
+            self.status_bar.showMessage("System Paused")
+        elif self.thread_manager:
+            try:
+                queue_size = self.thread_manager.get_queue_size()
+                self.status_bar.showMessage(f"Sorting Active | Queue: {queue_size}")
+            except:
+                self.status_bar.showMessage("Sorting Active")
+
+    def update_overlay_settings(self):
+        """Update video overlay settings"""
+        for key, check in self.overlay_checks.items():
+            self.video_display.overlay_options[key] = check.isChecked()
 
     def toggle_pause(self):
         """Toggle pause state"""
         self.is_paused = not self.is_paused
+
         if self.is_paused:
-            self.pause_button.setText("Resume")
-            self.pause_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #33aa33;
-                }
-                QPushButton:hover {
-                    background-color: #44cc44;
-                }
-            """)
+            self.pause_btn.setText("Resume")
             self.pause_requested.emit()
-            self.status_bar.showMessage("System Paused")
-            self.camera_status.setText("Camera: Paused")
-            self.camera_status.setStyleSheet("color: #ff0; padding: 0 10px;")
+
+            if self.camera:
+                self.camera.pause_consumer("sorting_gui")
         else:
-            self.pause_button.setText("Pause")
-            self.pause_button.setStyleSheet("")  # Reset to default style
+            self.pause_btn.setText("Pause")
             self.resume_requested.emit()
-            self.status_bar.showMessage("System Resumed")
-            self.camera_status.setText("Camera: Active")
-            self.camera_status.setStyleSheet("color: #0f0; padding: 0 10px;")
+
+            if self.camera:
+                self.camera.resume_consumer("sorting_gui")
 
     def stop_sorting(self):
-        """Stop sorting operation with confirmation"""
-        reply = QMessageBox.question(
-            self,
-            "Stop Sorting",
-            "Are you sure you want to stop the sorting system?\n\n"
-            "This will return you to the configuration screen.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+        """Stop sorting operation"""
+        self.stop_requested.emit()
+        self.unregister_camera_consumer()
+        self.status_bar.showMessage("Stopping sorting system...")
 
-        if reply == QMessageBox.Yes:
-            self.status_bar.showMessage("Stopping system...")
-            self.stop_requested.emit()
+    def cleanup(self):
+        """Clean up resources"""
+        self.unregister_camera_consumer()
 
-    @pyqtSlot(np.ndarray)
-    def update_frame_display(self, frame):
-        """Update video feed display with numpy array"""
-        try:
-            height, width = frame.shape[:2]
-
-            # Convert frame to QImage
-            if len(frame.shape) == 3:
-                # Color image
-                bytes_per_line = 3 * width
-                q_image = QImage(
-                    frame.data,
-                    width,
-                    height,
-                    bytes_per_line,
-                    QImage.Format_RGB888
-                ).rgbSwapped()
-            else:
-                # Grayscale image
-                bytes_per_line = width
-                q_image = QImage(
-                    frame.data,
-                    width,
-                    height,
-                    bytes_per_line,
-                    QImage.Format_Grayscale8
-                )
-
-            # Convert to pixmap and scale
-            pixmap = QPixmap.fromImage(q_image)
-            scaled_pixmap = pixmap.scaled(
-                self.video_label.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            self.video_label.setPixmap(scaled_pixmap)
-
-        except Exception as e:
-            logger.error(f"Failed to update frame display: {e}")
-
-    @pyqtSlot(dict)
-    def update_metrics(self, metrics):
-        """Update metrics display with formatted values"""
-        for key, value in metrics.items():
-            if key in self.metric_labels:
-                if key == 'efficiency':
-                    self.metric_labels[key].setText(f"{value:.1f}%")
-                elif key == 'average_processing_time':
-                    self.metric_labels[key].setText(f"{value:.2f}s")
-                elif key == 'uptime':
-                    # Format uptime as HH:MM:SS
-                    hours = int(value // 3600)
-                    minutes = int((value % 3600) // 60)
-                    seconds = int(value % 60)
-                    self.metric_labels[key].setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-                else:
-                    self.metric_labels[key].setText(str(value))
-
-    @pyqtSlot(dict)
-    def add_piece_to_display(self, piece_record):
-        """Add detected piece to display panels"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-
-        # Format piece information for recent pieces display
-        piece_info = (
-            f"[{timestamp}] Piece #{piece_record.get('piece_id', '?')}\n"
-            f"  Element ID: {piece_record.get('element_id', 'Unknown')}\n"
-            f"  Name: {piece_record.get('name', 'Unknown')}\n"
-            f"  Category: {piece_record.get('category', 'Unknown')}\n"
-            f"  Assigned to Bin: {piece_record.get('bin_number', '?')}\n"
-            f"{'-' * 40}\n"
-        )
-
-        # Update recent pieces (prepend to show newest first)
-        current_text = self.recent_pieces_text.toPlainText()
-        new_text = piece_info + current_text
-
-        # Limit the text length to prevent memory issues
-        max_chars = 5000
-        if len(new_text) > max_chars:
-            new_text = new_text[:max_chars]
-
-        self.recent_pieces_text.setPlainText(new_text)
-
-        # Format for history (more compact)
-        history_entry = (
-            f"[{timestamp}] ID: {piece_record.get('piece_id', '?')} | "
-            f"{piece_record.get('name', 'Unknown')} -> Bin {piece_record.get('bin_number', '?')}\n"
-        )
-
-        # Append to history
-        self.history_text.append(history_entry)
-
-        # Auto-scroll to bottom of history
-        scrollbar = self.history_text.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-
-    def update_fps(self, fps):
-        """Update FPS display"""
-        self.fps_label.setText(f"FPS: {fps:.1f}")
-
-    def save_configuration(self):
-        """Save current configuration"""
-        try:
-            self.config_manager.save_config()
-            QMessageBox.information(
-                self,
-                "Configuration Saved",
-                "Current configuration has been saved successfully."
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Save Error",
-                f"Failed to save configuration: {str(e)}"
-            )
-
-    def export_history(self):
-        """Export processing history to file"""
-        from PyQt5.QtWidgets import QFileDialog
-
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export History",
-            f"lego_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-            "Text Files (*.txt);;All Files (*.*)"
-        )
-
-        if filename:
-            try:
-                with open(filename, 'w') as f:
-                    f.write("LEGO Sorting System - Processing History\n")
-                    f.write(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write("=" * 60 + "\n\n")
-                    f.write(self.history_text.toPlainText())
-
-                QMessageBox.information(
-                    self,
-                    "Export Complete",
-                    f"History exported to: {filename}"
-                )
-            except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Export Error",
-                    f"Failed to export history: {str(e)}"
-                )
-
-    def toggle_fullscreen(self):
-        """Toggle fullscreen mode"""
-        if self.isFullScreen():
-            self.showNormal()
-        else:
-            self.showFullScreen()
-
-    def open_calibration(self):
-        """Open calibration dialog (placeholder)"""
-        QMessageBox.information(
-            self,
-            "Calibration",
-            "Calibration interface not yet implemented.\n\n"
-            "Please use command-line arguments for calibration."
-        )
+        # Stop timers
+        if hasattr(self, 'metrics_timer'):
+            self.metrics_timer.stop()
+        if hasattr(self, 'status_timer'):
+            self.status_timer.stop()
 
     def closeEvent(self, event):
         """Handle window close event"""
-        reply = QMessageBox.question(
-            self,
-            "Exit Application",
-            "Are you sure you want to exit the sorting system?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+        self.cleanup()
+        event.accept()
 
-        if reply == QMessageBox.Yes:
-            self.stop_requested.emit()
-            event.accept()
-        else:
-            event.ignore()
+
+# ============= Main Application Window =============
 
 class MainWindow(QMainWindow):
-    """Main application window"""
+    """Main application window with mode switching"""
 
     def __init__(self):
         super().__init__()
@@ -1754,10 +1674,32 @@ class MainWindow(QMainWindow):
         # Create config manager
         self.config_manager = create_config_manager()
 
-        self.setWindowTitle("LEGO Sorting System - Configuration")
+        # System modules
+        self.system_modules = {}
+
+        # Current mode
+        self.current_mode = "configuration"
+
+        # GUI screens
+        self.config_screen = None
+        self.sorting_gui = None
+
+        self.setWindowTitle("LEGO Sorting System")
         self.setGeometry(100, 100, 1200, 700)
 
-        # Create and set configuration screen
+        # Start with configuration screen
+        self.show_configuration_screen()
+
+    def show_configuration_screen(self):
+        """Show the configuration screen"""
+        self.current_mode = "configuration"
+        self.setWindowTitle("LEGO Sorting System - Configuration")
+
+        # Clean up sorting if it exists
+        if self.sorting_gui:
+            self.sorting_gui.cleanup()
+
+        # Create configuration screen
         self.config_screen = ConfigurationScreen(self.config_manager)
         self.config_screen.config_confirmed.connect(self.on_config_confirmed)
         self.setCentralWidget(self.config_screen)
@@ -1773,17 +1715,176 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.Yes:
+            # Clean up configuration screen
+            self.config_screen.cleanup()
+
+            # Start sorting mode
+            self.start_sorting_mode()
+
+    def start_sorting_mode(self):
+        """Initialize and start sorting operation mode"""
+        try:
             QMessageBox.information(
                 self,
-                "System Starting",
-                "The sorting system is now starting...\n\n"
-                "This window will transition to the sorting view."
+                "Initializing",
+                "Initializing sorting system modules..."
             )
-            # Here you would emit a signal or call the main application
-            # to start the actual sorting system
-            # For now, we just close the config window
-            # self.start_sorting_system()
 
+            # Initialize system modules
+            self.initialize_system_modules()
+
+            # Create sorting GUI
+            self.sorting_gui = LegoSortingGUI(self.config_manager)
+
+            # Connect signals
+            self.sorting_gui.pause_requested.connect(self.on_pause_requested)
+            self.sorting_gui.resume_requested.connect(self.on_resume_requested)
+            self.sorting_gui.stop_requested.connect(self.on_stop_requested)
+
+            # Set modules
+            self.sorting_gui.set_modules(self.system_modules)
+
+            # Register with camera
+            if 'camera' in self.system_modules:
+                self.sorting_gui.register_camera_consumer(self.system_modules['camera'])
+
+            # Update window
+            self.current_mode = "sorting"
+            self.setWindowTitle("LEGO Sorting System - Active Sorting")
+            self.setCentralWidget(self.sorting_gui)
+
+            # Start camera capture
+            if 'camera' in self.system_modules:
+                self.system_modules['camera'].start_capture()
+
+        except Exception as e:
+            logger.error(f"Failed to start sorting mode: {e}")
+            QMessageBox.critical(
+                self,
+                "Initialization Error",
+                f"Failed to initialize sorting system:\n{str(e)}"
+            )
+            self.show_configuration_screen()
+
+    def initialize_system_modules(self):
+        """Initialize all system modules for sorting operation"""
+        try:
+            # Import necessary modules
+            from camera_module import create_camera
+            from detector_module import create_detector
+            from sorting_module import create_sorting_manager
+            from thread_management_module import create_thread_manager
+            from piece_history_module import create_piece_history
+
+            # Initialize modules with correct arguments
+            self.system_modules = {
+                'camera': create_camera(
+                    camera_type="webcam",
+                    config_manager=self.config_manager
+                ),
+                'detector': create_detector(
+                    detector_type="conveyor",
+                    config_manager=self.config_manager,
+                    thread_manager=None
+                ),
+                'sorting_manager': create_sorting_manager(self.config_manager),
+                'thread_manager': create_thread_manager(self.config_manager),
+                'piece_history': create_piece_history()
+            }
+
+            # Update detector with thread manager if needed
+            if hasattr(self.system_modules['detector'], 'set_thread_manager'):
+                self.system_modules['detector'].set_thread_manager(
+                    self.system_modules['thread_manager']
+                )
+
+            # Create processing worker
+            from processing_module import create_processing_worker
+            self.system_modules['processing_worker'] = create_processing_worker(
+                self.system_modules['thread_manager'],
+                self.config_manager,
+                piece_history=self.system_modules['piece_history']
+            )
+
+            # Try to initialize Arduino
+            try:
+                from arduino_servo_module import create_arduino_servo_module
+                self.system_modules['arduino'] = create_arduino_servo_module(self.config_manager)
+            except Exception as e:
+                logger.warning(f"Arduino module not available: {e}")
+
+        except Exception as e:
+            logger.error(f"Module initialization error details: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise RuntimeError(f"Failed to initialize modules: {str(e)}")
+
+    def on_pause_requested(self):
+        """Handle pause request from sorting GUI"""
+        logger.info("Sorting paused")
+
+    def on_resume_requested(self):
+        """Handle resume request from sorting GUI"""
+        logger.info("Sorting resumed")
+
+    def on_stop_requested(self):
+        """Handle stop request and return to configuration"""
+        reply = QMessageBox.question(
+            self,
+            "Stop Sorting",
+            "Are you sure you want to stop sorting and return to configuration?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            self.cleanup_sorting_mode()
+            self.show_configuration_screen()
+
+    def cleanup_sorting_mode(self):
+        """Clean up sorting mode resources"""
+        # Stop camera capture
+        if 'camera' in self.system_modules:
+            try:
+                self.system_modules['camera'].stop_capture()
+            except:
+                pass
+
+        # Clean up sorting GUI
+        if self.sorting_gui:
+            self.sorting_gui.cleanup()
+
+        # Release resources
+        for module in self.system_modules.values():
+            if hasattr(module, 'release'):
+                try:
+                    module.release()
+                except:
+                    pass
+
+        self.system_modules.clear()
+
+    def closeEvent(self, event):
+        """Handle application close event"""
+        reply = QMessageBox.question(
+            self,
+            "Exit Application",
+            "Are you sure you want to exit the sorting system?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            # Clean up based on current mode
+            if self.current_mode == "sorting":
+                self.cleanup_sorting_mode()
+            elif self.config_screen:
+                self.config_screen.cleanup()
+
+            event.accept()
+        else:
+            event.ignore()
+
+
+# ============= Main Entry Point =============
 
 def main():
     """Main entry point"""

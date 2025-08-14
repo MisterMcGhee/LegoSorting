@@ -45,10 +45,10 @@
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "secondary",
+        "strategy": "primary",
         "target_primary_category": "Basic",
         "target_secondary_category": "",
-        "max_bins": 5,
+        "max_bins": 3,
         "overflow_bin": 0,
         "confidence_threshold": 0.7,
         "pre_assignments": {}
@@ -96,10 +96,10 @@
         "retry_delay": 1.0
     },
     "detector_roi": {
-        "x": 210,
-        "y": 165,
-        "w": 1500,
-        "h": 750,
+        "x": 90,
+        "y": 71,
+        "w": 1069,
+        "h": 507,
         "entry_zone_width": 150,
         "exit_zone_width": 150
     },
