@@ -15,29 +15,22 @@ import argparse
 import signal
 import time
 import logging
-import json
 import threading
 from enum import Enum
-from typing import Dict, Any, Optional, Callable, List
-from dataclasses import dataclass
+from typing import Dict, Any, Optional
 from datetime import datetime
 
 # PyQt5 imports
 from PyQt5.QtCore import (
     QObject, QThread, pyqtSignal, pyqtSlot, QTimer,
-    QMutex, QMutexLocker, Qt
+    QMutex, QMutexLocker
 )
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout,
-    QHBoxLayout, QStackedWidget, QPushButton, QLabel,
-    QMessageBox, QStatusBar, QToolBar, QAction, QMenuBar,
-    QProgressBar, QGroupBox, QGridLayout, QTextEdit,
-    QSplitter, QFrame
+    QApplication, QMessageBox
 )
-from PyQt5.QtGui import QPixmap, QImage, QIcon, QFont
 
 # Import modules
-from enhanced_config_manager import create_config_manager, ModuleConfig
+from enhanced_config_manager import create_config_manager
 from camera_module import CameraModule
 from detector_module import create_detector
 from sorting_module import create_sorting_manager
@@ -45,12 +38,10 @@ from thread_management_module import create_thread_manager, PieceMessage
 from arduino_servo_module import create_arduino_servo_module
 from piece_history_module import create_piece_history
 from error_module import setup_logging, get_logger
-from GUI_module import ConfigurationScreen, MainWindow, LegoSortingGUI  # Fixed import
-from ui_module import create_ui_manager
+from Old_versions.GUI_module import MainWindow, LegoSortingGUI  # Fixed import
 
 # Import cv2 and numpy
 import cv2
-import numpy as np
 
 # Initialize logger
 logger = get_logger(__name__)
