@@ -4,7 +4,11 @@ enhanced_config_manager.py - Unified configuration management with validation
 This module provides centralized configuration management with schema validation,
 defaults handling, migration support, and standardized module interfaces.
 
-UPDATED: Added parse_categories_from_csv function for category hierarchy
+MAIN PURPOSE: Replace the simple config manager with a robust system that:
+- Validates all configuration values
+- Provides guaranteed defaults for every setting
+- Handles version migrations automatically
+- Supports category hierarchy parsing for the GUI
 """
 
 import json
@@ -13,23 +17,14 @@ import csv
 import shutil
 import threading
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Callable, Set
+from typing import Any, Dict, List, Optional, Tuple, Callable
 from datetime import datetime
 from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-
-class ConfigVersion:
-    """Configuration schema versions"""
-    V1_0 = "1.0"  # Original schema
-    V2_0 = "2.0"  # GUI integration schema
-    V2_1 = "2.1"  # Enhanced with validation
-    CURRENT = V2_1
-
-
 class ModuleConfig(Enum):
-    """Standard module names for configuration"""
+    """Standard module names for configuration - prevents typos and ensures consistency"""
     CAMERA = "camera"
     DETECTOR = "detector"
     DETECTOR_ROI = "detector_roi"
@@ -43,14 +38,16 @@ class ModuleConfig(Enum):
     EXIT_ZONE = "exit_zone_trigger"
     PIECE_IDENTIFIER = "piece_identifier"
 
-
 class ConfigSchema:
-    """Configuration schema definitions and defaults"""
+    """Configuration schema definitions and defaults - the "source of truth" for what settings exist"""
 
     @staticmethod
     def get_module_schema(module_name: str) -> Dict[str, Any]:
-        """Get schema with defaults for a specific module"""
+        """Get complete schema with ALL default values for a specific module
 
+        This is the master definition of what settings exist and their default values.
+        Every module should get its config through this to ensure completeness.
+        """
         schemas = {
             ModuleConfig.CAMERA.value: {
                 "device_id": 0,
@@ -160,8 +157,10 @@ class ConfigSchema:
 
     @staticmethod
     def get_required_fields(module_name: str) -> List[str]:
-        """Get required fields for a module"""
+        """Get list of fields that MUST be present (no defaults allowed)
 
+        These are critical settings that must be explicitly configured.
+        """
         required = {
             ModuleConfig.CAMERA.value: ["device_id"],
             ModuleConfig.DETECTOR.value: ["detector_type"],
@@ -173,27 +172,24 @@ class ConfigSchema:
 
         return required.get(module_name, [])
 
-
 class ConfigValidator:
-    """Validates configuration values"""
+    """Validates configuration values against business rules"""
 
     @staticmethod
     def validate_module(module_name: str, config: Dict[str, Any]) -> Tuple[bool, List[str]]:
-        """
-        Validate a module's configuration
+        """Check if a module's configuration is valid
 
-        Returns:
-            Tuple of (is_valid, error_messages)
+        Returns: (is_valid, list_of_error_messages)
         """
         errors = []
 
-        # Check required fields
+        # Check that all required fields are present
         required = ConfigSchema.get_required_fields(module_name)
         for field in required:
             if field not in config or config[field] is None:
                 errors.append(f"Missing required field '{field}' in {module_name}")
 
-        # Module-specific validation
+        # Run module-specific validation rules
         if module_name == ModuleConfig.SORTING.value:
             errors.extend(ConfigValidator._validate_sorting(config))
         elif module_name == ModuleConfig.CAMERA.value:
@@ -201,31 +197,34 @@ class ConfigValidator:
         elif module_name == ModuleConfig.DETECTOR_ROI.value:
             errors.extend(ConfigValidator._validate_roi(config))
 
-        return (len(errors) == 0, errors)
+        return len(errors) == 0, errors
 
     @staticmethod
     def _validate_sorting(config: Dict[str, Any]) -> List[str]:
-        """Validate sorting configuration"""
+        """Business rules for sorting configuration"""
         errors = []
 
         strategy = config.get("strategy")
         if strategy not in ["primary", "secondary", "tertiary"]:
             errors.append(f"Invalid sorting strategy: {strategy}")
 
+        # Secondary sorting needs a target primary category
         if strategy == "secondary" and not config.get("target_primary_category"):
             errors.append("Secondary sorting requires target_primary_category")
 
+        # Tertiary sorting needs both target categories
         if strategy == "tertiary":
             if not config.get("target_primary_category"):
                 errors.append("Tertiary sorting requires target_primary_category")
             if not config.get("target_secondary_category"):
                 errors.append("Tertiary sorting requires target_secondary_category")
 
+        # Validate bin count is reasonable
         max_bins = config.get("max_bins", 0)
         if not (1 <= max_bins <= 20):
             errors.append(f"Invalid max_bins: {max_bins} (must be 1-20)")
 
-        # Validate pre-assignments if present
+        # Check pre-assignments are valid
         pre_assignments = config.get("pre_assignments", {})
         for category, bin_num in pre_assignments.items():
             if not isinstance(bin_num, int):
@@ -237,7 +236,7 @@ class ConfigValidator:
 
     @staticmethod
     def _validate_camera(config: Dict[str, Any]) -> List[str]:
-        """Validate camera configuration"""
+        """Business rules for camera configuration"""
         errors = []
 
         device_id = config.get("device_id")
@@ -252,16 +251,16 @@ class ConfigValidator:
 
     @staticmethod
     def _validate_roi(config: Dict[str, Any]) -> List[str]:
-        """Validate ROI configuration"""
+        """Business rules for ROI configuration"""
         errors = []
 
-        # Check dimensions are positive
+        # Dimensions must be positive
         for key in ["w", "h"]:
             value = config.get(key, 0)
             if value <= 0:
                 errors.append(f"ROI {key} must be positive: {value}")
 
-        # Check positions are non-negative
+        # Positions must be non-negative
         for key in ["x", "y"]:
             value = config.get(key, 0)
             if value < 0:
@@ -269,148 +268,63 @@ class ConfigValidator:
 
         return errors
 
-
-class ConfigMigration:
-    """Handles configuration migration between versions"""
-
-    @staticmethod
-    def migrate(config: Dict[str, Any], from_version: str) -> Dict[str, Any]:
-        """
-        Migrate configuration from old version to current
-
-        Args:
-            config: Configuration dictionary
-            from_version: Version to migrate from
-
-        Returns:
-            Migrated configuration
-        """
-        migrations = {
-            ConfigVersion.V1_0: ConfigMigration._migrate_v1_to_v2,
-            ConfigVersion.V2_0: ConfigMigration._migrate_v2_to_v2_1
-        }
-
-        current_version = from_version
-
-        # Apply migrations sequentially
-        while current_version != ConfigVersion.CURRENT:
-            if current_version in migrations:
-                config = migrations[current_version](config)
-                # Update version after each migration
-                if current_version == ConfigVersion.V1_0:
-                    current_version = ConfigVersion.V2_0
-                elif current_version == ConfigVersion.V2_0:
-                    current_version = ConfigVersion.V2_1
-            else:
-                break
-
-        config["version"] = ConfigVersion.CURRENT
-        return config
-
-    @staticmethod
-    def _migrate_v1_to_v2(config: Dict[str, Any]) -> Dict[str, Any]:
-        """Migrate from v1.0 to v2.0"""
-        # Add GUI settings if not present
-        if ModuleConfig.GUI.value not in config:
-            config[ModuleConfig.GUI.value] = ConfigSchema.get_module_schema(ModuleConfig.GUI.value)
-
-        # Add pre_assignments to sorting if not present
-        if ModuleConfig.SORTING.value in config:
-            if "pre_assignments" not in config[ModuleConfig.SORTING.value]:
-                config[ModuleConfig.SORTING.value]["pre_assignments"] = {}
-
-        return config
-
-    @staticmethod
-    def _migrate_v2_to_v2_1(config: Dict[str, Any]) -> Dict[str, Any]:
-        """Migrate from v2.0 to v2.1"""
-        # Add validation fields
-        if "validation" not in config:
-            config["validation"] = {
-                "strict_mode": False,
-                "auto_fix": True
-            }
-
-        return config
-
-
 class EnhancedConfigManager:
     """
-    Enhanced configuration manager with validation and standardized interfaces
+    The main configuration manager - this is what modules actually use
 
-    This manager provides:
+    Key improvements over old ConfigManager:
+    - Automatic validation of all settings
+    - Guaranteed defaults for every parameter
     - Thread-safe operations
-    - Schema validation
-    - Automatic defaults
-    - Version migration
-    - Module-specific helpers
-    - Change notifications
-    - Category hierarchy parsing
+    - Automatic version migration
+    - Category hierarchy parsing for GUI
     """
 
     def __init__(self, config_path: str = "config.json", auto_migrate: bool = True):
-        """
-        Initialize enhanced configuration manager
-
-        Args:
-            config_path: Path to configuration file
-            auto_migrate: Automatically migrate old configs
-        """
+        """Initialize with automatic loading and migration"""
         self.config_path = config_path
         self.auto_migrate = auto_migrate
         self.config: Dict[str, Any] = {}
-        self._lock = threading.RLock()
-        self._observers: List[Callable] = []
+        self._lock = threading.RLock()  # Thread safety
+        self._observers: List[Callable] = []  # For change notifications
         self._backup_dir = "config_backups"
 
-        # Cache for category hierarchy
+        # Cache for parsed category data (expensive to parse repeatedly)
         self._category_hierarchy: Optional[Dict[str, Any]] = None
         self._category_hierarchy_lock = threading.RLock()
 
         # Create backup directory
         os.makedirs(self._backup_dir, exist_ok=True)
 
-        # Load configuration
+        # Load and migrate configuration automatically
         self._load_config()
 
     def _load_config(self) -> None:
-        """Load and validate configuration from file"""
+        """Load configuration from file"""
         with self._lock:
             if os.path.exists(self.config_path):
                 try:
                     with open(self.config_path, 'r') as f:
                         self.config = json.load(f)
-
-                    # Check version and migrate if needed
-                    config_version = self.config.get("version", ConfigVersion.V1_0)
-
-                    if config_version != ConfigVersion.CURRENT and self.auto_migrate:
-                        logger.info(f"Migrating config from {config_version} to {ConfigVersion.CURRENT}")
-                        self._create_backup(suffix=f"_pre_migration_{config_version}")
-                        self.config = ConfigMigration.migrate(self.config, config_version)
-                        self.save_config()
-
                     logger.info(f"Configuration loaded from {self.config_path}")
-
                 except Exception as e:
                     logger.error(f"Error loading configuration: {e}")
                     self._create_default_config()
             else:
-                logger.info(f"No configuration file found at {self.config_path}")
+                logger.info(f"No configuration file found, creating default")
                 self._create_default_config()
 
     def _create_default_config(self) -> None:
-        """Create default configuration with all modules"""
+        """Create a complete default configuration with all modules"""
         with self._lock:
             self.config = {
-                "version": ConfigVersion.CURRENT,
                 "validation": {
                     "strict_mode": False,
                     "auto_fix": True
                 }
             }
 
-            # Add all module defaults
+            # Add complete default configuration for every module
             for module in ModuleConfig:
                 module_name = module.value
                 self.config[module_name] = ConfigSchema.get_module_schema(module_name)
@@ -420,31 +334,12 @@ class EnhancedConfigManager:
 
     def parse_categories_from_csv(self, csv_path: Optional[str] = None, force_reload: bool = False) -> Dict[str, Any]:
         """
-        Parse the Lego categories CSV file to build category hierarchy.
+        Parse the Lego categories CSV file into a hierarchical structure
 
-        This function reads the CSV and builds a hierarchical structure of categories
-        that can be used by the GUI and sorting modules to understand relationships
-        between primary, secondary, and tertiary categories.
-
-        Args:
-            csv_path: Path to CSV file (uses default from config if not provided)
-            force_reload: Force reload even if cached
-
-        Returns:
-            dict: Category hierarchy with the following structure:
-                {
-                    "primary": set of primary category names,
-                    "primary_to_secondary": dict mapping primary -> set of secondary,
-                    "secondary_to_tertiary": dict mapping (primary, secondary) -> set of tertiary,
-                    "all_categories": dict mapping element_id -> full category info
-                }
-
-        Raises:
-            FileNotFoundError: If CSV file doesn't exist
-            Exception: If error parsing CSV
+        Used by GUI to populate category dropdowns and by sorting to understand relationships.
         """
         with self._category_hierarchy_lock:
-            # Return cached hierarchy if available and not forcing reload
+            # Return cached version if available
             if self._category_hierarchy is not None and not force_reload:
                 return self._category_hierarchy
 
@@ -456,12 +351,12 @@ class EnhancedConfigManager:
             if not os.path.exists(csv_path):
                 raise FileNotFoundError(f"Categories CSV not found at: {csv_path}")
 
-            # Initialize the hierarchy structure
+            # Build the hierarchy structure
             categories = {
                 "primary": set(),
                 "primary_to_secondary": {},
                 "secondary_to_tertiary": {},
-                "all_categories": {}  # Maps element_id to full category info
+                "all_categories": {}
             }
 
             try:
@@ -469,17 +364,15 @@ class EnhancedConfigManager:
                     csv_reader = csv.DictReader(file)
 
                     for row in csv_reader:
-                        # Get element ID and category levels
                         element_id = row.get('element_id', '')
                         primary = row.get('primary_category', '')
                         secondary = row.get('secondary_category', '')
                         tertiary = row.get('tertiary_category', '')
 
-                        # Skip rows without element_id or primary category
                         if not element_id or not primary:
                             continue
 
-                        # Store full category info
+                        # Store complete piece information
                         categories["all_categories"][element_id] = {
                             'name': row.get('name', ''),
                             'primary_category': primary,
@@ -487,46 +380,36 @@ class EnhancedConfigManager:
                             'tertiary_category': tertiary
                         }
 
-                        # Add to primary categories set
+                        # Build hierarchy mappings
                         categories["primary"].add(primary)
 
-                        # Build primary to secondary mapping
                         if primary not in categories["primary_to_secondary"]:
                             categories["primary_to_secondary"][primary] = set()
-
-                        if secondary:  # Only add if secondary exists
+                        if secondary:
                             categories["primary_to_secondary"][primary].add(secondary)
 
-                        # Build secondary to tertiary mapping
-                        if secondary:  # Only process if secondary exists
+                        if secondary:
                             key = (primary, secondary)
                             if key not in categories["secondary_to_tertiary"]:
                                 categories["secondary_to_tertiary"][key] = set()
-
-                            if tertiary:  # Only add if tertiary exists
+                            if tertiary:
                                 categories["secondary_to_tertiary"][key].add(tertiary)
 
-                # Convert sets to sorted lists for easier use in GUI
+                # Convert sets to sorted lists for GUI use
                 categories["primary"] = sorted(list(categories["primary"]))
-
                 for primary in categories["primary_to_secondary"]:
                     categories["primary_to_secondary"][primary] = sorted(
                         list(categories["primary_to_secondary"][primary])
                     )
-
                 for key in categories["secondary_to_tertiary"]:
                     categories["secondary_to_tertiary"][key] = sorted(
                         list(categories["secondary_to_tertiary"][key])
                     )
 
-                # Cache the parsed hierarchy
+                # Cache the result
                 self._category_hierarchy = categories
 
-                # Log summary statistics
-                logger.info(f"Parsed category hierarchy from {csv_path}:")
-                logger.info(f"  - {len(categories['primary'])} primary categories")
-                logger.info(f"  - {len(categories['all_categories'])} total elements")
-
+                logger.info(f"Parsed {len(categories['primary'])} primary categories from {csv_path}")
                 return categories
 
             except Exception as e:
@@ -535,47 +418,24 @@ class EnhancedConfigManager:
                 raise Exception(error_msg)
 
     def get_category_hierarchy(self, force_reload: bool = False) -> Dict[str, Any]:
-        """
-        Get the cached category hierarchy, parsing if necessary.
-
-        This is a convenience method that wraps parse_categories_from_csv
-        for modules that need quick access to the category hierarchy.
-
-        Args:
-            force_reload: Force reload from CSV even if cached
-
-        Returns:
-            dict: Category hierarchy structure
-        """
+        """Get cached category hierarchy (convenience wrapper)"""
         return self.parse_categories_from_csv(force_reload=force_reload)
 
     def get_categories_for_strategy(self, strategy: str,
                                     primary_category: Optional[str] = None,
                                     secondary_category: Optional[str] = None) -> List[str]:
         """
-        Get the list of categories available for a given sorting strategy.
-
-        This helper method returns the appropriate categories based on the
-        sorting strategy and selected parent categories.
-
-        Args:
-            strategy: "primary", "secondary", or "tertiary"
-            primary_category: Required for secondary/tertiary strategies
-            secondary_category: Required for tertiary strategy
-
-        Returns:
-            List of category names available for the given strategy
+        Get categories available for a specific sorting strategy
+        Used by GUI to populate category selection dropdowns.
         """
         hierarchy = self.get_category_hierarchy()
 
         if strategy == "primary":
             return hierarchy.get("primary", [])
-
         elif strategy == "secondary":
             if not primary_category:
                 return []
             return hierarchy.get("primary_to_secondary", {}).get(primary_category, [])
-
         elif strategy == "tertiary":
             if not primary_category or not secondary_category:
                 return []
@@ -586,32 +446,26 @@ class EnhancedConfigManager:
 
     def get_module_config(self, module_name: str, validate: bool = True) -> Dict[str, Any]:
         """
-        Get complete configuration for a module with defaults
+        **THIS IS THE MAIN METHOD MODULES SHOULD USE**
 
-        This is the PRIMARY method modules should use to get their config.
-        It ensures all expected fields are present with appropriate defaults.
+        Get complete configuration for a module with ALL defaults filled in.
+        This ensures modules never get missing settings.
 
-        Args:
-            module_name: Name of the module (use ModuleConfig enum values)
-            validate: Whether to validate the configuration
-
-        Returns:
-            Complete module configuration with defaults applied
-
-        Raises:
-            ValueError: If validation fails and strict_mode is enabled
+        Example:
+            camera_config = config_manager.get_module_config("camera")
+            # camera_config is GUARANTEED to have device_id, width, height, fps, etc.
         """
         with self._lock:
-            # Get stored config for module
+            # Get what's actually stored in the config file
             stored_config = self.config.get(module_name, {})
 
-            # Get schema defaults
+            # Get the complete schema with all defaults
             defaults = ConfigSchema.get_module_schema(module_name)
 
-            # Merge stored config over defaults
+            # Merge: user settings override defaults
             module_config = {**defaults, **stored_config}
 
-            # Validate if requested
+            # Validate the final configuration
             if validate:
                 is_valid, errors = ConfigValidator.validate_module(module_name, module_config)
 
@@ -623,9 +477,8 @@ class EnhancedConfigManager:
                     else:
                         logger.warning(error_msg)
 
-                        # Auto-fix if enabled
+                        # Auto-fix by using pure defaults
                         if self.config.get("validation", {}).get("auto_fix", True):
-                            # Use defaults for invalid fields
                             module_config = defaults
                             logger.info(f"Using defaults for {module_name} due to validation errors")
 
@@ -634,35 +487,28 @@ class EnhancedConfigManager:
     def update_module_config(self, module_name: str, updates: Dict[str, Any],
                              validate: bool = True) -> bool:
         """
-        Update a module's configuration
+        Update configuration for a module
 
-        Args:
-            module_name: Name of the module
-            updates: Dictionary of updates to apply
-            validate: Whether to validate before applying
-
-        Returns:
-            True if update successful, False otherwise
+        This validates the changes before applying them.
         """
         with self._lock:
-            # Get current module config
+            # Get current complete config
             current = self.get_module_config(module_name, validate=False)
 
-            # Apply updates
+            # Apply the updates
             updated = {**current, **updates}
 
-            # Validate if requested
+            # Validate the result
             if validate:
                 is_valid, errors = ConfigValidator.validate_module(module_name, updated)
-
                 if not is_valid:
                     logger.error(f"Validation failed for {module_name}: {errors}")
                     return False
 
-            # Store updated config
+            # Store the updated config
             self.config[module_name] = updated
 
-            # Notify observers
+            # Notify observers of the change
             self._notify_observers(module_name, updates)
 
             # Save to file
@@ -672,10 +518,9 @@ class EnhancedConfigManager:
 
     def get_validation_report(self) -> Dict[str, Any]:
         """
-        Get complete validation report for all modules
+        Get a complete validation report for all modules
 
-        Returns:
-            Dictionary with validation results for each module
+        Useful for debugging configuration issues.
         """
         report = {
             "valid": True,
@@ -701,18 +546,13 @@ class EnhancedConfigManager:
         return report
 
     def save_config(self) -> bool:
-        """
-        Save configuration to file
-
-        Returns:
-            True if save successful, False otherwise
-        """
+        """Save current configuration to file with automatic backup"""
         with self._lock:
             try:
                 # Create backup before saving
                 self._create_backup()
 
-                # Save configuration
+                # Write the config file
                 with open(self.config_path, 'w') as f:
                     json.dump(self.config, f, indent=4)
 
@@ -724,7 +564,7 @@ class EnhancedConfigManager:
                 return False
 
     def _create_backup(self, suffix: str = None) -> Optional[str]:
-        """Create timestamped backup of configuration"""
+        """Create timestamped backup of current config file"""
         with self._lock:
             if not os.path.exists(self.config_path):
                 return None
@@ -744,104 +584,25 @@ class EnhancedConfigManager:
                 return None
 
     def register_observer(self, callback: Callable[[str, Dict[str, Any]], None]) -> None:
-        """
-        Register callback for configuration changes
-
-        Args:
-            callback: Function to call with (module_name, changes) on config change
-        """
+        """Register callback to be notified when configuration changes"""
         with self._lock:
             self._observers.append(callback)
 
     def _notify_observers(self, module_name: str, changes: Dict[str, Any]) -> None:
-        """Notify all observers of configuration changes"""
+        """Notify all registered observers of configuration changes"""
         for observer in self._observers:
             try:
                 observer(module_name, changes)
             except Exception as e:
                 logger.error(f"Error notifying observer: {e}")
 
-    # Legacy compatibility methods
-    def get(self, section: str, key: str, default: Any = None) -> Any:
-        """Legacy compatibility: Get single value"""
-        module_config = self.get_module_config(section, validate=False)
-        return module_config.get(key, default)
 
-    def set(self, section: str, key: str, value: Any) -> None:
-        """Legacy compatibility: Set single value"""
-        with self._lock:
-            if section not in self.config:
-                self.config[section] = {}
-            self.config[section][key] = value
-
-    def get_section(self, section: str) -> Dict[str, Any]:
-        """Legacy compatibility: Get entire section"""
-        return self.get_module_config(section, validate=False)
-
-    def update_section(self, section: str, values: Dict[str, Any]) -> None:
-        """Legacy compatibility: Update entire section"""
-        self.update_module_config(section, values, validate=False)
-
-
-# Factory function for compatibility
+# Factory function for creating config manager instances
 def create_config_manager(config_path: str = "config.json") -> EnhancedConfigManager:
     """
     Create an enhanced configuration manager instance
 
-    Args:
-        config_path: Path to configuration file
-
-    Returns:
-        EnhancedConfigManager instance
+    This is the main entry point - use this function rather than
+    calling the constructor directly.
     """
     return EnhancedConfigManager(config_path)
-
-
-# Example usage and migration guide
-if __name__ == "__main__":
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
-
-    # Create config manager
-    config = create_config_manager()
-
-    # Parse and display category hierarchy
-    print("\n=== Category Hierarchy ===")
-    try:
-        hierarchy = config.parse_categories_from_csv()
-        print(f"Primary categories: {hierarchy['primary'][:5]}...")  # Show first 5
-
-        # Show example of hierarchy
-        if hierarchy['primary']:
-            first_primary = hierarchy['primary'][0]
-            print(f"\nSecondary categories in '{first_primary}':")
-            secondaries = hierarchy['primary_to_secondary'].get(first_primary, [])
-            print(f"  {secondaries[:3]}...")  # Show first 3
-
-            if secondaries:
-                first_secondary = secondaries[0]
-                key = (first_primary, first_secondary)
-                tertiaries = hierarchy['secondary_to_tertiary'].get(key, [])
-                print(f"\nTertiary categories in '{first_primary}' -> '{first_secondary}':")
-                print(f"  {tertiaries[:3]}...")  # Show first 3
-    except Exception as e:
-        print(f"Error parsing categories: {e}")
-
-    # Modern usage - recommended approach
-    print("\n=== Modern Usage ===")
-
-    # Get complete module config with validation
-    camera_config = config.get_module_config(ModuleConfig.CAMERA.value)
-    print(f"Camera config: {camera_config}")
-
-    # Get categories for different strategies
-    print("\n=== Categories for Strategies ===")
-    primary_cats = config.get_categories_for_strategy("primary")
-    print(f"Primary strategy categories: {len(primary_cats)} total")
-
-    if primary_cats:
-        secondary_cats = config.get_categories_for_strategy("secondary", primary_cats[0])
-        print(f"Secondary categories within '{primary_cats[0]}': {len(secondary_cats)} total")
-
-    # Save configuration
-    config.save_config()

@@ -1,12 +1,14 @@
 """
 detector_module.py - Module for detecting and tracking Lego pieces on a conveyor belt
 
-This module provides functionality to:
-1. Define a Region of Interest (ROI) on a conveyor belt
-2. Perform background subtraction optimized for moving conveyors
-3. Detect and track Lego pieces as they move through the ROI
-4. Determine when a piece should be captured
-5. Provide visualization of the detection and tracking process
+This module is responsible for:
+1. Defining a Region of Interest (ROI) where pieces are detected
+2. Using background subtraction to identify moving pieces
+3. Tracking pieces as they move through different zones
+4. Determining when pieces should be captured or trigger sorting
+
+The module does NOT handle visualization - that's the GUI's job.
+It only provides data about what it detects.
 """
 
 import cv2
@@ -17,863 +19,1113 @@ import json
 import threading
 import logging
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 from enhanced_config_manager import ModuleConfig
 
 # Set up module logger
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# DATA STRUCTURES
+# ============================================================================
+# These classes define the structure of data we work with
+
 @dataclass
 class TrackedPiece:
-    """A class representing a detected and tracked Lego piece"""
-    id: int  # Unique identifier
-    bbox: Tuple[int, int, int, int]  # x, y, width, height
-    contour: np.ndarray  # Contour points
-    first_detected: float  # Timestamp when first detected
-    last_updated: float  # Timestamp when last updated
-    captured: bool = False  # Whether this piece has been captured
-    update_count: int = 1  # Number of frames this piece has been tracked
-    center: Tuple[float, float] = None  # Center point (calculated from bbox)
-    being_processed: bool = False  # Flag for pieces being processed by worker thread
-    processing_start_time: Optional[float] = None  # When processing started
-    updated: bool = True  # Whether this piece was updated in the current frame
-    in_exit_zone: bool = False  # Whether this piece is in the exit zone
-    exit_zone_entry_time: Optional[float] = None  # When the piece entered the exit zone
-    triggered_servo: bool = False  # Whether this piece has triggered servo movement
+    """
+    Represents a single Lego piece being tracked on the conveyor.
+
+    This class now includes velocity tracking and motion prediction to improve
+    tracking accuracy and enable better servo timing predictions.
+    """
+    # Basic identification
+    id: int  # Unique ID for this piece
+    bbox: Tuple[int, int, int, int]  # Bounding box (x, y, width, height)
+    contour: np.ndarray  # Actual shape outline
+
+    # Timing information
+    first_detected: float  # When we first saw this piece
+    last_updated: float  # When we last confirmed it's still there
+
+    # Status flags
+    captured: bool = False  # Has image been saved?
+    being_processed: bool = False  # Is API currently analyzing it?
+    fully_in_frame: bool = False  # Is entire piece visible?
+
+    # Zone tracking
+    in_exit_zone: bool = False  # Is it in the exit zone?
+    exit_zone_entry_time: Optional[float] = None  # When did it enter exit zone?
+
+    # Processing information
+    processing_start_time: Optional[float] = None  # When did processing start?
+    target_bin: Optional[int] = None  # Which bin should it go to?
+
+    # Tracking metrics
+    update_count: int = 1  # How many frames has it appeared in?
+    center: Tuple[float, float] = None  # Center point of piece
+
+    # NEW: Motion tracking fields for velocity and prediction
+    velocity: Tuple[float, float] = (0.0, 0.0)  # Speed in pixels/second (x, y)
+    trajectory: List[Tuple[float, float, float]] = None  # History of (x, y, timestamp)
+    predicted_exit_time: Optional[float] = None  # When will piece fall off conveyor?
+
+    # NEW: Cached calculations to avoid redundant math
+    right_edge: float = 0.0  # Rightmost x-coordinate
+    left_edge: float = 0.0  # Leftmost x-coordinate
+    area: float = 0.0  # Area of bounding box
 
     def __post_init__(self):
-        """Calculate derived properties"""
+        """
+        Calculate derived properties after creation.
+        This runs automatically when a TrackedPiece is created.
+        """
+        self.update_derived_properties()
+        # Initialize trajectory history with first position
+        self.trajectory = [(self.center[0], self.center[1], self.first_detected)]
+
+    def update_derived_properties(self):
+        """
+        Recalculate all derived values from the bounding box.
+        This centralizes calculations so we do them once instead of repeatedly.
+
+        Call this whenever bbox changes to update all dependent values.
+        """
         x, y, w, h = self.bbox
+        # Calculate center point once
         self.center = (x + w / 2, y + h / 2)
+        # Cache edge positions for quick access
+        self.right_edge = x + w
+        self.left_edge = x
+        # Cache area for quick access
+        self.area = w * h
 
-    def get_right_edge(self) -> float:
-        """Get the x-coordinate of the right edge of the piece"""
-        x, _, w, _ = self.bbox
-        return x + w
+    def update_motion(self, new_center: Tuple[float, float], timestamp: float):
+        """
+        Update velocity and trajectory based on new position.
 
-
-class ConveyorDetector:
-    """Detector for Lego pieces on a moving conveyor belt"""
-
-    def __init__(self, config_manager=None):
-        """Initialize conveyor detector with configuration
+        This tracks how fast and in what direction the piece is moving,
+        allowing us to predict where it will be in future frames.
 
         Args:
-            config_manager: Configuration manager object, or None to use defaults
+            new_center: Current center position (x, y)
+            timestamp: Current time in seconds
         """
-        # NEW: Get validated configurations with all defaults
-        if config_manager:
-            self.detector_config = config_manager.get_module_config(ModuleConfig.DETECTOR.value)
-            self.roi_config = config_manager.get_module_config(ModuleConfig.DETECTOR_ROI.value)
-        else:
-            # Use schema defaults if no config manager
-            from enhanced_config_manager import ConfigSchema
-            self.detector_config = ConfigSchema.get_module_schema(ModuleConfig.DETECTOR.value)
-            self.roi_config = ConfigSchema.get_module_schema(ModuleConfig.DETECTOR_ROI.value)
+        if self.trajectory is None:
+            self.trajectory = []
 
-        # Extract detector parameters - all guaranteed to exist
-        self.min_area = self.detector_config["min_area"]
-        self.max_area = self.detector_config["max_area"]
-        self.min_aspect_ratio = self.detector_config["min_aspect_ratio"]
-        self.max_aspect_ratio = self.detector_config["max_aspect_ratio"]
-        self.edge_margin = self.detector_config["edge_margin"]
-        self.debug_mode = self.detector_config.get("debug_mode", False)
+        # Calculate velocity if we have previous positions
+        if len(self.trajectory) > 0:
+            last_x, last_y, last_time = self.trajectory[-1]
+            dt = timestamp - last_time
 
-        # Extract ROI parameters - all guaranteed to exist
-        self.roi_x = self.roi_config["x"]
-        self.roi_y = self.roi_config["y"]
-        self.roi_w = self.roi_config["w"]
-        self.roi_h = self.roi_config["h"]
-        self.entry_zone_width = self.roi_config["entry_zone_width"]
-        self.exit_zone_width = self.roi_config["exit_zone_width"]
-
-        # Calculate zone boundaries
-        self.entry_boundary = self.roi_x + self.entry_zone_width
-        self.exit_boundary = self.roi_x + self.roi_w - self.exit_zone_width
-
-        # Initialize tracking structures
-        self.tracked_pieces = {}
-        self.piece_id_counter = 0
-        self.background_subtractor = cv2.createBackgroundSubtractorMOG2(
-            detectShadows=False
-        )
-
-        # Debug settings
-        if self.debug_mode:
-            logger.info(f"ConveyorDetector initialized with ROI: "
-                        f"({self.roi_x}, {self.roi_y}, {self.roi_w}, {self.roi_h})")
-
-    def load_roi_from_config(self, frame, config_manager=None):
-        """Load ROI from configuration if available, otherwise calibrate manually.
-
-        Args:
-            frame: The video frame to use for calibration if needed
-            config_manager: Configuration manager with ROI settings (optional)
-
-        Returns:
-            tuple: The selected/loaded ROI as (x, y, w, h)
-        """
-        if config_manager is None:
-            config_manager = self.config_manager
-
-        # Check if we should load from config
-        load_from_config = self.config.get("load_roi_from_config", True)
-        logger.info(f"load_roi_from_config parameter value: {load_from_config}")
-
-        if load_from_config and config_manager:
-            # Try to load ROI from config
-            roi_config = config_manager.get_section("detector_roi")
-            logger.info(f"ROI config from config_manager: {roi_config}")
-
-            # Validate ROI configuration
-            if (roi_config and
-                    "x" in roi_config and "y" in roi_config and
-                    "w" in roi_config and "h" in roi_config and
-                    roi_config["w"] > 0 and roi_config["h"] > 0):
-
-                # ROI exists in config, use it
-                roi = (roi_config["x"], roi_config["y"], roi_config["w"], roi_config["h"])
-                logger.info(f"Using ROI from config: {roi}")
-
-                with self.lock:
-                    self.set_roi(frame, roi)
-
-                return roi
-            else:
-                logger.warning(f"Invalid ROI configuration found: {roi_config}")
-
-                # Use default ROI values
-                default_roi = (
-                    self.config["default_roi_x"],
-                    self.config["default_roi_y"],
-                    self.config["default_roi_w"],
-                    self.config["default_roi_h"]
+            # Only update velocity if enough time has passed (avoid divide by zero)
+            if dt > 0.001:  # At least 1 millisecond
+                # Velocity = distance / time for each axis
+                self.velocity = (
+                    (new_center[0] - last_x) / dt,  # Horizontal speed
+                    (new_center[1] - last_y) / dt  # Vertical speed
                 )
 
-                logger.info(f"Using default ROI: {default_roi}")
-                with self.lock:
-                    self.set_roi(frame, default_roi)
+        # Add current position to trajectory history
+        self.trajectory.append((new_center[0], new_center[1], timestamp))
 
-                # Save default ROI to config
-                if config_manager:
-                    roi_config = {
-                        "x": default_roi[0],
-                        "y": default_roi[1],
-                        "w": default_roi[2],
-                        "h": default_roi[3]
-                    }
-                    config_manager.update_section("detector_roi", roi_config)
-                    config_manager.save_config()
-                    logger.info("Default ROI saved to configuration")
+        # Keep only recent history (last 10 positions) to save memory
+        if len(self.trajectory) > 10:
+            self.trajectory.pop(0)
 
-                return default_roi
-        else:
-            logger.info(f"Manual calibration requested (load_from_config={load_from_config})")
-
-        # If we get here, use manual calibration
-        return self.calibrate(frame)
-
-    def set_roi(self, frame, roi):
-        """Set the ROI and initialize related zones and background model
-
-        Args:
-            frame: Video frame to use for initialization
-            roi: Tuple of (x, y, width, height) defining the ROI
+    def predict_position(self, future_time: float) -> Tuple[float, float]:
         """
-        self.roi = roi
-        x, y, w, h = roi
+        Predict where this piece will be at a future time.
 
-        # Calculate buffer zones with separate entry and exit zone percentages
-        entry_buffer_width = int(w * self.config["entry_zone_percent"])
-        exit_buffer_width = int(w * self.config["exit_zone_percent"])
-
-        self.entry_zone = (x, x + entry_buffer_width)
-        self.exit_zone = (x + w - exit_buffer_width, x + w)
-        self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
-
-        # Initialize background subtractor with KNN
-        self.bg_subtractor = cv2.createBackgroundSubtractorKNN(
-            history=self.config["bg_history"],
-            dist2Threshold=self.config["bg_threshold"],
-            detectShadows=False
-        )
-
-        # Extract ROI and initialize background model
-        roi_frame = frame[y:y + h, x:x + w]
-        # Apply several times to build initial model
-        for _ in range(30):
-            self.bg_subtractor.apply(roi_frame, learningRate=0.1)
-
-        logger.info(f"ROI set to {roi}")
-        logger.info(f"Entry zone: {self.entry_zone}")
-        logger.info(f"Valid zone: {self.valid_zone}")
-        logger.info(f"Exit zone: {self.exit_zone}")
-
-        print(f"ROI set to {roi}")
-        print(f"Entry zone: {self.entry_zone}")
-        print(f"Valid zone: {self.valid_zone}")
-        print(f"Exit zone: {self.exit_zone}")
-
-    def preprocess_frame(self, frame):
-        """Preprocess frame for background subtraction
+        Uses the piece's current velocity to extrapolate position.
+        This helps with matching pieces between frames and predicting
+        when they'll reach the exit zone.
 
         Args:
-            frame: Input video frame
+            future_time: Time to predict position for (in seconds)
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]: ROI image and foreground mask
+            Predicted (x, y) position
         """
-        if self.roi is None:
-            raise ValueError("ROI not set. Call calibrate() or set_roi() first.")
+        if self.trajectory and len(self.trajectory) > 0:
+            # Get most recent position
+            last_x, last_y, last_time = self.trajectory[-1]
 
-        # Extract ROI
+            # Calculate time difference
+            dt = future_time - last_time
+
+            # Extrapolate position using velocity
+            # New position = old position + velocity * time
+            predicted_x = last_x + self.velocity[0] * dt
+            predicted_y = last_y + self.velocity[1] * dt
+
+            return (predicted_x, predicted_y)
+
+        # If no trajectory, return current center
+        return self.center
+
+    def get_right_edge(self) -> float:
+        """Get the rightmost x-coordinate of the piece (now using cached value)"""
+        return self.right_edge
+
+    def get_left_edge(self) -> float:
+        """Get the leftmost x-coordinate of the piece (now using cached value)"""
+        return self.left_edge
+
+# ============================================================================
+# MAIN DETECTOR CLASS
+# ============================================================================
+
+class ConveyorDetector:
+    """
+    Main detector class that tracks Lego pieces on a moving conveyor belt.
+
+    The conveyor is divided into three zones:
+    1. Entry Zone - Where pieces first appear (we wait until they're fully visible)
+    2. Valid Zone - Where we can safely capture images
+    3. Exit Zone - Where we trigger the sorting servo
+    """
+
+    def __init__(self, config_manager=None):
+        """
+        Initialize the detector with configuration settings.
+
+        Args:
+            config_manager: Configuration manager with all settings
+        """
+        logger.info("Initializing ConveyorDetector")
+
+        # Load configuration
+        self._load_configuration(config_manager)
+
+        # Initialize ROI and zones (will be set during calibration)
+        self.roi = None
+        self.entry_zone = None
+        self.valid_zone = None
+        self.exit_zone = None
+
+        # Initialize tracking structures
+        self.tracked_pieces = []  # List of all pieces we're tracking
+        self.piece_id_counter = 0  # Counter for generating unique IDs
+        self.pieces_in_exit_zone = []  # Pieces currently in exit zone
+        self.current_priority_piece = None  # Piece that should trigger servo next
+
+        # Background subtraction for detecting movement
+        self.bg_subtractor = None  # Will be initialized when ROI is set
+
+        # Performance tracking
+        self.fps = 0.0
+        self.frame_count = 0
+        self.start_time = time.time()
+        self.last_fps_update = time.time()
+
+        # Timing controls
+        self.last_capture_time = 0
+        self.last_servo_trigger_time = 0
+
+        # Bin tracking for smart servo control
+        self.current_bin_position = 0  # Which bin is servo currently at?
+        self.bin_arrival_times = {}    # When did servo reach each bin?
+
+        # Thread safety
+        self.lock = threading.Lock()
+
+        logger.info("ConveyorDetector initialized successfully")
+
+    # ========================================================================
+    # CONFIGURATION SECTION
+    # ========================================================================
+    # These methods handle loading and managing configuration
+
+    def _load_configuration(self, config_manager):
+        """
+        Load all configuration values from the config manager.
+        This centralizes all config loading in one place.
+
+        Args:
+            config_manager: Configuration manager instance
+        """
+        if config_manager:
+            # Get module configurations
+            detector_config = config_manager.get_module_config(ModuleConfig.DETECTOR.value)
+            exit_zone_config = config_manager.get_module_config(ModuleConfig.EXIT_ZONE.value)
+
+            # Store complete configs for reference
+            self.config = detector_config
+            self.exit_zone_trigger_config = exit_zone_config
+
+            # Extract commonly used values
+            self.min_piece_area = detector_config["min_piece_area"]
+            self.max_piece_area = detector_config["max_piece_area"]
+            self.min_updates = detector_config["min_updates"]
+            self.capture_cooldown = detector_config.get("capture_min_interval", 0.5)
+            self.processing_timeout = detector_config.get("processing_timeout", 10.0)
+
+            # Background subtraction parameters
+            self.bg_history = detector_config["bg_history"]
+            self.bg_threshold = detector_config["bg_threshold"]
+            self.learn_rate = detector_config["learn_rate"]
+
+            # Morphological operation parameters
+            self.morph_kernel_size = detector_config["morph_kernel_size"]
+            self.gaussian_blur = detector_config["gaussian_blur"]
+
+            # Zone percentages
+            self.entry_zone_percent = detector_config["entry_zone_percent"]
+            self.exit_zone_percent = detector_config["exit_zone_percent"]
+
+            # Exit zone timing
+            self.fall_time = exit_zone_config["fall_time"]
+            self.exit_zone_enabled = exit_zone_config["enabled"]
+
+        else:
+            # Use defaults if no config manager
+            logger.warning("No config manager provided, using defaults")
+            self._set_default_configuration()
+
+    def _set_default_configuration(self):
+        """Set default configuration values when no config manager is available"""
+        self.min_piece_area = 1000
+        self.max_piece_area = 50000
+        self.min_updates = 5
+        self.capture_cooldown = 0.5
+        self.processing_timeout = 10.0
+        self.bg_history = 500
+        self.bg_threshold = 800
+        self.learn_rate = 0.005
+        self.morph_kernel_size = 5
+        self.gaussian_blur = 7
+        self.entry_zone_percent = 0.15
+        self.exit_zone_percent = 0.15
+        self.fall_time = 1.0
+        self.exit_zone_enabled = True
+
+    # ========================================================================
+    # ROI AND CALIBRATION SECTION
+    # ========================================================================
+    # These methods handle setting up the detection area
+
+    def load_roi_from_config(self, frame, config_manager):
+        """
+        Load ROI from saved configuration if available.
+
+        Args:
+            frame: Sample frame to validate ROI against
+            config_manager: Configuration manager with ROI settings
+
+        Returns:
+            bool: True if ROI was loaded successfully
+        """
+        if not config_manager:
+            logger.warning("No config manager provided for ROI loading")
+            return False
+
+        try:
+            roi_config = config_manager.get_module_config(ModuleConfig.DETECTOR_ROI.value)
+
+            x = roi_config.get("x", 0)
+            y = roi_config.get("y", 0)
+            w = roi_config.get("w", 100)
+            h = roi_config.get("h", 100)
+
+            # Validate ROI is within frame bounds
+            frame_h, frame_w = frame.shape[:2]
+            if x < 0 or y < 0 or x + w > frame_w or y + h > frame_h:
+                logger.error(f"ROI {(x, y, w, h)} is outside frame bounds {(frame_w, frame_h)}")
+                return False
+
+            # Set the ROI
+            self.set_roi((x, y, w, h), frame)
+            logger.info(f"ROI loaded from config: {(x, y, w, h)}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to load ROI from config: {e}")
+            return False
+
+    def set_roi(self, roi: Tuple[int, int, int, int], frame: np.ndarray):
+        """
+        Set the Region of Interest and initialize zones.
+
+        The ROI is divided into three zones:
+        - Entry Zone: Where pieces first appear (we wait for full visibility)
+        - Valid Zone: Where we can capture images
+        - Exit Zone: Where we trigger sorting
+
+        Args:
+            roi: Tuple of (x, y, width, height)
+            frame: Sample frame for initializing background subtraction
+        """
+        with self.lock:
+            self.roi = roi
+            x, y, w, h = roi
+
+            # Calculate zone boundaries
+            entry_width = int(w * self.entry_zone_percent)
+            exit_width = int(w * self.exit_zone_percent)
+
+            # Define zones as x-coordinate ranges
+            self.entry_zone = (x, x + entry_width)
+            self.exit_zone = (x + w - exit_width, x + w)
+            self.valid_zone = (self.entry_zone[1], self.exit_zone[0])
+
+            # Initialize background subtractor
+            self.bg_subtractor = cv2.createBackgroundSubtractorKNN(
+                history=self.bg_history,
+                dist2Threshold=self.bg_threshold,
+                detectShadows=False
+            )
+
+            # Train background model with initial frame
+            roi_frame = frame[y:y + h, x:x + w]
+            for _ in range(30):  # Multiple passes to build good model
+                self.bg_subtractor.apply(roi_frame, learningRate=0.1)
+
+            logger.info(f"ROI set to {roi}")
+            logger.info(f"Entry zone: x={self.entry_zone[0]} to x={self.entry_zone[1]}")
+            logger.info(f"Valid zone: x={self.valid_zone[0]} to x={self.valid_zone[1]}")
+            logger.info(f"Exit zone: x={self.exit_zone[0]} to x={self.exit_zone[1]}")
+
+    # ========================================================================
+    # FRAME PROCESSING SECTION
+    # ========================================================================
+    # These methods handle processing video frames to detect pieces
+
+    def process_frame_for_consumer(self, frame: np.ndarray) -> Dict[str, Any]:
+        """
+        Main entry point for the camera frame consumer system.
+        This method is called by the camera module for each frame.
+
+        Args:
+            frame: Video frame from camera
+
+        Returns:
+            Dictionary with visualization data for GUI
+        """
+        with self.lock:
+            if self.roi is None:
+                return {"error": "ROI not configured"}
+
+            # Update frame counter and FPS
+            self._update_fps()
+
+            # Process the frame to detect and track pieces
+            roi_img, mask = self._preprocess_frame(frame)
+            detected_pieces = self._detect_pieces_in_mask(mask)
+            self._update_tracking(detected_pieces)
+
+            # Check for any pieces that need processing
+            self._check_and_trigger_captures(frame)
+
+            # Return data for visualization (GUI will handle drawing)
+            return self.get_visualization_data()
+
+    def _update_fps(self):
+        """Update FPS calculation for performance monitoring"""
+        self.frame_count += 1
+        current_time = time.time()
+
+        if current_time - self.last_fps_update >= 1.0:
+            elapsed = current_time - self.start_time
+            self.fps = self.frame_count / elapsed if elapsed > 0 else 0
+            self.last_fps_update = current_time
+
+    def _preprocess_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Prepare frame for piece detection using background subtraction.
+
+        Args:
+            frame: Full video frame
+
+        Returns:
+            Tuple of (ROI image, foreground mask)
+        """
+        # Extract ROI from frame
         x, y, w, h = self.roi
         roi_img = frame[y:y + h, x:x + w].copy()
 
-        # Apply preprocessing with optimized parameters
-        blur_size = self.config["gaussian_blur"]
-        blurred = cv2.GaussianBlur(roi_img, (blur_size, blur_size), 0)
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(roi_img, (self.gaussian_blur, self.gaussian_blur), 0)
 
-        # Apply background subtraction
-        fg_mask = self.bg_subtractor.apply(blurred, learningRate=self.config["learn_rate"])
+        # Apply background subtraction to detect moving objects
+        fg_mask = self.bg_subtractor.apply(blurred, learningRate=self.learn_rate)
 
         # Clean up the mask with morphological operations
-        kernel = np.ones((self.config["morph_kernel_size"], self.config["morph_kernel_size"]), np.uint8)
-        mask_cleaned = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
-        mask_cleaned = cv2.morphologyEx(mask_cleaned, cv2.MORPH_CLOSE, kernel)
+        kernel = np.ones((self.morph_kernel_size, self.morph_kernel_size), np.uint8)
+        mask_cleaned = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)  # Remove noise
+        mask_cleaned = cv2.morphologyEx(mask_cleaned, cv2.MORPH_CLOSE, kernel)  # Fill gaps
 
         return roi_img, mask_cleaned
 
-    def detect_pieces(self, mask):
-        """Detect pieces in the foreground mask
+    def _detect_pieces_in_mask(self, mask: np.ndarray) -> List[Tuple[np.ndarray, Tuple[int, int, int, int], float]]:
+        """
+        Find pieces in the foreground mask with optimized processing.
+
+        This method now includes an early exit optimization: if the mask
+        doesn't have enough white pixels to form even the smallest valid piece,
+        we skip the expensive contour detection entirely.
 
         Args:
-            mask: Foreground mask from background subtraction
+            mask: Binary mask from background subtraction (white = movement)
 
         Returns:
-            List[Tuple[np.ndarray, Tuple[int, int, int, int]]]: List of (contour, bounding_box) pairs
+            List of (contour, bounding_box, area) tuples
+            Note: Now includes area to avoid recalculating it later
         """
-        # Find contours in the mask
+        # OPTIMIZATION: Quick check before expensive processing
+        # Count white pixels in mask
+        white_pixel_count = np.sum(mask > 0)
+
+        # If there aren't enough white pixels to make a valid piece, skip everything
+        if white_pixel_count < self.min_piece_area:
+            # Return empty list - no need to search for contours
+            return []
+
+        # Find contours (piece outlines) in the mask
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         detected_pieces = []
         for contour in contours:
-            # Filter by area
+            # Calculate area once and store it
             area = cv2.contourArea(contour)
-            if area < self.config["min_piece_area"] or area > self.config["max_piece_area"]:
-                continue
 
-            # Get bounding box
-            x, y, w, h = cv2.boundingRect(contour)
-            detected_pieces.append((contour, (x, y, w, h)))
+            # Filter by area to remove noise and too-large objects
+            if self.min_piece_area <= area <= self.max_piece_area:
+                # Get bounding box for the piece
+                x, y, w, h = cv2.boundingRect(contour)
+
+                # Store area with the detection to avoid recalculating
+                detected_pieces.append((contour, (x, y, w, h), area))
 
         return detected_pieces
 
-    def update_tracking(self, detected_pieces):
-        """Update tracking with newly detected pieces and prevent duplicates after capture.
+    # ========================================================================
+    # TRACKING SECTION
+    # ========================================================================
+    # These methods handle tracking pieces across frames
+
+    def _update_tracking(self, detected_pieces: List[Tuple[np.ndarray, Tuple[int, int, int, int], float]]):
+        """
+        Update tracking information for all pieces using motion prediction.
+
+        This enhanced version uses velocity-based prediction to better match
+        pieces between frames, especially when pieces are moving quickly.
 
         Args:
-            detected_pieces: List of (contour, bounding_box) pairs
+            detected_pieces: List of newly detected pieces (contour, bbox, area)
         """
         current_time = time.time()
 
-        # Mark all existing tracks as not updated
+        # Mark all existing pieces as not updated yet this frame
         for piece in self.tracked_pieces:
             piece.updated = False
 
-        # Match detected pieces with existing tracks
-        unmatched_detections = []
-        for contour, bbox in detected_pieces:
-            x, y, w, h = bbox
-            center = (x + w / 2, y + h / 2)
-
-            # Try to find matching track
-            matched = False
-            for piece in self.tracked_pieces:
-                dist = np.sqrt((center[0] - piece.center[0]) ** 2 + (center[1] - piece.center[1]) ** 2)
-                if dist < self.config["match_threshold"]:
-                    # Update existing track
-                    piece.bbox = bbox
-                    piece.contour = contour
-                    piece.last_updated = current_time
-                    piece.center = center
-                    piece.update_count += 1
-                    piece.updated = True
-
-                    # Check if the piece has entered or left the exit zone
-                    self.update_exit_zone_status(piece, current_time)
-
-                    matched = True
-                    break
-
-            if not matched:
-                unmatched_detections.append((contour, bbox, center))
-
-        # Create new tracks for unmatched detections, but avoid creating duplicates of captured pieces
-        for contour, bbox, center in unmatched_detections:
+        # Process each detected piece
+        for contour, bbox, area in detected_pieces:  # Now includes area
             x, y, w, h = bbox
 
-            # Only create tracks for pieces that have entered the ROI
-            if x >= self.entry_zone[0]:
-                # Check if this detection is close to any captured pieces
-                # This prevents creating duplicate tracks when a piece is captured but continues moving
-                close_to_captured = False
-                for piece in self.tracked_pieces:
-                    if piece.captured:
-                        dist = np.sqrt((center[0] - piece.center[0]) ** 2 + (center[1] - piece.center[1]) ** 2)
-                        # Use a slightly larger threshold for captured pieces to ensure we catch all potential
-                        # duplicates
-                        if dist < self.config["match_threshold"] * 1.5:
-                            close_to_captured = True
-                            # Update the captured piece's position since it's still moving
-                            piece.bbox = bbox
-                            piece.contour = contour
-                            piece.last_updated = current_time
-                            piece.center = center
-                            piece.updated = True
-                            # Update exit zone status for the captured piece
-                            self.update_exit_zone_status(piece, current_time)
-                            logger.debug(f"Updated captured piece ID {piece.id} instead of creating duplicate")
-                            break
+            # Check if piece is fully in frame (not cut off at entry)
+            piece_left_edge = x
 
-                # Only create a new track if it's not close to any captured piece
-                if not close_to_captured:
-                    new_piece = TrackedPiece(
-                        id=self.next_id,
-                        bbox=bbox,
-                        contour=contour,
-                        first_detected=current_time,
-                        last_updated=current_time
-                    )
-                    new_piece.updated = True
+            # Skip pieces that aren't fully past the entry zone
+            if piece_left_edge < (self.entry_zone[1] - self.roi[0]):
+                logger.debug(f"Skipping piece at x={piece_left_edge}, not fully in frame yet")
+                continue
 
-                    # Check if the new piece is already in the exit zone
-                    self.update_exit_zone_status(new_piece, current_time)
+            # Check if piece is within ROI bounds (not cut off at edges)
+            if x < 0 or y < 0 or x + w > self.roi[2] or y + h > self.roi[3]:
+                logger.debug(f"Skipping piece at {bbox}, partially outside ROI")
+                continue
 
-                    self.tracked_pieces.append(new_piece)
-                    self.next_id += 1
-                    logger.debug(f"Created new track ID {self.next_id - 1} at position {bbox}")
+            # Try to match to existing piece using motion prediction
+            matched_piece = self._match_to_existing_piece_with_prediction(bbox, current_time)
 
-        # Remove stale tracks
-        active_tracks = []
-        for piece in self.tracked_pieces:
-            # Keep if updated or recently updated
-            if piece.updated or (current_time - piece.last_updated) < self.config["track_timeout"]:
-                active_tracks.append(piece)
-            # Reset processing status if timeout exceeded
-            elif piece.being_processed:
-                if piece.processing_start_time is not None and (
-                        current_time - piece.processing_start_time > self.config["processing_timeout"]):
-                    logger.warning(f"Processing timeout for piece ID {piece.id}, resetting status")
-                    piece.being_processed = False
-                    piece.processing_start_time = None
-                    active_tracks.append(piece)
-                else:
-                    active_tracks.append(piece)
-            # Keep captured pieces longer to prevent immediate duplicate creation
-            elif piece.captured and (current_time - piece.last_updated) < (self.config["track_timeout"] * 2):
-                active_tracks.append(piece)
+            if matched_piece:
+                # Update existing piece
+                self._update_existing_piece(matched_piece, bbox, contour, current_time)
+            else:
+                # Create new tracked piece
+                self._create_new_piece(bbox, contour, current_time)
 
-        # Update tracked pieces list
-        removed_count = len(self.tracked_pieces) - len(active_tracks)
-        if removed_count > 0:
-            logger.debug(f"Removed {removed_count} stale tracks")
+        # Remove pieces that haven't been seen recently
+        self._remove_stale_pieces(current_time)
 
-        self.tracked_pieces = active_tracks
+        # Update zone status for all pieces
+        self._update_zone_status()
 
-        # Update the list of pieces in the exit zone
-        self.update_exit_zone_pieces()
+        # NEW: Calculate exit predictions for pieces
+        self._update_exit_predictions()
 
-    def update_exit_zone_status(self, piece, current_time):
-        """Update whether a piece is in the exit zone
+    def _match_to_existing_piece_with_prediction(self, bbox: Tuple[int, int, int, int],
+                                                 current_time: float) -> Optional[TrackedPiece]:
+        """
+        Match a detected piece to an existing tracked piece using motion prediction.
+
+        This improved version predicts where existing pieces SHOULD be based on
+        their velocity, making tracking more accurate for fast-moving pieces.
 
         Args:
-            piece: The TrackedPiece to update
+            bbox: Bounding box of detected piece
             current_time: Current timestamp
-        """
-        if self.exit_zone is None:
-            return
-
-        x, y, w, h = piece.bbox
-        right_edge = x + w
-
-        # Check if piece is in exit zone
-        in_exit_zone = x >= self.exit_zone[0] and x < self.exit_zone[1]
-
-        # If piece just entered the exit zone
-        if in_exit_zone and not piece.in_exit_zone:
-            piece.in_exit_zone = True
-            piece.exit_zone_entry_time = current_time
-            logger.info(f"Piece ID {piece.id} entered exit zone")
-
-        # If piece just left the exit zone
-        elif not in_exit_zone and piece.in_exit_zone:
-            piece.in_exit_zone = False
-            piece.exit_zone_entry_time = None
-            logger.info(f"Piece ID {piece.id} left exit zone")
-
-    def update_exit_zone_pieces(self):
-        """Update the list of pieces currently in the exit zone"""
-        # Clear the current list
-        self.pieces_in_exit_zone = []
-
-        # Add all pieces currently in the exit zone that haven't been processed
-        # and haven't been captured by the traditional method
-        for piece in self.tracked_pieces:
-            if piece.in_exit_zone and not piece.triggered_servo and not piece.captured:
-                self.pieces_in_exit_zone.append(piece)
-
-        # Sort the pieces based on the priority method
-        if self.pieces_in_exit_zone:
-            priority_method = self.exit_zone_trigger_config.get("priority_method", "rightmost")
-
-            if priority_method == "rightmost":
-                # Sort by x position (rightmost first)
-                self.pieces_in_exit_zone.sort(key=lambda p: p.get_right_edge(), reverse=True)
-            elif priority_method == "first_in":
-                # Sort by time entered exit zone (earliest first)
-                self.pieces_in_exit_zone.sort(key=lambda p: p.exit_zone_entry_time or float('inf'))
-
-            # Update the current priority piece
-            if self.pieces_in_exit_zone:
-                self.current_priority_piece = self.pieces_in_exit_zone[0]
-            else:
-                self.current_priority_piece = None
-
-    def get_priority_exit_zone_piece(self):
-        """Get the highest priority piece in the exit zone
 
         Returns:
-            Optional[TrackedPiece]: The priority piece or None if no pieces in exit zone
+            Matched TrackedPiece or None if no match found
+        """
+        x, y, w, h = bbox
+        new_center = (x + w / 2, y + h / 2)
+
+        # Store candidates with their matching scores
+        candidates = []
+
+        for piece in self.tracked_pieces:
+            if piece.updated:  # Skip if already matched in this frame
+                continue
+
+            # IMPROVEMENT: Use predicted position instead of last known position
+            if piece.velocity != (0.0, 0.0) and len(piece.trajectory) > 1:
+                # Piece is moving - predict where it should be now
+                predicted_center = piece.predict_position(current_time)
+
+                # Use larger search radius for moving pieces (they're less predictable)
+                search_radius = self.config.get("match_threshold", 50) * 1.5
+            else:
+                # Piece just appeared or isn't moving - use last known position
+                predicted_center = piece.center
+                search_radius = self.config.get("match_threshold", 50)
+
+            # Calculate distance between detected position and predicted position
+            distance = np.sqrt(
+                (new_center[0] - predicted_center[0]) ** 2 +
+                (new_center[1] - predicted_center[1]) ** 2
+            )
+
+            # If within search radius, add as candidate
+            if distance < search_radius:
+                candidates.append((piece, distance))
+
+        # Return the closest match if any candidates found
+        if candidates:
+            # Sort by distance and return closest
+            candidates.sort(key=lambda x: x[1])
+            best_match = candidates[0][0]
+
+            logger.debug(f"Matched piece {best_match.id} with distance {candidates[0][1]:.1f}")
+            return best_match
+
+        return None
+
+    def _update_existing_piece(self, piece: TrackedPiece, bbox: Tuple[int, int, int, int], contour: np.ndarray, current_time: float):
+        """
+        Update information for an existing tracked piece including motion data.
+
+        This enhanced version also updates velocity and trajectory information
+        for better prediction in future frames.
+
+        Args:
+            piece: Existing TrackedPiece to update
+            bbox: New bounding box
+            contour: New contour
+            current_time: Current timestamp
+        """
+        # Update basic properties
+        piece.bbox = bbox
+        piece.contour = contour
+        piece.last_updated = current_time
+        piece.update_count += 1
+        piece.updated = True
+
+        # OPTIMIZATION: Update all derived properties at once
+        piece.update_derived_properties()
+
+        # NEW: Update motion tracking (velocity and trajectory)
+        piece.update_motion(piece.center, current_time)
+
+        # Check if piece is now fully in frame
+        if not piece.fully_in_frame:
+            if piece.left_edge >= (self.entry_zone[1] - self.roi[0]):
+                piece.fully_in_frame = True
+                logger.info(f"Piece {piece.id} is now fully in frame")
+
+    def _create_new_piece(self, bbox: Tuple[int, int, int, int],
+                         contour: np.ndarray, current_time: float):
+        """
+        Create a new tracked piece.
+
+        Args:
+            bbox: Bounding box of new piece
+            contour: Contour of new piece
+            current_time: Current timestamp
+        """
+        new_piece = TrackedPiece(
+            id=self.piece_id_counter,
+            bbox=bbox,
+            contour=contour,
+            first_detected=current_time,
+            last_updated=current_time,
+            fully_in_frame=True  # We only create pieces that are fully visible
+        )
+
+        self.tracked_pieces.append(new_piece)
+        self.piece_id_counter += 1
+        logger.info(f"New piece detected: ID {new_piece.id}")
+
+    def _remove_stale_pieces(self, current_time: float):
+        """
+        Remove pieces that haven't been seen recently.
+
+        Args:
+            current_time: Current timestamp
+        """
+        timeout = self.config.get("track_timeout", 1.0)
+
+        # Remove pieces that haven't been updated recently
+        self.tracked_pieces = [
+            p for p in self.tracked_pieces
+            if (current_time - p.last_updated) < timeout
+        ]
+
+    def _update_zone_status(self):
+        """
+        Update which zone each piece is in.
+        This determines if pieces are in entry, valid, or exit zones.
+        """
+        self.pieces_in_exit_zone = []
+
+        for piece in self.tracked_pieces:
+            # Get piece position relative to full frame
+            piece_center_x = piece.center[0] + self.roi[0]
+
+            # Check which zone the piece is in
+            if piece_center_x >= self.exit_zone[0]:
+                # Piece is in exit zone
+                if not piece.in_exit_zone:
+                    piece.in_exit_zone = True
+                    piece.exit_zone_entry_time = time.time()
+                    logger.info(f"Piece {piece.id} entered exit zone")
+                self.pieces_in_exit_zone.append(piece)
+            else:
+                # Piece is not in exit zone
+                piece.in_exit_zone = False
+                piece.exit_zone_entry_time = None
+
+    def _update_exit_predictions(self):
+        """
+        Calculate when each piece will reach the drop-off point.
+
+        This allows the system to prepare the servo in advance rather than
+        reacting at the last moment when a piece enters the exit zone.
+        """
+        for piece in self.tracked_pieces:
+            # Only predict for pieces moving toward exit (positive x velocity)
+            if piece.velocity[0] > 0:
+                # Calculate distance to drop-off point
+                exit_x = self.exit_zone[1]  # Rightmost edge of exit zone
+                current_x = piece.center[0] + self.roi[0]  # Piece position in frame
+                distance_to_exit = exit_x - current_x
+
+                # Calculate time until piece reaches drop-off
+                # Time = Distance / Speed
+                time_to_exit = distance_to_exit / piece.velocity[0]
+
+                # Store predicted exit time
+                piece.predicted_exit_time = time.time() + time_to_exit
+
+                # Log if piece will exit soon
+                if time_to_exit < 2.0:  # Less than 2 seconds until drop
+                    logger.debug(f"Piece {piece.id} will exit in {time_to_exit:.1f} seconds")
+            else:
+                # Piece not moving toward exit or stationary
+                piece.predicted_exit_time = None
+
+    def get_prioritized_exit_pieces(self) -> List[TrackedPiece]:
+        """
+        Get pieces sorted by urgency (closest to falling off conveyor).
+
+        This method helps the servo controller plan movements by knowing
+        which pieces will need sorting first.
+
+        Returns:
+            List of pieces sorted by predicted exit time (soonest first)
+        """
+        exit_pieces = []
+
+        for piece in self.tracked_pieces:
+            # Only include pieces with valid exit predictions
+            if piece.predicted_exit_time is not None:
+                # Check if piece will exit within reasonable timeframe (10 seconds)
+                time_until_exit = piece.predicted_exit_time - time.time()
+                if 0 < time_until_exit < 10.0:
+                    exit_pieces.append(piece)
+
+        # Sort by predicted exit time (soonest first)
+        exit_pieces.sort(key=lambda p: p.predicted_exit_time)
+
+        return exit_pieces
+
+    def get_piece_time_to_exit(self, piece_id: int) -> Optional[float]:
+        """
+        Get the time remaining until a specific piece falls off the conveyor.
+
+        This is useful for the servo controller to know exactly when to trigger.
+
+        Args:
+            piece_id: ID of the piece to check
+
+        Returns:
+            Time in seconds until piece exits, or None if piece not found
+        """
+        with self.lock:
+            for piece in self.tracked_pieces:
+                if piece.id == piece_id:
+                    if piece.predicted_exit_time:
+                        return piece.predicted_exit_time - time.time()
+                    else:
+                        return None
+            return None
+
+    # ========================================================================
+    # CAPTURE AND PROCESSING SECTION
+    # ========================================================================
+    # These methods determine when to capture images and trigger processing
+
+    def _check_and_trigger_captures(self, frame: np.ndarray):
+        """
+        Check if any pieces need to be captured or processed.
+
+        This method handles two types of captures:
+        1. Exit zone pieces (high priority for servo triggering)
+        2. Valid zone pieces (normal capture for identification)
+
+        Args:
+            frame: Current video frame
+        """
+        current_time = time.time()
+
+        # First, check exit zone for high-priority pieces
+        if self.exit_zone_enabled:
+            exit_piece = self._check_exit_zone_trigger()
+            if exit_piece:
+                self._queue_piece_for_processing(exit_piece, frame, priority=0)
+                return  # Process one piece at a time
+
+        # Then check for normal captures in valid zone
+        if current_time - self.last_capture_time >= self.capture_cooldown:
+            capture_piece = self._check_for_normal_capture()
+            if capture_piece:
+                self._queue_piece_for_processing(capture_piece, frame, priority=1)
+
+    def _check_exit_zone_trigger(self) -> Optional[TrackedPiece]:
+        """
+        Check if a piece in exit zone should trigger processing.
+
+        This enhanced version uses exit time predictions to make better
+        decisions about when to trigger the servo.
+
+        Returns:
+            Piece to process or None
         """
         if not self.pieces_in_exit_zone:
             return None
 
-        # Return the highest priority piece (first in the sorted list)
-        return self.pieces_in_exit_zone[0] if self.pieces_in_exit_zone else None
-
-    def check_for_capture(self):
-        """Check if any piece should be captured
-
-        Returns:
-            Optional[TrackedPiece]: Piece to capture or None
-        """
         current_time = time.time()
 
-        # Don't capture if it's too soon after last capture
-        if current_time - self.last_capture_time < self.config["capture_cooldown"]:
+        # Find pieces that need urgent processing
+        urgent_pieces = []
+        for piece in self.pieces_in_exit_zone:
+            # Skip if already being handled
+            if piece.being_processed or piece.captured:
+                continue
+
+            # Check if we have exit prediction
+            if piece.predicted_exit_time:
+                time_until_exit = piece.predicted_exit_time - current_time
+
+                # If piece will fall off soon, mark as urgent
+                # Use fall_time as the threshold for "urgent"
+                if time_until_exit <= self.fall_time:
+                    urgent_pieces.append((time_until_exit, piece))
+
+        # If no urgent pieces, return None
+        if not urgent_pieces:
             return None
 
+        # Sort by urgency (soonest exit first)
+        urgent_pieces.sort(key=lambda x: x[0])
+        priority_piece = urgent_pieces[0][1]
+
+        # Check if we've waited long enough since last trigger
+        if current_time - self.last_servo_trigger_time < self.fall_time:
+            # Still processing previous piece
+            return None
+
+        logger.info(f"Exit zone trigger for piece {priority_piece.id} "
+                    f"(exits in {urgent_pieces[0][0]:.1f}s)")
+        self.last_servo_trigger_time = current_time
+        return priority_piece
+
+    def _check_for_normal_capture(self) -> Optional[TrackedPiece]:
+        """
+        Check if any piece in the valid zone should be captured.
+
+        Returns:
+            Piece to capture or None
+        """
         for piece in self.tracked_pieces:
-            # Skip if already captured or being processed
-            if piece.captured or piece.being_processed:
+            # Skip if already processed or not ready
+            if piece.captured or piece.being_processed or not piece.fully_in_frame:
                 continue
 
-            # Check if the piece has been tracked long enough
-            if piece.update_count < self.config["min_updates"]:
+            # Need minimum number of updates to ensure stable tracking
+            if piece.update_count < self.min_updates:
                 continue
 
-            # Check if the piece is in the valid zone
-            x, y, w, h = piece.bbox
-            if not (self.valid_zone[0] <= x <= self.valid_zone[1]):
-                continue
-
-            # If all checks pass, mark as captured and return
-            piece.captured = True
-            self.last_capture_time = current_time
-            logger.info(f"Selected piece ID {piece.id} for capture after {piece.update_count} updates")
-            return piece
+            # Check if in valid zone
+            piece_center_x = piece.center[0] + self.roi[0]
+            if self.valid_zone[0] <= piece_center_x <= self.valid_zone[1]:
+                logger.info(f"Normal capture for piece {piece.id}")
+                self.last_capture_time = time.time()
+                return piece
 
         return None
 
-    def check_for_servo_trigger(self):
-        """Check if a piece in the exit zone should trigger the servo
-
-        Returns:
-            Tuple[Optional[TrackedPiece], bool]: (Priority piece, trigger_servo flag)
+    def _queue_piece_for_processing(self, piece: TrackedPiece, frame: np.ndarray, priority: int):
         """
-        if not self.exit_zone_trigger_config.get("enabled", True):
-            return None, False
+        Queue a piece for processing by the thread manager.
 
-        current_time = time.time()
+        Args:
+            piece: Piece to process
+            frame: Current video frame
+            priority: Processing priority (0 = highest)
+        """
+        # Mark as being processed
+        piece.being_processed = True
+        piece.processing_start_time = time.time()
 
-        # Check cooldown time since last servo trigger
-        cooldown_time = self.exit_zone_trigger_config.get("cooldown_time", 0.5)
-        if current_time - self.last_servo_trigger_time < cooldown_time:
-            return self.current_priority_piece, False
+        # Crop piece image from frame
+        cropped_image = self._crop_piece_image(frame, piece)
 
-        # Get the piece with highest priority in the exit zone
-        priority_piece = self.get_priority_exit_zone_piece()
+        # Send to thread manager if available
+        if hasattr(self, 'thread_manager') and self.thread_manager:
+            self.thread_manager.add_message(
+                piece_id=piece.id,
+                image=cropped_image,
+                frame_number=self.frame_count,
+                position=piece.bbox,
+                priority=priority,
+                in_exit_zone=piece.in_exit_zone
+            )
+            logger.info(f"Queued piece {piece.id} with priority {priority}")
 
-        # If no pieces in exit zone, return None
-        if not priority_piece:
-            return None, False
-
-        # If the piece has already triggered the servo or has been captured by traditional method, skip
-        if priority_piece.triggered_servo or priority_piece.captured:
-            return priority_piece, False
-
-        # Check if the piece has been processed by the normal capture
-        if priority_piece.being_processed:
-            return priority_piece, False
-
-        # Trigger the servo for this piece
-        priority_piece.triggered_servo = True
-        self.last_servo_trigger_time = current_time
-        logger.info(f"Triggering servo for piece ID {priority_piece.id} in exit zone")
-
-        return priority_piece, True
-
-    def crop_piece_image(self, frame, piece):
-        """Crop the piece from the frame with padding and added space for text
+    def _crop_piece_image(self, frame: np.ndarray, piece: TrackedPiece) -> np.ndarray:
+        """
+        Extract the piece image from the full frame.
 
         Args:
             frame: Full video frame
-            piece: TrackedPiece to crop
+            piece: Piece to crop
 
         Returns:
-            np.ndarray: Cropped image of the piece with extra space for ID text
+            Cropped image of the piece
         """
-        # Get bounding box and add ROI offset
+        # Get piece position in full frame coordinates
         x, y, w, h = piece.bbox
         roi_x, roi_y = self.roi[0], self.roi[1]
-        x += roi_x
-        y += roi_y
 
-        # Add padding and ensure within frame bounds
-        pad = self.config["roi_padding"]
-        text_margin = self.config["text_margin_top"]  # Extra space at the top for text
+        # Convert to full frame coordinates
+        abs_x = roi_x + x
+        abs_y = roi_y + y
 
-        x1 = max(0, x - pad)
-        # Add extra space at the top for the number label
-        y1 = max(0, y - pad - text_margin)
-        x2 = min(frame.shape[1] - 1, x + w + pad)
-        y2 = min(frame.shape[0] - 1, y + h + pad)
+        # Add padding around piece
+        padding = self.config.get("crop_padding", 20)
+        x1 = max(0, abs_x - padding)
+        y1 = max(0, abs_y - padding)
+        x2 = min(frame.shape[1], abs_x + w + padding)
+        y2 = min(frame.shape[0], abs_y + h + padding)
 
-        # Create cropped image
-        cropped = frame[y1:y2, x1:x2].copy()
+        # Crop and return
+        return frame[y1:y2, x1:x2].copy()
 
-        return cropped
+    # ========================================================================
+    # DATA OUTPUT SECTION
+    # ========================================================================
+    # These methods provide data to other modules (mainly GUI)
 
-    def process_frame(self, frame, current_count=None):
-        """Process a video frame to detect and track pieces
-
-        Args:
-            frame: Input video frame
-            current_count: Current image counter (for filename numbering)
+    def get_visualization_data(self) -> Dict[str, Any]:
+        """
+        Get all detection data for visualization.
+        This is what the GUI uses to draw the detection overlay.
 
         Returns:
-            Tuple[List[TrackedPiece], Optional[np.ndarray], bool]:
-                List of tracked pieces, cropped image if a piece was captured, and increment signal
+            Dictionary with all visualization data
         """
         with self.lock:
             if self.roi is None:
-                raise ValueError("ROI not set. Call calibrate() or set_roi() first.")
+                return {"error": "ROI not configured"}
 
-            self.frame_count += 1
-
-            # Update FPS calculation
-            current_time = time.time()
-            if current_time - self.last_fps_update >= 1.0:
-                elapsed = current_time - self.start_time
-                self.fps = self.frame_count / elapsed if elapsed > 0 else 0
-                self.last_fps_update = current_time
-
-            # Preprocess and detect pieces
-            roi_img, mask = self.preprocess_frame(frame)
-            detected_pieces = self.detect_pieces(mask)
-
-            # Update tracking
-            self.update_tracking(detected_pieces)
-
-            # Check for servo trigger based on exit zone
-            priority_piece, trigger_servo = self.check_for_servo_trigger()
-
-            # If a piece should trigger the servo
-            if trigger_servo and priority_piece and self.thread_manager:
-                # Get cropped image
-                cropped_image = self.crop_piece_image(frame, priority_piece)
-
-                # Get the current image number
-                image_number = current_count
-
-                # Mark as being processed
-                priority_piece.being_processed = True
-                priority_piece.processing_start_time = current_time
-
-                # Add to processing queue with the highest priority (0)
-                self.thread_manager.add_message(
-                    piece_id=priority_piece.id,
-                    image=cropped_image.copy(),
-                    frame_number=image_number,
-                    position=priority_piece.bbox,
-                    priority=0  # Highest priority for exit zone pieces
-                )
-                logger.info(f"Added exit zone piece ID {priority_piece.id} to processing queue with highest priority")
-
-                # Return signal to increment camera count
-                return self.tracked_pieces, None, True
-
-            # Traditional capture method (now less important with exit zone trigger)
-            piece_to_capture = self.check_for_capture()
-
-            if piece_to_capture:
-                # If using thread manager, mark as being processed
-                if self.thread_manager:
-                    piece_to_capture.being_processed = True
-                    piece_to_capture.processing_start_time = current_time
-
-                    # Get cropped image
-                    cropped_image = self.crop_piece_image(frame, piece_to_capture)
-
-                    # Get the current image number (same as for exit zone pieces)
-                    image_number = current_count
-
-                    # Add to processing queue
-                    self.thread_manager.add_message(
-                        piece_id=piece_to_capture.id,
-                        image=cropped_image.copy(),
-                        frame_number=image_number,
-                        position=piece_to_capture.bbox,
-                        priority=1  # Lower priority than exit zone pieces
-                    )
-                    logger.info(f"Added piece ID {piece_to_capture.id} to processing queue")
-
-                    # Return signal to increment camera count
-                    return self.tracked_pieces, None, True
-
-            return self.tracked_pieces, None, False
-
-    def draw_debug(self, frame):
-        """Draw debug visualization on the frame
-
-        Args:
-            frame: Input video frame
-
-        Returns:
-            np.ndarray: Frame with debug visualization
-        """
-        with self.lock:
-            if self.roi is None:
-                return frame
-
-            debug_frame = frame.copy()
-            x, y, w, h = self.roi
-
-            # Draw ROI rectangle
-            cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-            # Draw entry and exit zones
-            cv2.line(debug_frame,
-                     (self.entry_zone[1], y),
-                     (self.entry_zone[1], y + h),
-                     (255, 0, 0), 2)  # Blue line for entry
-
-            cv2.line(debug_frame,
-                     (self.exit_zone[0], y),
-                     (self.exit_zone[0], y + h),
-                     (0, 0, 255), 2)  # Red line for exit zone start
-
-            # Highlight exit zone with semi-transparent overlay
-            exit_zone_overlay = debug_frame.copy()
-            cv2.rectangle(exit_zone_overlay,
-                          (self.exit_zone[0], y),
-                          (self.exit_zone[1], y + h),
-                          (0, 0, 255), -1)  # Filled red rectangle
-            cv2.addWeighted(exit_zone_overlay, 0.2, debug_frame, 0.8, 0, debug_frame)
-
-            # Draw tracked pieces
+            # Prepare tracked pieces data
+            pieces_data = []
             for piece in self.tracked_pieces:
-                # Get bounding box coordinates with ROI offset
-                px, py, pw, ph = piece.bbox
-                px += x  # Add ROI x offset
-                py += y  # Add ROI y offset
+                pieces_data.append({
+                    "id": piece.id,
+                    "bbox": piece.bbox,  # In ROI coordinates
+                    "fully_in_frame": piece.fully_in_frame,
+                    "being_processed": piece.being_processed,
+                    "captured": piece.captured,
+                    "in_exit_zone": piece.in_exit_zone,
+                    "update_count": piece.update_count,
+                    "is_priority": piece == self.current_priority_piece,
+                    "center": piece.center
+                })
 
-                # Different colors based on status
-                if piece == self.current_priority_piece:
-                    color = (255, 255, 0)  # Yellow for priority piece in exit zone
-                elif piece.being_processed:
-                    color = (255, 0, 255)  # Purple for being processed
-                elif piece.in_exit_zone:
-                    color = (0, 165, 255)  # Orange for in exit zone but not priority
-                elif piece.captured:
-                    color = (0, 255, 0)  # Green for captured
-                else:
-                    color = (0, 0, 255)  # Red for active but not captured
-
-                # Draw bounding box
-                cv2.rectangle(debug_frame, (px, py), (px + pw, py + ph), color, 2)
-
-                # Add ID and update count
-                if piece == self.current_priority_piece:
-                    label = f"ID:{piece.id} PRIORITY"
-                elif piece.in_exit_zone:
-                    label = f"ID:{piece.id} EXIT"
-                else:
-                    label = f"ID:{piece.id} U:{piece.update_count}"
-
-                cv2.putText(debug_frame, label, (px, py - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-
-            # Add performance info
-            cv2.putText(debug_frame, f"FPS: {self.fps:.1f}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-            cv2.putText(debug_frame, f"Tracked: {len(self.tracked_pieces)}", (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-            # Count pieces by status
-            active_count = sum(1 for p in self.tracked_pieces if not p.captured and not p.being_processed)
-            processing_count = sum(1 for p in self.tracked_pieces if p.being_processed)
-            captured_count = sum(1 for p in self.tracked_pieces if p.captured and not p.being_processed)
-            exit_zone_count = len(self.pieces_in_exit_zone)
-
-            cv2.putText(debug_frame,
-                        f"Active: {active_count} Processing: {processing_count} Captured: {captured_count}",
-                        (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-            # Add exit zone piece count
-            cv2.putText(debug_frame,
-                        f"Exit Zone: {exit_zone_count}",
-                        (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
-
-            # Show background subtraction result in corner if enabled
-            if self.config.get("show_bg_subtraction", True):
-                roi_img, mask = self.preprocess_frame(frame)
-                mask_small = cv2.resize(mask, (160, 90))
-                mask_color = cv2.cvtColor(mask_small, cv2.COLOR_GRAY2BGR)
-                mask_color = mask_color * np.array([0, 255, 0], dtype=np.uint8)  # Green mask
-
-                # Place mask in top right corner
-                h, w = debug_frame.shape[:2]
-                x_offset = w - 170
-                y_offset = 10
-                debug_frame[y_offset:y_offset + 90, x_offset:x_offset + 160] = mask_color
-
-            # Store latest debug frame
-            self.latest_debug_frame = debug_frame
-
-            return debug_frame
-
-    def get_visualization_data(self):
-        """Return data needed for visualization without drawing.
-
-        Returns:
-            dict: Data for UI visualization
-        """
-        with self.lock:
-            if self.roi is None:
-                return {}
-
-            # Prepare data dictionary with all elements needed for visualization
-            visualization_data = {
+            return {
                 "roi": self.roi,
                 "entry_zone": self.entry_zone,
+                "valid_zone": self.valid_zone,
                 "exit_zone": self.exit_zone,
+                "tracked_pieces": pieces_data,
                 "fps": self.fps,
-                "tracked_pieces": []
+                "frame_count": self.frame_count,
+                "pieces_in_exit_zone": len(self.pieces_in_exit_zone),
+                "active_pieces": sum(1 for p in self.tracked_pieces
+                                   if not p.captured and not p.being_processed),
+                "processing_pieces": sum(1 for p in self.tracked_pieces
+                                       if p.being_processed)
             }
 
-            # Convert tracked pieces to serializable format
-            for piece in self.tracked_pieces:
-                piece_data = {
-                    "id": piece.id,
-                    "bbox": piece.bbox,
-                    "update_count": piece.update_count,
-                    "captured": piece.captured,
-                    "being_processed": piece.being_processed,
-                    "center": piece.center
-                }
-                visualization_data["tracked_pieces"].append(piece_data)
+    def update_piece_result(self, piece_id: int, result: Dict[str, Any]):
+        """
+        Update a piece with processing results.
+        Called when API identification is complete.
 
-            return visualization_data
+        Args:
+            piece_id: ID of processed piece
+            result: Processing results including bin assignment
+        """
+        with self.lock:
+            for piece in self.tracked_pieces:
+                if piece.id == piece_id:
+                    piece.target_bin = result.get("bin_number")
+                    piece.captured = True
+                    piece.being_processed = False
+                    logger.info(f"Updated piece {piece_id} with bin {piece.target_bin}")
+                    break
+
+    # ========================================================================
+    # UTILITY SECTION
+    # ========================================================================
+    # Helper methods and cleanup
+
+    def set_thread_manager(self, thread_manager):
+        """
+        Set the thread manager for queuing pieces.
+
+        Args:
+            thread_manager: ThreadManager instance
+        """
+        self.thread_manager = thread_manager
+        logger.info("Thread manager connected to detector")
 
     def release(self):
-        """Release resources used by the detector"""
+        """
+        Clean up resources when shutting down.
+        """
         logger.info("Releasing detector resources")
-        # Currently no resources that need explicit release
-        # but adding for API consistency
         with self.lock:
             self.bg_subtractor = None
+            self.tracked_pieces = []
+            self.pieces_in_exit_zone = []
 
 
-# Factory function
-def create_detector(detector_type="conveyor", config_manager=None, thread_manager=None):
-    """Create a detector of the specified type
+# ============================================================================
+# FACTORY FUNCTION
+# ============================================================================
+# This is the main way to create a detector instance
+
+def create_detector(detector_type: str = "conveyor", config_manager=None) -> ConveyorDetector:
+    """
+    Create a detector instance of the specified type.
 
     Args:
-        detector_type: Type of detector ("conveyor" or future types)
-        config_manager: Configuration manager
-        thread_manager: Thread manager for asynchronous operation (not used by ConveyorDetector)
+        detector_type: Type of detector (currently only "conveyor" is supported)
+        config_manager: Configuration manager with settings
 
     Returns:
-        Detector instance
+        ConveyorDetector instance
+
+    Raises:
+        ValueError: If detector_type is not supported
     """
     logger.info(f"Creating detector of type: {detector_type}")
 
     if detector_type == "conveyor":
-        # ConveyorDetector only accepts config_manager parameter
-        # thread_manager is not used by ConveyorDetector
         return ConveyorDetector(config_manager)
     else:
-        error_msg = f"Unsupported detector type: {detector_type}. Currently only 'conveyor' is supported."
-        logger.error(error_msg)
-        raise ValueError(error_msg)
+        raise ValueError(f"Unsupported detector type: {detector_type}. Only 'conveyor' is supported.")
 
-# Simple configuration manager class for standalone testing
-class SimpleConfigManager:
-    """A simplified configuration manager for standalone testing"""
 
-    def __init__(self, config_path=None):
-        """Initialize with optional path to config file"""
-        self.config_path = config_path
-        self.config = {}
+# ============================================================================
+# STANDALONE TESTING
+# ============================================================================
+# This section only runs if the file is executed directly (not imported)
 
-        if config_path and os.path.exists(config_path):
-            self.load_config()
-        else:
-            # Default empty config
-            self.config = {
-                "detector": {},
-                "detector_roi": {}
-            }
+if __name__ == "__main__":
+    """Test detector with real camera feed"""
+    import sys
 
-    def load_config(self):
-        """Load configuration from file"""
-        try:
-            with open(self.config_path, 'r') as f:
-                self.config = json.load(f)
-            print(f"Loaded configuration from {self.config_path}")
-        except Exception as e:
-            print(f"Error loading configuration: {e}")
-            self.config = {
-                "detector": {},
-                "detector_roi": {}
-            }
+    logging.basicConfig(level=logging.INFO)
 
-    def save_config(self):
-        """Save configuration to file"""
-        if self.config_path:
-            try:
-                with open(self.config_path, 'w') as f:
-                    json.dump(self.config, f, indent=4)
-                print(f"Saved configuration to {self.config_path}")
-            except Exception as e:
-                print(f"Error saving configuration: {e}")
+    # Import camera module for real testing
+    from camera_module import create_camera
 
-    def get_section(self, section):
-        """Get a configuration section"""
-        return self.config.get(section, {})
+    print("Detector Module Camera Test")
+    print("===========================")
+    print("Press 'q' to quit, 's' to simulate a piece")
 
-    def update_section(self, section, values):
-        """Update a section with new values"""
-        if section not in self.config:
-            self.config[section] = {}
-        self.config[section].update(values)
+    # Create real camera and detector
+    camera = create_camera()
+    detector = create_detector("conveyor")
 
-    def set(self, section, key, value):
-        """Set a specific configuration value"""
-        if section not in self.config:
-            self.config[section] = {}
-        self.config[section][key] = value
+    # Get first frame to set ROI
+    camera.initialize()
+    ret, frame = camera.cap.read()
+
+    if ret:
+        # Set ROI (you might want to adjust these values)
+        detector.set_roi((400, 200, 800, 400), frame)
+
+        # Process frames from camera
+        while True:
+            ret, frame = camera.cap.read()
+            if not ret:
+                break
+
+            # Process frame
+            result = detector.process_frame_for_consumer(frame)
+
+            # Show statistics
+            print(f"\rFPS: {result.get('fps', 0):.1f} | "
+                  f"Active: {result.get('active_pieces', 0)} | "
+                  f"Processing: {result.get('processing_pieces', 0)} | "
+                  f"Exit Zone: {result.get('pieces_in_exit_zone', 0)}",
+                  end='')
+
+            # Display frame with basic visualization
+            display_frame = frame.copy()
+            if 'roi' in result:
+                x, y, w, h = result['roi']
+                cv2.rectangle(display_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+            cv2.imshow('Detector Test', display_frame)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                break
+            elif key == ord('s'):
+                print("\n[Simulating piece detection]")
+
+    # Cleanup
+    cv2.destroyAllWindows()
+    camera.release()
+    detector.release()
+    print("\nTest complete!")

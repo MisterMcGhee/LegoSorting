@@ -7,7 +7,12 @@
         "fps": 30,
         "auto_exposure": true,
         "directory": "LegoPictures",
-        "filename_prefix": "Lego"
+        "filename_prefix": "Lego",
+        "resolution": [
+            1920,
+            1080
+        ],
+        "exposure": 0
     },
     "detector": {
         "detector_type": "conveyor",
@@ -38,7 +43,8 @@
         "default_roi_y": 200,
         "default_roi_w": 1550,
         "default_roi_h": 500,
-        "show_bg_subtraction": true
+        "show_bg_subtraction": true,
+        "threshold": 30
     },
     "piece_identifier": {
         "csv_path": "Lego_Categories.csv",
@@ -183,5 +189,21 @@
         "strict_mode": false,
         "auto_fix": true
     },
-    "version": "2.1"
+    "version": "2.1",
+    "api": {
+        "api_type": "rebrickable",
+        "api_key": "",
+        "cache_enabled": true,
+        "cache_dir": "api_cache",
+        "timeout": 10,
+        "retry_count": 3,
+        "rate_limit": 5.0,
+        "mode": "Production"
+    },
+    "system": {
+        "threading_enabled": true,
+        "queue_size": 100,
+        "log_level": "DEBUG",
+        "save_images": true
+    }
 }

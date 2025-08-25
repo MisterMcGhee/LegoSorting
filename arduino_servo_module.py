@@ -107,6 +107,7 @@ class ArduinoServoModule:
         self.max_bins = max_bins
         logger.info(f"Updated max_bins to {max_bins}")
         # Positions will be recalculated by calling _calculate_bin_positions()
+
     def _calculate_bin_positions(self):
         """Calculate bin positions dynamically based on max_bins and minimum bin separation"""
         # Bin 0 (overflow bin) is always at 0 degrees
