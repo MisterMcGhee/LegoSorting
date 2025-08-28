@@ -799,6 +799,28 @@ class PieceQueueManager:
             except Exception as e:
                 logger.error(f"Error in callback for {event_type}: {e}")
 
+    def trigger_external_callback(self, event: str, **kwargs):
+        """
+        Allow external modules (like ProcessingWorker) to trigger callbacks.
+
+        This method allows the processing module to notify other parts of the
+        system when pieces are processed, failed, etc.
+
+        Args:
+            event: Event type ('piece_processed', 'piece_failed', etc.)
+            **kwargs: Event-specific data (piece_id, result, etc.)
+
+        Example:
+            # From processing module after successful processing:
+            queue_manager.trigger_external_callback(
+                'piece_processed',
+                piece_id=message.piece_id,
+                result=result
+            )
+        """
+        # Use the existing internal method
+        self._trigger_callbacks(event, **kwargs)
+
     # ========================================================================
     # UTILITY SECTION
     # ========================================================================

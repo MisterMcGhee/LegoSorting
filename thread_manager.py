@@ -121,9 +121,6 @@ class ThreadManager:
     def __init__(self, config_manager=None):
         """
         Initialize the thread manager.
-
-        Args:
-            config_manager: Optional configuration manager for loading settings
         """
         logger.info("Initializing ThreadManager")
 
@@ -131,29 +128,53 @@ class ThreadManager:
         self._load_configuration(config_manager)
 
         # ====== Thread Storage ======
-        # All thread-related data is stored in these dictionaries
-        self.workers: Dict[str, threading.Thread] = {}  # name -> thread object
-        self.worker_configs: Dict[str, WorkerConfig] = {}  # name -> configuration
-        self.worker_stats: Dict[str, WorkerStatistics] = {}  # name -> statistics
-        self.worker_locks: Dict[str, threading.RLock] = {}  # name -> lock for that worker
+        self.workers: Dict[str, threading.Thread] = {}
+        self.worker_configs: Dict[str, WorkerConfig] = {}
+        self.worker_stats: Dict[str, WorkerStatistics] = {}
+        self.worker_locks: Dict[str, threading.RLock] = {}
 
         # ====== Control Flags ======
-        # These control the overall state of the thread manager
-        self.running = True  # Global running flag
-        self.shutdown_event = threading.Event()  # Signals shutdown to all threads
+        self.running = True
+        self.shutdown_event = threading.Event()
 
         # ====== Thread Safety ======
-        # Main lock for thread-safe operations on worker dictionaries
         self._lock = threading.RLock()
 
-        # ====== Health Monitoring ======
-        # Optional health check thread for monitoring worker health
+        # ============================================================
+        # ADD NEW CODE HERE - AFTER EXISTING ATTRIBUTES
+        # ============================================================
+
+        # ====== Named Resource Locks (NEW) ======
+        # These provide thread safety for shared resources
+        self.resource_locks = {
+            'api': threading.RLock(),  # For API calls
+            'servo': threading.RLock(),  # For servo movements
+            'sorting': threading.RLock(),  # For sorting decisions
+            'history': threading.RLock(),  # For piece history
+        }
+
+        # ====== System Callbacks (NEW) ======
+        # For worker lifecycle events
+        self.system_callbacks = {
+            'worker_started': [],  # When a worker starts
+            'worker_stopped': [],  # When a worker stops
+            'worker_failed': [],  # When a worker crashes
+            'worker_restarted': [],  # When a worker is restarted
+            'system_shutdown': [],  # When system is shutting down
+        }
+
+        logger.info("ThreadManager initialized with resource locks and callbacks")
+
+        # ============================================================
+        # END OF NEW CODE - EXISTING CODE CONTINUES BELOW
+        # ============================================================
+
+        # ====== Health Monitoring (EXISTING) ======
         self.health_monitor_thread = None
         if self.enable_health_monitoring:
             self._start_health_monitor()
 
-        # ====== Statistics ======
-        # Global statistics for the thread manager itself
+        # ====== Statistics (EXISTING) ======
         self.global_stats = {
             "total_workers_created": 0,
             "total_restarts": 0,
@@ -162,6 +183,112 @@ class ThreadManager:
         }
 
         logger.info(f"ThreadManager initialized with health_monitoring={self.enable_health_monitoring}")
+
+    def with_lock(self, resource_name: str, func: Callable, *args, **kwargs) -> Any:
+        """
+        Execute a function with a resource lock for thread safety.
+
+        This method ensures that only one thread can access a resource at a time,
+        preventing race conditions and data corruption.
+
+        Args:
+            resource_name: Name of resource to lock ('api', 'servo', 'sorting', 'history')
+            func: Function to execute with the lock held
+            *args: Positional arguments for the function
+            **kwargs: Keyword arguments for the function
+
+        Returns:
+            Whatever the function returns
+
+        Example:
+            # Thread-safe API call
+            result = thread_manager.with_lock('api', api_client.send_to_api, image_path)
+
+            # Thread-safe servo movement
+            success = thread_manager.with_lock('servo', servo.move_to_bin, bin_number)
+        """
+        # Create lock if it doesn't exist
+        if resource_name not in self.resource_locks:
+            logger.warning(f"Creating new lock for resource: {resource_name}")
+            self.resource_locks[resource_name] = threading.RLock()
+
+        # Get the lock for this resource
+        lock = self.resource_locks[resource_name]
+
+        # Execute the function with the lock held
+        with lock:
+            try:
+                # Log for debugging (comment out in production for performance)
+                logger.debug(f"Executing {func.__name__} with lock '{resource_name}'")
+
+                # Execute the function
+                result = func(*args, **kwargs)
+
+                return result
+
+            except Exception as e:
+                logger.error(f"Error executing {func.__name__} with lock '{resource_name}': {e}")
+                raise
+
+    def create_lock(self, name: str) -> threading.RLock:
+        """
+        Create or get a named lock for a resource.
+
+        This allows modules to create their own locks if needed.
+
+        Args:
+            name: Name for the lock
+
+        Returns:
+            The lock object (RLock for reentrancy)
+        """
+        if name not in self.resource_locks:
+            self.resource_locks[name] = threading.RLock()
+            logger.info(f"Created new lock: {name}")
+
+        return self.resource_locks[name]
+
+# ========================================================================
+# CALLBACK MANAGEMENT SECTION
+# ========================================================================
+
+    def register_system_callback(self, event: str, callback: Callable) -> bool:
+        """
+        Register a callback for system-level events.
+
+        These are worker lifecycle events, not piece-specific events.
+
+        Args:
+            event: Event name ('worker_started', 'worker_stopped', etc.)
+            callback: Function to call when event occurs
+
+        Returns:
+            True if registered successfully
+        """
+        if event not in self.system_callbacks:
+            logger.warning(f"Unknown system event: {event}")
+            return False
+
+        self.system_callbacks[event].append(callback)
+        logger.debug(f"Registered system callback for event: {event}")
+        return True
+
+    def _trigger_system_callbacks(self, event: str, **kwargs):
+        """
+        Trigger all callbacks for a system event.
+
+        Args:
+            event: Event that occurred
+            **kwargs: Event-specific data
+        """
+        if event not in self.system_callbacks:
+            return
+
+        for callback in self.system_callbacks[event]:
+            try:
+                callback(**kwargs)
+            except Exception as e:
+                logger.error(f"Error in system callback for {event}: {e}")
 
     # ========================================================================
     # CONFIGURATION SECTION
@@ -213,46 +340,20 @@ class ThreadManager:
                         priority: int = 5) -> bool:
         """
         Register and start a new worker thread.
-
-        This is the main method for creating managed threads. The thread will be
-        automatically monitored and restarted if it fails (if configured to do so).
-
-        Args:
-            name: Unique identifier for this worker (e.g., "camera_capture", "api_processor")
-            target: The function to run in the thread
-            args: Arguments to pass to the target function
-            daemon: Whether the thread should be a daemon thread
-            restart_on_failure: Whether to automatically restart if the thread crashes
-            max_restart_attempts: Override default max restart attempts for this worker
-            priority: Priority level (1-10) for shutdown order and resource allocation
-
-        Returns:
-            bool: True if worker was successfully registered and started
-
-        Example:
-            # Register a worker for processing API calls
-            thread_manager.register_worker(
-                name="api_processor",
-                target=process_api_calls,
-                args=(api_client, queue),
-                restart_on_failure=True,
-                priority=8
-            )
         """
         with self._lock:
-            # Check if we've reached the worker limit
+            # [EXISTING CODE - checking worker limits and existing workers]
             if len(self.workers) >= self.max_workers:
                 logger.error(f"Cannot register worker '{name}': max workers ({self.max_workers}) reached")
                 return False
 
-            # Check if a worker with this name already exists
             if name in self.workers and self.workers[name].is_alive():
                 logger.warning(f"Worker '{name}' already exists and is running")
                 return False
 
             logger.info(f"Registering new worker: {name}")
 
-            # Create worker configuration
+            # [EXISTING CODE - Create worker configuration]
             config = WorkerConfig(
                 name=name,
                 target=target,
@@ -264,31 +365,136 @@ class ThreadManager:
                 priority=priority
             )
 
-            # Initialize statistics for this worker
+            # [EXISTING CODE - Initialize statistics]
             stats = WorkerStatistics(
                 start_time=time.time(),
                 state=WorkerState.INITIALIZING
             )
 
-            # Store configuration and stats
+            # [EXISTING CODE - Store configuration and stats]
             self.worker_configs[name] = config
             self.worker_stats[name] = stats
             self.worker_locks[name] = threading.RLock()
 
-            # Start the worker with the wrapper
-            success = self._start_worker_internal(name)
+            # [EXISTING CODE - Update global statistics]
+            self.global_stats["total_workers_created"] += 1
 
-            if success:
-                self.global_stats["total_workers_created"] += 1
-                logger.info(f"Successfully registered and started worker: {name}")
-            else:
-                # Clean up if start failed
-                del self.worker_configs[name]
-                del self.worker_stats[name]
-                del self.worker_locks[name]
-                logger.error(f"Failed to start worker: {name}")
+            # [EXISTING CODE - Define worker wrapper function]
+            def worker_wrapper():
+                """Wrapper function that handles exceptions and restarts."""
+                restart_count = 0
 
-            return success
+                while self.running:
+                    try:
+                        # Update state to running
+                        with self.worker_locks[name]:
+                            self.worker_stats[name].state = WorkerState.RUNNING
+                            if restart_count > 0:
+                                self.worker_stats[name].last_restart_time = time.time()
+
+                        logger.info(f"Worker '{name}' starting (attempt {restart_count + 1})")
+
+                        # ============================================================
+                        # ADD CALLBACK HERE - WHEN WORKER STARTS
+                        # ============================================================
+                        if restart_count == 0:
+                            # First start - trigger worker_started
+                            self._trigger_system_callbacks('worker_started', worker_name=name)
+                        else:
+                            # Restart - trigger worker_restarted
+                            self._trigger_system_callbacks('worker_restarted',
+                                                           worker_name=name,
+                                                           attempt=restart_count)
+                        # ============================================================
+
+                        # Run the actual worker function
+                        target(*args)
+
+                        # Worker exited normally
+                        logger.info(f"Worker '{name}' exited normally")
+
+                        # ============================================================
+                        # ADD CALLBACK HERE - WHEN WORKER STOPS NORMALLY
+                        # ============================================================
+                        self._trigger_system_callbacks('worker_stopped',
+                                                       worker_name=name,
+                                                       reason='normal_exit')
+                        # ============================================================
+
+                        break  # Exit the retry loop
+
+                    except Exception as e:
+                        # Worker crashed
+                        logger.error(f"Worker '{name}' crashed: {e}", exc_info=True)
+
+                        # Update statistics
+                        with self.worker_locks[name]:
+                            self.worker_stats[name].error_count += 1
+                            self.worker_stats[name].last_error = str(e)
+                            self.worker_stats[name].state = WorkerState.FAILED
+
+                        self.global_stats["total_failures"] += 1
+
+                        # ============================================================
+                        # ADD CALLBACK HERE - WHEN WORKER FAILS
+                        # ============================================================
+                        self._trigger_system_callbacks('worker_failed',
+                                                       worker_name=name,
+                                                       error=str(e),
+                                                       restart_count=restart_count)
+                        # ============================================================
+
+                        # Check if we should restart
+                        if config.restart_on_failure and restart_count < config.max_restart_attempts:
+                            restart_count += 1
+                            self.worker_stats[name].restart_count = restart_count
+                            self.global_stats["total_restarts"] += 1
+
+                            logger.info(f"Restarting worker '{name}' in {config.restart_delay} seconds "
+                                        f"(attempt {restart_count}/{config.max_restart_attempts})")
+
+                            # Update state to restarting
+                            with self.worker_locks[name]:
+                                self.worker_stats[name].state = WorkerState.RESTARTING
+
+                            # Wait before restarting
+                            if self.shutdown_event.wait(config.restart_delay):
+                                # Shutdown was requested during wait
+                                logger.info(f"Shutdown requested, not restarting worker '{name}'")
+                                break
+                        else:
+                            # Max restarts reached or restart not enabled
+                            logger.critical(f"Worker '{name}' failed permanently after {restart_count} attempts")
+
+                            # ============================================================
+                            # ADD CALLBACK HERE - PERMANENT FAILURE
+                            # ============================================================
+                            self._trigger_system_callbacks('worker_stopped',
+                                                           worker_name=name,
+                                                           reason='permanent_failure',
+                                                           attempts=restart_count)
+                            # ============================================================
+                            break
+
+                # Worker is done - update final state
+                with self.worker_locks[name]:
+                    self.worker_stats[name].state = WorkerState.STOPPED
+                    self.worker_stats[name].stop_time = time.time()
+
+            # [EXISTING CODE - Create and start the thread]
+            thread = threading.Thread(
+                target=worker_wrapper,
+                name=f"Worker-{name}",
+                daemon=config.daemon
+            )
+
+            try:
+                thread.start()
+                self.workers[name] = thread
+                return True
+            except Exception as e:
+                logger.error(f"Failed to start thread for worker '{name}': {e}")
+                return False
 
     def _start_worker_internal(self, name: str) -> bool:
         """
