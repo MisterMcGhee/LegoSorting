@@ -489,15 +489,14 @@ class LegoSortingApplication(QObject):
 
         self.config_gui = ConfigurationGUI(self.config_manager)
 
-        # Connect signals
+        # Connect only the configuration complete signal
+        # Preview is now handled internally by the GUI
         self.config_gui.configuration_complete.connect(self.on_configuration_complete)
-        self.config_gui.preview_requested.connect(self.show_camera_preview)
 
         self.config_gui.show()
         self.config_gui.center_window()
         self.current_state = ApplicationState.CONFIGURING
         logger.info("Configuration GUI displayed")
-
     def show_sorting_gui(self):
         """Display sorting interface"""
 
@@ -532,7 +531,7 @@ class LegoSortingApplication(QObject):
         # Get a frame and display it
         frame = self.camera.get_frame()
         if frame is not None and self.config_gui:
-            self.config_gui.update_preview(frame)
+            self.config_gui.update_preview_frame(frame)
 
     @pyqtSlot(dict)
     def on_configuration_complete(self, config: Dict[str, Any]):
