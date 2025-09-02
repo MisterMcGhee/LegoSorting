@@ -51,17 +51,15 @@
         "confidence_threshold": 0.7
     },
     "sorting": {
-        "strategy": "secondary",
-        "target_primary_category": "Basic",
+        "strategy": "primary",
+        "target_primary_category": "",
         "target_secondary_category": "",
-        "max_bins": 7,
+        "max_bins": 9,
         "overflow_bin": 0,
         "confidence_threshold": 0.7,
-        "pre_assignments": {
-            "Brick": 1,
-            "Plate": 2,
-            "Tile": 3
-        }
+        "pre_assignments": {},
+        "max_pieces_per_bin": 50,
+        "bin_warning_threshold": 0.8
     },
     "threading": {
         "max_queue_size": 100,

@@ -23,6 +23,7 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+
 class ModuleConfig(Enum):
     """Standard module names for configuration - prevents typos and ensures consistency"""
     CAMERA = "camera"
@@ -37,6 +38,7 @@ class ModuleConfig(Enum):
     GUI = "gui_settings"
     EXIT_ZONE = "exit_zone_trigger"
     PIECE_IDENTIFIER = "piece_identifier"
+
 
 class ConfigSchema:
     """Configuration schema definitions and defaults - the "source of truth" for what settings exist"""
@@ -84,7 +86,9 @@ class ConfigSchema:
                 "max_bins": 9,
                 "overflow_bin": 0,
                 "confidence_threshold": 0.7,
-                "pre_assignments": {}  # For GUI pre-assignment feature
+                "pre_assignments": {},  # For GUI pre-assignment feature
+                "max_pieces_per_bin": 50,  # Maximum pieces before bin is full
+                "bin_warning_threshold": 0.8  # Warn at 80% capacity
             },
 
             ModuleConfig.SERVO.value: {
@@ -172,6 +176,7 @@ class ConfigSchema:
 
         return required.get(module_name, [])
 
+
 class ConfigValidator:
     """Validates configuration values against business rules"""
 
@@ -232,6 +237,31 @@ class ConfigValidator:
             elif not (1 <= bin_num <= max_bins):
                 errors.append(f"Bin {bin_num} for {category} out of range (1-{max_bins})")
 
+        errors.extend(ConfigValidator._validate_bin_capacity(config))
+
+        return errors
+
+    @staticmethod
+    def _validate_bin_capacity(config: Dict[str, Any]) -> List[str]:
+        """Validate bin capacity settings"""
+        errors = []
+
+        # Check max_pieces_per_bin is reasonable
+        max_pieces = config.get("max_pieces_per_bin", 50)
+        if not isinstance(max_pieces, int) or max_pieces < 1:
+            errors.append(f"Invalid max_pieces_per_bin: {max_pieces} (must be positive integer)")
+        elif max_pieces > 1000:
+            errors.append(f"max_pieces_per_bin too large: {max_pieces} (max 1000)")
+
+        # Check warning threshold is valid percentage
+        threshold = config.get("bin_warning_threshold", 0.8)
+        if not isinstance(threshold, (int, float)) or not (0.0 < threshold <= 1.0):
+            errors.append(f"Invalid bin_warning_threshold: {threshold} (must be between 0.0 and 1.0)")
+
+        # Logical check: warning should be less than full
+        if threshold >= 1.0:
+            errors.append("bin_warning_threshold should be less than 1.0 to provide warning before full")
+
         return errors
 
     @staticmethod
@@ -267,6 +297,7 @@ class ConfigValidator:
                 errors.append(f"ROI {key} must be non-negative: {value}")
 
         return errors
+
 
 class EnhancedConfigManager:
     """
