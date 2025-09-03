@@ -10,11 +10,12 @@ import logging
 import time  # ADD if not present
 import numpy as np  # ADD if not present
 from typing import Dict, Any, Optional
+from enhanced_config_manager import create_config_manager  # or your config manager
 from GUI.gui_common import BaseGUIWindow, VideoWidget, ConfirmationDialog, validate_config
 from camera_module import create_camera
 
-logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
 
 class ConfigurationGUI(BaseGUIWindow):
     """Main configuration window for system setup"""
@@ -331,35 +332,100 @@ class ConfigurationGUI(BaseGUIWindow):
             self.update_available_categories()
 
     def on_strategy_changed(self, strategy_text):
-        """Handle strategy selection change"""
-        strategy = strategy_text.lower()
+        """Handle sorting strategy selection change with smart dropdown population"""
+        print(f"Strategy changed to: {strategy_text}")  # Debug line
+        if not self.config_manager:
+            print("WARNING: config_manager is None!")
+            return
 
-        # Show/hide target category selectors based on strategy
+        strategy = strategy_text.lower()
+        print(f"Strategy (lowercase): {strategy}")  # Debug line
+
+        # Get the category hierarchy for populating dropdowns
+        hierarchy = self.config_manager.get_category_hierarchy()
+
+        # Handle visibility and populate dropdowns based on strategy
         if strategy == "primary":
+            # Hide all target category selectors for primary strategy
             self.target_primary_label.hide()
             self.target_primary_combo.hide()
             self.target_secondary_label.hide()
             self.target_secondary_combo.hide()
+
         elif strategy == "secondary":
+            # Show only primary selector for secondary strategy
             self.target_primary_label.show()
             self.target_primary_combo.show()
             self.target_secondary_label.hide()
             self.target_secondary_combo.hide()
+
+            # Populate primary dropdown with all available primary categories
+            primary_categories = hierarchy.get("primary", [])
+            current_selection = self.target_primary_combo.currentText()
+
+            self.target_primary_combo.clear()
+            self.target_primary_combo.addItem("")  # Add empty option
+            self.target_primary_combo.addItems(sorted(primary_categories))
+
+            # Restore previous selection if it still exists
+            if current_selection in primary_categories:
+                self.target_primary_combo.setCurrentText(current_selection)
+
         elif strategy == "tertiary":
+            # Show both selectors for tertiary strategy
             self.target_primary_label.show()
             self.target_primary_combo.show()
             self.target_secondary_label.show()
             self.target_secondary_combo.show()
 
-        # Update available categories
+            # Populate primary dropdown with all available primary categories
+            primary_categories = hierarchy.get("primary", [])
+            current_primary = self.target_primary_combo.currentText()
+
+            self.target_primary_combo.clear()
+            self.target_primary_combo.addItem("")  # Add empty option
+            self.target_primary_combo.addItems(sorted(primary_categories))
+
+            # If we had a previous selection, restore it and populate secondary
+            if current_primary in primary_categories:
+                self.target_primary_combo.setCurrentText(current_primary)
+
+                # Populate secondary dropdown based on selected primary
+                secondary_categories = hierarchy.get("primary_to_secondary", {}).get(current_primary, [])
+                current_secondary = self.target_secondary_combo.currentText()
+
+                self.target_secondary_combo.clear()
+                self.target_secondary_combo.addItem("")  # Add empty option
+                self.target_secondary_combo.addItems(sorted(secondary_categories))
+
+                # Restore secondary selection if it still exists
+                if current_secondary in secondary_categories:
+                    self.target_secondary_combo.setCurrentText(current_secondary)
+            else:
+                # Clear secondary dropdown if no primary selected
+                self.target_secondary_combo.clear()
+                self.target_secondary_combo.addItem("")
+
+        # Update available categories list based on new strategy
         self.update_available_categories()
 
         # Clear pre-assignments as they may no longer be valid
         self.validate_assignments()
 
+        # Update status to show what categories are available
+        self.update_dropdown_status()
+
+        self.strategy_combo.parentWidget().update()
+        self.strategy_combo.parentWidget().adjustSize()
+
     def on_primary_category_changed(self, primary_category):
-        """Handle primary category selection change"""
+        """Handle primary category selection change with smart secondary dropdown update"""
         if not primary_category or not self.config_manager:
+            # Clear secondary dropdown if no primary selected
+            if self.strategy_combo.currentText().lower() == "tertiary":
+                self.target_secondary_combo.clear()
+                self.target_secondary_combo.addItem("")
+            self.update_available_categories()
             return
 
         strategy = self.strategy_combo.currentText().lower()
@@ -370,25 +436,90 @@ class ConfigurationGUI(BaseGUIWindow):
             hierarchy = self.config_manager.get_category_hierarchy()
             secondary_categories = hierarchy.get("primary_to_secondary", {}).get(primary_category, [])
 
+            # Remember current selection if any
+            current_secondary = self.target_secondary_combo.currentText()
+
+            # Populate secondary dropdown
             self.target_secondary_combo.clear()
             self.target_secondary_combo.addItem("")  # Empty option
-            self.target_secondary_combo.addItems(sorted(secondary_categories))
 
-        # Update available categories
+            if secondary_categories:
+                self.target_secondary_combo.addItems(sorted(secondary_categories))
+
+                # Restore selection if it's still valid
+                if current_secondary in secondary_categories:
+                    self.target_secondary_combo.setCurrentText(current_secondary)
+
+                # Enable the secondary dropdown
+                self.target_secondary_combo.setEnabled(True)
+
+                # Update tooltip with helpful information
+                tooltip = f"Select a secondary category within '{primary_category}'\n"
+                tooltip += f"Available options: {len(secondary_categories)} categories"
+                self.target_secondary_combo.setToolTip(tooltip)
+            else:
+                # No secondary categories available
+                self.target_secondary_combo.addItem("(No secondary categories available)")
+                self.target_secondary_combo.setEnabled(False)
+
+        # Update available categories based on selection
         self.update_available_categories()
         self.validate_assignments()
+
+        # Update status
+        self.update_dropdown_status()
 
     def on_secondary_category_changed(self, secondary_category):
         """Handle secondary category selection change"""
         self.update_available_categories()
         self.validate_assignments()
 
+        # Update status to reflect the selection
+        self.update_dropdown_status()
+
     def on_max_bins_changed(self, value):
         """Handle max bins value change"""
         self.validate_assignments()
 
+    def update_dropdown_status(self):
+        """Update status bar with current dropdown selection information"""
+        strategy = self.strategy_combo.currentText().lower()
+
+        if strategy == "primary":
+            # Get count of primary categories available
+            categories = self.config_manager.get_categories_for_strategy(strategy)
+            self.status_bar.showMessage(f"Primary sorting: {len(categories)} categories available")
+
+        elif strategy == "secondary":
+            primary = self.target_primary_combo.currentText()
+            if primary:
+                categories = self.config_manager.get_categories_for_strategy(strategy, primary)
+                self.status_bar.showMessage(
+                    f"Secondary sorting in '{primary}': {len(categories)} subcategories available"
+                )
+            else:
+                self.status_bar.showMessage("Secondary sorting: Please select a primary category")
+
+        elif strategy == "tertiary":
+            primary = self.target_primary_combo.currentText()
+            secondary = self.target_secondary_combo.currentText()
+
+            if primary and secondary:
+                categories = self.config_manager.get_categories_for_strategy(
+                    strategy, primary, secondary
+                )
+                self.status_bar.showMessage(
+                    f"Tertiary sorting in '{primary}/{secondary}': {len(categories)} categories available"
+                )
+            elif primary:
+                self.status_bar.showMessage(
+                    f"Tertiary sorting in '{primary}': Please select a secondary category"
+                )
+            else:
+                self.status_bar.showMessage("Tertiary sorting: Please select primary and secondary categories")
+
     def load_category_hierarchy(self):
-        """Load category hierarchy from CSV via config manager"""
+        """Load category hierarchy from CSV via config manager and populate initial dropdowns"""
         if not self.config_manager:
             return
 
@@ -396,14 +527,26 @@ class ConfigurationGUI(BaseGUIWindow):
             # Parse categories from CSV
             hierarchy = self.config_manager.get_category_hierarchy()
 
-            # Populate primary category dropdown
+            # Get all primary categories
             primary_categories = hierarchy.get("primary", [])
+
+            # Store hierarchy for later use
+            self.category_hierarchy = hierarchy
+
+            # Initially populate primary dropdown (will be shown/hidden based on strategy)
             self.target_primary_combo.clear()
             self.target_primary_combo.addItem("")  # Empty option
             self.target_primary_combo.addItems(sorted(primary_categories))
 
-            # Store hierarchy for later use
-            self.category_hierarchy = hierarchy
+            # Add tooltips to help users
+            self.target_primary_combo.setToolTip(
+                f"Select from {len(primary_categories)} available primary categories"
+            )
+            self.target_secondary_combo.setToolTip(
+                "Secondary categories will appear after selecting a primary category"
+            )
+
+            logger.info(f"Loaded category hierarchy with {len(primary_categories)} primary categories")
 
         except Exception as e:
             logger.error(f"Failed to load category hierarchy: {e}")
@@ -461,6 +604,52 @@ class ConfigurationGUI(BaseGUIWindow):
             else:
                 self.category_info_label.setText("Select primary and secondary categories first")
 
+    def validate_dropdown_selections(self):
+        """Validate that dropdown selections are valid for the current strategy"""
+        strategy = self.strategy_combo.currentText().lower()
+        primary = self.target_primary_combo.currentText()
+        secondary = self.target_secondary_combo.currentText()
+
+        errors = []
+
+        if strategy == "secondary":
+            if not primary:
+                errors.append("Secondary sorting requires selecting a primary category")
+
+            # Check if the selected primary has any secondary categories
+            elif self.config_manager:
+                categories = self.config_manager.get_categories_for_strategy(strategy, primary)
+                if not categories:
+                    errors.append(f"Primary category '{primary}' has no secondary categories")
+
+        elif strategy == "tertiary":
+            if not primary:
+                errors.append("Tertiary sorting requires selecting a primary category")
+            elif not secondary:
+                errors.append("Tertiary sorting requires selecting a secondary category")
+
+            # Check if the combination has any tertiary categories
+            elif self.config_manager:
+                categories = self.config_manager.get_categories_for_strategy(
+                    strategy, primary, secondary
+                )
+                if not categories:
+                    errors.append(
+                        f"Combination '{primary}/{secondary}' has no tertiary categories"
+                    )
+
+        return errors
+
+    def refresh_dropdowns(self):
+        """Force refresh all dropdowns from the CSV data"""
+        # Reload category hierarchy
+        self.load_category_hierarchy()
+
+        # Trigger strategy change to repopulate dropdowns
+        current_strategy = self.strategy_combo.currentText()
+        self.on_strategy_changed(current_strategy)
+
+        self.status_bar.showMessage("Dropdowns refreshed from CSV data", 3000)
     def add_bin_assignment(self):
         """Add a new bin assignment"""
         if not self.config_manager:

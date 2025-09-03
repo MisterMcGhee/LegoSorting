@@ -51,7 +51,6 @@ from error_module import setup_logging, get_logger
 
 logger = get_logger(__name__)
 
-
 # ============= Application States =============
 
 class ApplicationState(Enum):
@@ -148,8 +147,12 @@ class LegoSortingApplication(QObject):
     def __init__(self):
         super().__init__()
 
-        # Core components (initialized in order)
-        self.config_manager = None
+        # CRITICAL: Initialize config_manager FIRST and DON'T overwrite it!
+        self.config_manager = create_config_manager()
+        logger.info("Configuration manager initialized during startup")
+
+        # Core components (will be initialized later in initialize_system)
+        # Note: config_manager is already set above, so DON'T set it to None here!
         self.camera = None
         self.detector = None
         self.thread_manager = None
@@ -196,13 +199,16 @@ class LegoSortingApplication(QObject):
         progress.show()
 
         try:
-            # 1. Configuration Manager (first - everything depends on this)
-            progress.setLabelText("Loading configuration...")
+            # 1. Configuration Manager is already initialized in __init__
+            # Just verify it exists
+            progress.setLabelText("Verifying configuration...")
             progress.setValue(1)
             QApplication.processEvents()
 
-            self.config_manager = create_config_manager()
-            logger.info("Configuration manager initialized")
+            if not self.config_manager:
+                raise RuntimeError("Configuration manager not initialized")
+
+            logger.info("Configuration manager verified")
 
             # 2. Thread Manager (infrastructure for threading)
             progress.setLabelText("Setting up thread management...")
@@ -487,6 +493,13 @@ class LegoSortingApplication(QObject):
     def show_configuration_gui(self):
         """Display configuration interface"""
 
+        # Verify config_manager exists
+        if not self.config_manager:
+            logger.error("Cannot show configuration GUI - config_manager is None!")
+            QMessageBox.critical(None, "Configuration Error",
+                                "Configuration manager not initialized")
+            return
+
         self.config_gui = ConfigurationGUI(self.config_manager)
 
         # Connect only the configuration complete signal
@@ -496,7 +509,7 @@ class LegoSortingApplication(QObject):
         self.config_gui.show()
         self.config_gui.center_window()
         self.current_state = ApplicationState.CONFIGURING
-        logger.info("Configuration GUI displayed")
+        logger.info(f"Configuration GUI displayed with config_manager: {self.config_manager}")
     def show_sorting_gui(self):
         """Display sorting interface"""
 
