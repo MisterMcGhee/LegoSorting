@@ -22,10 +22,13 @@ from enum import Enum
 from dataclasses import dataclass
 import cv2
 import numpy as np
+import serial
+import serial.tools.list_ports
 
 # PyQt5 imports for GUI
 from PyQt5.QtWidgets import QApplication, QMessageBox, QProgressDialog
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QMetaObject, Q_ARG, QTimer
+from PyQt5.QtGui import QPalette
 
 # GUI modules
 from GUI.config_GUI_module import ConfigurationGUI
@@ -44,12 +47,13 @@ from piece_history_module import create_piece_history
 # Threading and queue management - CRITICAL IMPORTS
 from thread_manager import create_thread_manager, ThreadManager
 from piece_queue_manager import create_piece_queue_manager, PieceQueueManager, PieceMessage
-from processing_module import ProcessingWorker, create_processing_worker
+from processing_module import create_processing_worker
 
 # Error handling
 from error_module import setup_logging, get_logger
 
 logger = get_logger(__name__)
+
 
 # ============= Application States =============
 
@@ -492,19 +496,19 @@ class LegoSortingApplication(QObject):
 
     def show_configuration_gui(self):
         """Display configuration interface"""
-
-        # Verify config_manager exists
         if not self.config_manager:
-            logger.error("Cannot show configuration GUI - config_manager is None!")
             QMessageBox.critical(None, "Configuration Error",
-                                "Configuration manager not initialized")
+                                 "Configuration manager not initialized")
             return
 
         self.config_gui = ConfigurationGUI(self.config_manager)
 
         # Connect only the configuration complete signal
-        # Preview is now handled internally by the GUI
         self.config_gui.configuration_complete.connect(self.on_configuration_complete)
+
+        # NEW: Connect Arduino mode change signal to reinitialization method
+        self.config_gui.arduino_mode_changed.connect(self.reinitialize_arduino_module)
+        logger.info("Connected arduino_mode_changed signal to reinitialize handler")
 
         self.config_gui.show()
         self.config_gui.center_window()
@@ -546,6 +550,100 @@ class LegoSortingApplication(QObject):
         if frame is not None and self.config_gui:
             self.config_gui.update_preview_frame(frame)
 
+    def reinitialize_arduino_module(self, simulation_mode):
+        """
+        Reinitialize the Arduino servo module with updated simulation mode setting.
+
+        This method is called when the user manually changes between simulation and
+        hardware modes in the configuration GUI. It cleanly shuts down any existing
+        Arduino connection and creates a new module with the updated settings.
+
+        Args:
+            simulation_mode: True for simulation mode, False for hardware mode
+        """
+        logger.info(f"Reinitializing Arduino module (simulation_mode={simulation_mode})")
+
+        try:
+            # Step 1: Clean up existing Arduino module if it exists
+            if self.servo_module:
+                try:
+                    logger.info("Releasing existing Arduino module...")
+
+                    # Move servo to safe position before disconnecting
+                    if not self.servo_module.simulation_mode:
+                        self.servo_module.move_to_bin(0)  # Move to home/overflow position
+                        time.sleep(0.5)  # Wait for movement to complete
+
+                    # Release hardware resources
+                    self.servo_module.release()
+                    self.servo_module = None
+                    logger.info("Existing Arduino module released successfully")
+
+                except Exception as e:
+                    logger.warning(f"Error releasing Arduino module: {e}")
+                    self.servo_module = None
+
+            # Step 2: Update configuration using EnhancedConfigManager API
+            if self.config_manager:
+                self.config_manager.update_module_config("arduino_servo", {
+                    "simulation_mode": simulation_mode
+                })
+                self.config_manager.save_config()
+                logger.info(f"Configuration updated: simulation_mode={simulation_mode}")
+
+            # Step 3: Create new Arduino module with updated configuration
+            try:
+                self.servo_module = create_arduino_servo_module(self.config_manager)
+
+                # Verify initialization was successful
+                if self.servo_module and self.servo_module.initialized:
+                    mode_str = "simulation" if simulation_mode else "hardware"
+                    logger.info(f"Arduino module reinitialized successfully in {mode_str} mode")
+
+                    # Update GUI if sorting interface is active
+                    if self.sorting_gui:
+                        self.sorting_gui.set_arduino_status(not simulation_mode)
+                        self.sorting_gui.show_status_message(
+                            f"Arduino module switched to {mode_str} mode",
+                            5000  # Show for 5 seconds
+                        )
+
+                    # Show success message in config GUI if it's open
+                    if self.config_gui:
+                        QMessageBox.information(
+                            self.config_gui,
+                            "Arduino Module Updated",
+                            f"Arduino module successfully switched to {mode_str} mode."
+                        )
+
+                else:
+                    raise Exception("Arduino module initialization returned invalid state")
+
+            except Exception as e:
+                logger.error(f"Failed to create new Arduino module: {e}")
+                self.servo_module = None
+
+                # Inform user of the failure
+                error_msg = (f"Failed to initialize Arduino in "
+                             f"{'simulation' if simulation_mode else 'hardware'} mode.\n\n"
+                             f"Error: {str(e)}\n\n"
+                             f"The system will continue without servo control.")
+
+                if self.config_gui:
+                    QMessageBox.critical(self.config_gui, "Arduino Initialization Failed", error_msg)
+
+                # Update GUI to reflect Arduino unavailability
+                if self.sorting_gui:
+                    self.sorting_gui.set_arduino_status(False)
+                    self.sorting_gui.show_status_message("Arduino module unavailable", 5000)
+
+        except Exception as e:
+            logger.error(f"Critical error during Arduino reinitialization: {e}", exc_info=True)
+            self.servo_module = None
+
+            # Ensure GUI reflects the error state
+            if self.sorting_gui:
+                self.sorting_gui.set_arduino_status(False)
     @pyqtSlot(dict)
     def on_configuration_complete(self, config: Dict[str, Any]):
         """Handle configuration completion"""

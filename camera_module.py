@@ -482,6 +482,141 @@ class CameraModule:
                 cls._instance.release()
             cls._instance = None
 
+    @staticmethod
+    def enumerate_cameras(max_check: int = 10) -> List[Tuple[int, str]]:
+        """
+        Detect available camera devices.
+
+        Args:
+            max_check: Maximum number of camera indices to check
+
+        Returns:
+            List of tuples (device_id, description)
+        """
+        available_cameras = []
+
+        for i in range(max_check):
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                # Try to read a frame to confirm camera is really available
+                ret, _ = cap.read()
+                if ret:
+                    # Get camera info if available
+                    backend = cap.getBackendName()
+                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                    # Create description
+                    description = f"Camera {i} ({backend}) - {width}x{height}"
+                    available_cameras.append((i, description))
+                    logger.info(f"Found camera: {description}")
+
+                cap.release()
+
+        if not available_cameras:
+            logger.warning("No cameras found, adding default option")
+            available_cameras.append((0, "Default Camera (0)"))
+
+        return available_cameras
+
+    def reinitialize_with_device(self, new_device_id: int) -> bool:
+        """
+        Reinitialize camera with a new device ID.
+
+        This properly handles switching between cameras.
+
+        Args:
+            new_device_id: The new camera device ID to use
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        logger.info(f"Reinitializing camera from device {self.device_id} to {new_device_id}")
+
+        # Only reinitialize if device actually changed
+        if self.device_id == new_device_id and self.is_initialized:
+            logger.info("Device ID unchanged and camera initialized, skipping reinit")
+            return True
+
+        # Store capture state
+        was_capturing = self.is_capturing
+
+        # Stop capture if running
+        if was_capturing:
+            self.stop_capture()
+
+        # Release current camera
+        if self.cap and self.is_initialized:
+            self.cap.release()
+            self.cap = None
+            self.is_initialized = False
+            self.is_warmed_up = False
+            logger.info(f"Released camera device {self.device_id}")
+
+        # Update device ID
+        self.device_id = new_device_id
+
+        # Reinitialize with new device
+        success = self.initialize()
+
+        if success:
+            logger.info(f"Successfully initialized camera device {new_device_id}")
+
+            # Restart capture if it was running
+            if was_capturing:
+                self.start_capture()
+        else:
+            logger.error(f"Failed to initialize camera device {new_device_id}")
+
+        return success
+
+    def switch_camera(self, new_device_id: int, config_manager=None) -> bool:
+        """
+        Switch to a different camera device.
+
+        Args:
+            new_device_id: The new camera device ID
+            config_manager: Optional config manager to update settings
+
+        Returns:
+            bool: True if switch was successful
+        """
+        # Update config if manager provided
+        if config_manager:
+            camera_config = config_manager.get_module_config("camera")
+            camera_config["device_id"] = new_device_id
+            config_manager.update_module_config("camera", camera_config)
+
+        # Reinitialize with new device
+        return self.reinitialize_with_device(new_device_id)
+
+    @classmethod
+    def reset_and_switch(cls, new_device_id: int, config_manager=None):
+        """
+        Reset singleton and create new instance with different device.
+
+        Use this method when you need to completely reset the camera system.
+
+        Args:
+            new_device_id: The new camera device ID
+            config_manager: Configuration manager
+
+        Returns:
+            CameraModule: New camera instance with specified device
+        """
+        # Reset the singleton
+        cls.reset_instance()
+
+        # Update config if provided
+        if config_manager:
+            camera_config = config_manager.get_module_config("camera")
+            camera_config["device_id"] = new_device_id
+            config_manager.update_module_config("camera", camera_config)
+
+        # Create new instance with updated config
+        from camera_module import create_camera
+        return create_camera(config_manager=config_manager)
+
 
 # Factory function for backward compatibility
 def create_camera(camera_type="webcam", config_manager=None):

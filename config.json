@@ -44,7 +44,17 @@
         "default_roi_w": 1550,
         "default_roi_h": 500,
         "show_bg_subtraction": true,
-        "threshold": 30
+        "threshold": 30,
+        "zones": {
+            "entry_percentage": 15,
+            "exit_percentage": 15
+        },
+        "roi": [
+            50,
+            300,
+            1700,
+            500
+        ]
     },
     "piece_identifier": {
         "csv_path": "Lego_Categories.csv",
@@ -54,10 +64,13 @@
         "strategy": "primary",
         "target_primary_category": "",
         "target_secondary_category": "",
-        "max_bins": 9,
+        "max_bins": 7,
         "overflow_bin": 0,
         "confidence_threshold": 0.7,
-        "pre_assignments": {},
+        "pre_assignments": {
+            "Basic": 1,
+            "Technic": 2
+        },
         "max_pieces_per_bin": 50,
         "bin_warning_threshold": 0.8
     },
@@ -75,7 +88,7 @@
         "default_position": 90,
         "speed": 100,
         "calibration_positions": {},
-        "calibration_mode": false,
+        "calibration_mode": true,
         "min_bin_separation": 20,
         "movement_speed": 0.5,
         "settling_time": 0.2,
@@ -100,8 +113,33 @@
         "port": "/dev/cu.usbmodem48CA435B6CCC2",
         "baud_rate": 9600,
         "timeout": 2.0,
+        "servo_count": 9,
+        "servo_pins": [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+        ],
         "connection_retries": 3,
-        "retry_delay": 1.0
+        "retry_delay": 1.0,
+        "bin_positions": {
+            "0": 90,
+            "1": 0,
+            "2": 30,
+            "3": 60,
+            "4": 120,
+            "5": 150,
+            "6": 180,
+            "7": 90,
+            "8": 90,
+            "9": 90
+        },
+        "simulation_mode": false
     },
     "detector_roi": {
         "x": 412,

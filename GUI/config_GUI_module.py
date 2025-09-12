@@ -8,20 +8,344 @@ from PyQt5.QtGui import *
 import json
 import logging
 import time  # ADD if not present
-import numpy as np  # ADD if not present
+import numpy as np
+import cv2
 from typing import Dict, Any, Optional
 from enhanced_config_manager import create_config_manager  # or your config manager
 from GUI.gui_common import BaseGUIWindow, VideoWidget, ConfirmationDialog, validate_config
 from camera_module import create_camera
+import serial
+import serial.tools.list_ports
 
 
 logger = logging.getLogger(__name__)
+
+
+class DetectorPreviewWidget(QWidget):
+    """Custom widget that shows camera preview with detection overlays"""
+
+    def __init__(self):
+        super().__init__()
+        self.current_frame = None  # Will store the camera image
+        self.roi = None  # Region of Interest rectangle
+        self.zones = None  # Entry/exit zone percentages
+        self.detected_pieces = []  # List of detected pieces
+
+    def update_frame(self, frame, detection_data=None):
+        """Update the widget with a new camera frame"""
+        self.current_frame = frame
+        if detection_data:
+            self.roi = detection_data.get('roi')
+            self.zones = detection_data.get('zones')
+            self.detected_pieces = detection_data.get('pieces', [])
+        self.update()  # Triggers a repaint
+
+    def paintEvent(self, event):
+        """This method draws everything on the widget"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        if self.current_frame is not None:
+            # Convert OpenCV image to Qt format
+            height, width = self.current_frame.shape[:2]
+            bytes_per_line = 3 * width
+
+            # Convert BGR to RGB (OpenCV uses BGR, Qt uses RGB)
+            rgb_image = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2RGB)
+            q_image = QImage(rgb_image.data, width, height,
+                             bytes_per_line, QImage.Format_RGB888)
+
+            # Convert to pixmap and scale to widget size
+            pixmap = QPixmap.fromImage(q_image)
+            scaled_pixmap = pixmap.scaled(self.size(), Qt.KeepAspectRatio,
+                                          Qt.SmoothTransformation)
+
+            # Calculate scaling factors
+            scale_x = scaled_pixmap.width() / width
+            scale_y = scaled_pixmap.height() / height
+
+            # Draw the image
+            painter.drawPixmap(0, 0, scaled_pixmap)
+
+            # Draw ROI rectangle (yellow border)
+            if self.roi:
+                x, y, w, h = self.roi
+                painter.setPen(QPen(QColor(255, 255, 0), 2))  # Yellow, 2px wide
+                painter.drawRect(int(x * scale_x), int(y * scale_y),
+                                 int(w * scale_x), int(h * scale_y))
+
+                # Draw zones if we have them
+                if self.zones:
+                    # Entry zone (green, semi-transparent)
+                    entry_width = w * self.zones.get('entry', 0.15)
+                    painter.fillRect(
+                        int(x * scale_x),
+                        int(y * scale_y),
+                        int(entry_width * scale_x),
+                        int(h * scale_y),
+                        QColor(0, 255, 0, 50)  # Green with transparency
+                    )
+
+                    # Exit zone (red, semi-transparent)
+                    exit_width = w * self.zones.get('exit', 0.15)
+                    exit_x = x + w - exit_width
+                    painter.fillRect(
+                        int(exit_x * scale_x),
+                        int(y * scale_y),
+                        int(exit_width * scale_x),
+                        int(h * scale_y),
+                        QColor(255, 0, 0, 50)  # Red with transparency
+                    )
+
+            # Draw detected pieces
+            for piece in self.detected_pieces:
+                px, py, pw, ph = piece.get('bbox', (0, 0, 0, 0))
+                # Adjust coordinates if they're relative to ROI
+                if self.roi:
+                    px += self.roi[0]
+                    py += self.roi[1]
+
+                # Choose color based on piece status
+                if piece.get('being_processed'):
+                    painter.setPen(QPen(QColor(0, 255, 255), 2))  # Cyan
+                elif piece.get('captured'):
+                    painter.setPen(QPen(QColor(0, 255, 0), 2))  # Green
+                else:
+                    painter.setPen(QPen(QColor(255, 255, 255), 1))  # White
+
+                painter.drawRect(int(px * scale_x), int(py * scale_y),
+                                 int(pw * scale_x), int(ph * scale_y))
+        else:
+            # No frame yet - show black screen with text
+            painter.fillRect(self.rect(), Qt.black)
+            painter.setPen(Qt.white)
+            painter.drawText(self.rect(), Qt.AlignCenter,
+                             "No camera feed\nClick 'Start Preview' to begin")
+
+class ROIConfigDialog(QDialog):
+    """Dialog window for setting up the Region of Interest"""
+
+    def __init__(self, parent=None, current_frame=None, current_roi=None):
+        super().__init__(parent)
+        self.setWindowTitle("Configure Region of Interest")
+        self.setModal(True)  # Blocks interaction with main window
+        self.resize(800, 600)
+
+        self.current_frame = current_frame
+        self.current_roi = current_roi
+        self.temp_roi = current_roi  # Temporary ROI while configuring
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Create the dialog interface"""
+        layout = QVBoxLayout()
+
+        # Instructions at the top
+        instructions = QLabel(
+            "Draw ROI: Click and drag to create a rectangle\n"
+            "Adjust: Use the spin boxes below for fine tuning"
+        )
+        instructions.setStyleSheet("padding: 10px; background: #f0f0f0;")
+        layout.addWidget(instructions)
+
+        # Image display area
+        self.image_label = QLabel()
+        self.image_label.setMinimumSize(640, 480)
+        self.image_label.setStyleSheet("border: 1px solid black;")
+        self.image_label.setAlignment(Qt.AlignCenter)
+
+        # Mouse events for drawing ROI
+        self.image_label.mousePressEvent = self.mouse_press
+        self.image_label.mouseMoveEvent = self.mouse_move
+        self.image_label.mouseReleaseEvent = self.mouse_release
+
+        self.drawing = False
+        self.start_point = None
+
+        layout.addWidget(self.image_label)
+
+        # ROI info display
+        self.roi_info = QLabel("ROI: Not set")
+        layout.addWidget(self.roi_info)
+
+        # Fine adjustment controls
+        adjust_group = QGroupBox("Fine Adjustment")
+        adjust_layout = QGridLayout()
+
+        # Create spin boxes for X, Y, Width, Height
+        self.x_spin = QSpinBox()
+        self.y_spin = QSpinBox()
+        self.w_spin = QSpinBox()
+        self.h_spin = QSpinBox()
+
+        # Set ranges for spin boxes
+        if self.current_frame is not None:
+            h, w = self.current_frame.shape[:2]
+            self.x_spin.setRange(0, w)
+            self.y_spin.setRange(0, h)
+            self.w_spin.setRange(10, w)
+            self.h_spin.setRange(10, h)
+        else:
+            for spin in [self.x_spin, self.y_spin, self.w_spin, self.h_spin]:
+                spin.setRange(0, 2000)
+
+        # Connect spin boxes to update method
+        self.x_spin.valueChanged.connect(self.update_roi_from_spinboxes)
+        self.y_spin.valueChanged.connect(self.update_roi_from_spinboxes)
+        self.w_spin.valueChanged.connect(self.update_roi_from_spinboxes)
+        self.h_spin.valueChanged.connect(self.update_roi_from_spinboxes)
+
+        # Add labels and spin boxes to grid
+        adjust_layout.addWidget(QLabel("X:"), 0, 0)
+        adjust_layout.addWidget(self.x_spin, 0, 1)
+        adjust_layout.addWidget(QLabel("Width:"), 0, 2)
+        adjust_layout.addWidget(self.w_spin, 0, 3)
+
+        adjust_layout.addWidget(QLabel("Y:"), 1, 0)
+        adjust_layout.addWidget(self.y_spin, 1, 1)
+        adjust_layout.addWidget(QLabel("Height:"), 1, 2)
+        adjust_layout.addWidget(self.h_spin, 1, 3)
+
+        adjust_group.setLayout(adjust_layout)
+        layout.addWidget(adjust_group)
+
+        # Dialog buttons
+        button_layout = QHBoxLayout()
+
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self.reject)
+
+        button_layout.addStretch()
+        button_layout.addWidget(self.ok_btn)
+        button_layout.addWidget(self.cancel_btn)
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+        # Show current frame if available
+        self.update_display()
+
+        # Set current ROI values if exists
+        if self.current_roi:
+            x, y, w, h = self.current_roi
+            self.x_spin.setValue(x)
+            self.y_spin.setValue(y)
+            self.w_spin.setValue(w)
+            self.h_spin.setValue(h)
+
+    def mouse_press(self, event):
+        """Start drawing ROI"""
+        self.drawing = True
+        self.start_point = event.pos()
+
+    def mouse_move(self, event):
+        """Update ROI while drawing"""
+        if self.drawing and self.start_point:
+            # Calculate rectangle from start point to current position
+            x1 = self.start_point.x()
+            y1 = self.start_point.y()
+            x2 = event.pos().x()
+            y2 = event.pos().y()
+
+            # Make sure coordinates are positive
+            x = min(x1, x2)
+            y = min(y1, y2)
+            w = abs(x2 - x1)
+            h = abs(y2 - y1)
+
+            # Scale to image coordinates
+            if self.current_frame is not None:
+                label_h = self.image_label.height()
+                label_w = self.image_label.width()
+                img_h, img_w = self.current_frame.shape[:2]
+
+                x = int(x * img_w / label_w)
+                y = int(y * img_h / label_h)
+                w = int(w * img_w / label_w)
+                h = int(h * img_h / label_h)
+
+                self.temp_roi = (x, y, w, h)
+                self.update_spinboxes()
+                self.update_display()
+
+    def mouse_release(self, event):
+        """Finish drawing ROI"""
+        self.drawing = False
+
+    def update_spinboxes(self):
+        """Update spin boxes with current ROI"""
+        if self.temp_roi:
+            x, y, w, h = self.temp_roi
+            # Block signals to prevent recursion
+            self.x_spin.blockSignals(True)
+            self.y_spin.blockSignals(True)
+            self.w_spin.blockSignals(True)
+            self.h_spin.blockSignals(True)
+
+            self.x_spin.setValue(x)
+            self.y_spin.setValue(y)
+            self.w_spin.setValue(w)
+            self.h_spin.setValue(h)
+
+            self.x_spin.blockSignals(False)
+            self.y_spin.blockSignals(False)
+            self.w_spin.blockSignals(False)
+            self.h_spin.blockSignals(False)
+
+            self.roi_info.setText(f"ROI: X={x}, Y={y}, W={w}, H={h}")
+
+    def update_roi_from_spinboxes(self):
+        """Update ROI from spin box values"""
+        self.temp_roi = (
+            self.x_spin.value(),
+            self.y_spin.value(),
+            self.w_spin.value(),
+            self.h_spin.value()
+        )
+        self.roi_info.setText(f"ROI: X={self.x_spin.value()}, Y={self.y_spin.value()}, "
+                              f"W={self.w_spin.value()}, H={self.h_spin.value()}")
+        self.update_display()
+
+    def update_display(self):
+        """Update the image display with ROI overlay"""
+        if self.current_frame is not None:
+            # Create a copy of the frame
+            display_frame = self.current_frame.copy()
+
+            # Draw ROI rectangle if it exists
+            if self.temp_roi:
+                x, y, w, h = self.temp_roi
+                cv2.rectangle(display_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+            # Convert to QPixmap and display
+            height, width = display_frame.shape[:2]
+            bytes_per_line = 3 * width
+            rgb_image = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+            q_image = QImage(rgb_image.data, width, height,
+                             bytes_per_line, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(q_image)
+
+            # Scale to fit label
+            scaled_pixmap = pixmap.scaled(self.image_label.size(),
+                                          Qt.KeepAspectRatio,
+                                          Qt.SmoothTransformation)
+            self.image_label.setPixmap(scaled_pixmap)
+        else:
+            self.image_label.setText("No camera frame available")
+
+    def get_roi(self):
+        """Return the configured ROI"""
+        return self.temp_roi
 
 class ConfigurationGUI(BaseGUIWindow):
     """Main configuration window for system setup"""
 
     # Signals
     configuration_complete = pyqtSignal(dict)  # Emitted when config is confirmed
+    arduino_mode_changed = pyqtSignal(bool)  # Emitted when simulation mode changes
 
     def __init__(self, config_manager=None):
         super().__init__(config_manager, "Lego Sorting System - Configuration")
@@ -68,13 +392,17 @@ class ConfigurationGUI(BaseGUIWindow):
         self.create_control_panel()
         main_layout.addWidget(self.control_panel)
 
+        # Detector tab related
+        self.current_roi = None  # Store current ROI
+        self.preview_timer = None  # Timer for preview updates
+
         # Status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready to configure")
 
     def create_camera_tab(self):
-        """Create camera configuration tab"""
+        """Create enhanced camera configuration tab with dynamic device detection"""
         camera_tab = QWidget()
         layout = QVBoxLayout()
 
@@ -82,10 +410,30 @@ class ConfigurationGUI(BaseGUIWindow):
         camera_group = QGroupBox("Camera Settings")
         camera_layout = QFormLayout()
 
-        # Device selection
+        # Device selection with refresh button
+        device_layout = QHBoxLayout()
+
         self.camera_device = QComboBox()
-        self.camera_device.addItems(["0", "1", "2", "3"])
-        camera_layout.addRow("Camera Device:", self.camera_device)
+        self.camera_device.setMinimumWidth(250)
+        device_layout.addWidget(self.camera_device)
+
+        # Add refresh button to detect cameras
+        self.refresh_cameras_btn = QPushButton("🔄 Detect Cameras")
+        self.refresh_cameras_btn.clicked.connect(self.refresh_camera_list)
+        device_layout.addWidget(self.refresh_cameras_btn)
+
+        # Add test button to verify camera works
+        self.test_camera_btn = QPushButton("Test Camera")
+        self.test_camera_btn.clicked.connect(self.test_selected_camera)
+        device_layout.addWidget(self.test_camera_btn)
+
+        device_layout.addStretch()
+        camera_layout.addRow("Camera Device:", device_layout)
+
+        # Camera status label
+        self.camera_status_label = QLabel("Status: Not tested")
+        self.camera_status_label.setStyleSheet("color: gray;")
+        camera_layout.addRow("Camera Status:", self.camera_status_label)
 
         # Resolution
         self.resolution_combo = QComboBox()
@@ -107,7 +455,7 @@ class ConfigurationGUI(BaseGUIWindow):
         camera_group.setLayout(camera_layout)
         layout.addWidget(camera_group)
 
-        # Preview area
+        # Preview area (existing code)
         preview_group = QGroupBox("Camera Preview")
         preview_layout = QVBoxLayout()
 
@@ -122,7 +470,7 @@ class ConfigurationGUI(BaseGUIWindow):
         self.stop_preview_btn = QPushButton("Stop Preview")
         self.stop_preview_btn.setEnabled(False)
 
-        self.start_preview_btn.clicked.connect(self.start_camera_preview)
+        self.start_preview_btn.clicked.connect(self.start_camera_preview_with_switch)
         self.stop_preview_btn.clicked.connect(self.stop_camera_preview)
 
         preview_buttons.addWidget(self.start_preview_btn)
@@ -135,52 +483,533 @@ class ConfigurationGUI(BaseGUIWindow):
         camera_tab.setLayout(layout)
         self.tab_widget.addTab(camera_tab, "Camera")
 
+        # Connect device change signal
+        self.camera_device.currentIndexChanged.connect(self.on_camera_device_changed)
+
+        # Initially populate camera list
+        QTimer.singleShot(100, self.refresh_camera_list)
+
+    def refresh_camera_list(self):
+        """Detect and populate available cameras"""
+        try:
+            self.camera_status_label.setText("Detecting cameras...")
+            self.camera_status_label.setStyleSheet("color: blue;")
+            QApplication.processEvents()  # Update UI immediately
+
+            # Import camera module
+            from camera_module import CameraModule
+
+            # Get current selection to restore if possible
+            current_device_id = None
+            if self.camera_device.count() > 0:
+                current_text = self.camera_device.currentText()
+                if current_text:
+                    # Try to extract device ID from text
+                    try:
+                        current_device_id = int(current_text.split()[1])
+                    except:
+                        pass
+
+            # Clear existing items
+            self.camera_device.clear()
+
+            # Detect available cameras
+            cameras = CameraModule.enumerate_cameras(max_check=10)
+
+            if cameras:
+                # Add detected cameras to dropdown
+                for device_id, description in cameras:
+                    self.camera_device.addItem(description, userData=device_id)
+
+                # Try to restore previous selection
+                if current_device_id is not None:
+                    for i in range(self.camera_device.count()):
+                        if self.camera_device.itemData(i) == current_device_id:
+                            self.camera_device.setCurrentIndex(i)
+                            break
+
+                self.camera_status_label.setText(f"Found {len(cameras)} camera(s)")
+                self.camera_status_label.setStyleSheet("color: green;")
+                logger.info(f"Detected {len(cameras)} cameras")
+            else:
+                # No cameras found, add default option
+                self.camera_device.addItem("No cameras detected", userData=0)
+                self.camera_status_label.setText("No cameras detected")
+                self.camera_status_label.setStyleSheet("color: red;")
+                logger.warning("No cameras detected")
+
+        except Exception as e:
+            logger.error(f"Error detecting cameras: {e}")
+            self.camera_status_label.setText(f"Detection error: {str(e)}")
+            self.camera_status_label.setStyleSheet("color: red;")
+
+            # Add fallback options
+            self.camera_device.clear()
+            for i in range(4):
+                self.camera_device.addItem(f"Camera {i}", userData=i)
+
+    def test_selected_camera(self):
+        """Test if the selected camera works"""
+        try:
+            device_id = self.camera_device.currentData()
+            if device_id is None:
+                device_id = 0
+
+            self.camera_status_label.setText(f"Testing camera {device_id}...")
+            self.camera_status_label.setStyleSheet("color: blue;")
+            QApplication.processEvents()
+
+            import cv2
+            cap = cv2.VideoCapture(device_id)
+
+            if cap.isOpened():
+                ret, frame = cap.read()
+                cap.release()
+
+                if ret:
+                    self.camera_status_label.setText(f"Camera {device_id} works!")
+                    self.camera_status_label.setStyleSheet("color: green;")
+                else:
+                    self.camera_status_label.setText(f"Camera {device_id} opened but can't read frames")
+                    self.camera_status_label.setStyleSheet("color: orange;")
+            else:
+                self.camera_status_label.setText(f"Cannot open camera {device_id}")
+                self.camera_status_label.setStyleSheet("color: red;")
+
+        except Exception as e:
+            self.camera_status_label.setText(f"Test error: {str(e)}")
+            self.camera_status_label.setStyleSheet("color: red;")
+            logger.error(f"Camera test error: {e}")
+
+    def on_camera_device_changed(self, index):
+        """Handle camera device selection change"""
+        if index >= 0:
+            device_id = self.camera_device.currentData()
+            if device_id is not None:
+                logger.info(f"Camera device changed to: {device_id}")
+
+                # Update config
+                if self.config_manager:
+                    camera_config = self.config_manager.get_module_config("camera")
+                    camera_config["device_id"] = device_id
+                    self.config_manager.update_module_config("camera", camera_config)
+
+                # If preview is active, restart with new camera
+                if self.preview_active:
+                    self.stop_camera_preview()
+                    QTimer.singleShot(100, self.start_camera_preview_with_switch)
+
+    def start_camera_preview_with_switch(self):
+        """Start camera preview with proper device switching"""
+        try:
+            device_id = self.camera_device.currentData()
+            if device_id is None:
+                device_id = 0
+
+            # Get or create camera instance
+            if not hasattr(self, 'camera') or not self.camera:
+                from camera_module import create_camera
+                self.camera = create_camera(config_manager=self.config_manager)
+            else:
+                # Switch to the selected camera device
+                logger.info(f"Switching to camera device {device_id}")
+                success = self.camera.switch_camera(device_id, self.config_manager)
+
+                if not success:
+                    QMessageBox.warning(self, "Camera Error",
+                                        f"Failed to switch to camera {device_id}")
+                    return
+
+            # Initialize if needed
+            if not self.camera.is_initialized:
+                if not self.camera.initialize():
+                    QMessageBox.warning(self, "Camera Error",
+                                        "Failed to initialize camera")
+                    return
+
+            # Register preview consumer (rest of existing preview code)
+            success = self.camera.register_consumer(
+                name="config_preview",
+                callback=self._preview_frame_callback,
+                processing_type="async",
+                priority=50
+            )
+
+            if not success:
+                logger.warning("Preview consumer already registered, continuing...")
+
+            # Start capture if not running
+            if not self.camera.is_capturing:
+                self.camera.start_capture()
+
+            # Update UI state
+            self.preview_active = True
+            self.start_preview_btn.setEnabled(False)
+            self.stop_preview_btn.setEnabled(True)
+            self.status_bar.showMessage(f"Camera preview started (Device {device_id})")
+
+            logger.info(f"Live camera preview started with device {device_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to start camera preview: {e}")
+            QMessageBox.critical(self, "Preview Error",
+                                 f"Failed to start preview: {str(e)}")
+
     def create_detector_tab(self):
-        """Create detector configuration tab"""
+        """Create enhanced detector configuration tab with live preview"""
         detector_tab = QWidget()
+        main_layout = QHBoxLayout()  # Side-by-side layout
+
+        # LEFT SIDE: Settings Panel
+        settings_panel = self._create_detector_settings_panel()
+        main_layout.addWidget(settings_panel, 1)  # Takes 1/3 of space
+
+        # RIGHT SIDE: Preview Panel
+        preview_panel = self._create_detector_preview_panel()
+        main_layout.addWidget(preview_panel, 2)  # Takes 2/3 of space
+
+        detector_tab.setLayout(main_layout)
+        self.tab_widget.addTab(detector_tab, "Detector")
+
+    def _create_detector_settings_panel(self):
+        """Create the settings panel with all controls"""
+        panel = QWidget()
         layout = QVBoxLayout()
 
-        # Detection settings
+        # === DETECTION SETTINGS GROUP ===
         detection_group = QGroupBox("Detection Settings")
         detection_layout = QFormLayout()
 
-        # Min/Max area
-        self.min_area_spin = QSpinBox()
-        self.min_area_spin.setRange(100, 10000)
-        self.min_area_spin.setValue(500)
-        detection_layout.addRow("Min Area:", self.min_area_spin)
+        # Minimum piece area
+        self.min_piece_area_spin = QSpinBox()
+        self.min_piece_area_spin.setRange(100, 10000)
+        self.min_piece_area_spin.setValue(1000)
+        self.min_piece_area_spin.setSuffix(" px²")
+        self.min_piece_area_spin.setToolTip(
+            "Minimum area to detect as a valid piece.\n"
+            "Lower = may detect noise, Higher = may miss small pieces"
+        )
+        detection_layout.addRow("Min Piece Area:", self.min_piece_area_spin)
 
-        self.max_area_spin = QSpinBox()
-        self.max_area_spin.setRange(1000, 100000)
-        self.max_area_spin.setValue(50000)
-        detection_layout.addRow("Max Area:", self.max_area_spin)
+        # Maximum piece area
+        self.max_piece_area_spin = QSpinBox()
+        self.max_piece_area_spin.setRange(1000, 100000)
+        self.max_piece_area_spin.setValue(50000)
+        self.max_piece_area_spin.setSuffix(" px²")
+        self.max_piece_area_spin.setToolTip(
+            "Maximum area to detect as a single piece.\n"
+            "Lower = may split large pieces, Higher = may group multiple pieces"
+        )
+        detection_layout.addRow("Max Piece Area:", self.max_piece_area_spin)
 
-        # Threshold
-        self.threshold_slider = QSlider(Qt.Horizontal)
-        self.threshold_slider.setRange(0, 255)
-        self.threshold_slider.setValue(30)
-        detection_layout.addRow("Threshold:", self.threshold_slider)
+        # Minimum updates (how many frames before capture)
+        self.min_updates_spin = QSpinBox()
+        self.min_updates_spin.setRange(1, 20)
+        self.min_updates_spin.setValue(5)
+        self.min_updates_spin.setSuffix(" frames")
+        self.min_updates_spin.setToolTip(
+            "Frames a piece must be visible before capture.\n"
+            "Lower = faster but less reliable, Higher = slower but more reliable"
+        )
+        detection_layout.addRow("Min Updates:", self.min_updates_spin)
 
         detection_group.setLayout(detection_layout)
         layout.addWidget(detection_group)
 
-        # ROI settings
+        # === ZONE CONFIGURATION GROUP ===
+        zone_group = QGroupBox("Zone Configuration")
+        zone_layout = QFormLayout()
+
+        # Entry zone slider
+        entry_widget = QWidget()
+        entry_layout = QHBoxLayout()
+        self.entry_zone_slider = QSlider(Qt.Horizontal)
+        self.entry_zone_slider.setRange(5, 30)
+        self.entry_zone_slider.setValue(15)
+        self.entry_zone_label = QLabel("15%")
+        self.entry_zone_slider.valueChanged.connect(self._update_entry_zone)
+        entry_layout.addWidget(self.entry_zone_slider)
+        entry_layout.addWidget(self.entry_zone_label)
+        entry_widget.setLayout(entry_layout)
+        zone_layout.addRow("Entry Zone:", entry_widget)
+
+        # Exit zone slider
+        exit_widget = QWidget()
+        exit_layout = QHBoxLayout()
+        self.exit_zone_slider = QSlider(Qt.Horizontal)
+        self.exit_zone_slider.setRange(5, 30)
+        self.exit_zone_slider.setValue(15)
+        self.exit_zone_label = QLabel("15%")
+        self.exit_zone_slider.valueChanged.connect(self._update_exit_zone)
+        exit_layout.addWidget(self.exit_zone_slider)
+        exit_layout.addWidget(self.exit_zone_label)
+        exit_widget.setLayout(exit_layout)
+        zone_layout.addRow("Exit Zone:", exit_widget)
+
+        zone_group.setLayout(zone_layout)
+        layout.addWidget(zone_group)
+
+        # === ROI CONFIGURATION GROUP ===
         roi_group = QGroupBox("Region of Interest")
         roi_layout = QVBoxLayout()
 
-        self.roi_info_label = QLabel("ROI not configured")
+        self.roi_info_label = QLabel("ROI: Not Configured")
+        self.roi_info_label.setStyleSheet("padding: 5px; background: #f0f0f0;")
         roi_layout.addWidget(self.roi_info_label)
 
+        roi_button_layout = QHBoxLayout()
         self.configure_roi_btn = QPushButton("Configure ROI")
-        self.configure_roi_btn.clicked.connect(self.configure_roi)
-        roi_layout.addWidget(self.configure_roi_btn)
+        self.configure_roi_btn.clicked.connect(self._open_roi_configurator)
+        self.reset_roi_btn = QPushButton("Reset ROI")
+        self.reset_roi_btn.clicked.connect(self._reset_roi)
+        roi_button_layout.addWidget(self.configure_roi_btn)
+        roi_button_layout.addWidget(self.reset_roi_btn)
+        roi_layout.addLayout(roi_button_layout)
 
         roi_group.setLayout(roi_layout)
         layout.addWidget(roi_group)
 
+        # === ADVANCED SETTINGS BUTTON ===
+        self.advanced_toggle_btn = QPushButton("▼ Show Advanced Settings")
+        self.advanced_toggle_btn.setCheckable(True)
+        self.advanced_toggle_btn.clicked.connect(self._toggle_advanced_settings)
+        layout.addWidget(self.advanced_toggle_btn)
+
+        # === ADVANCED SETTINGS CONTAINER (Hidden by default) ===
+        self.advanced_container = self._create_advanced_settings()
+        self.advanced_container.setVisible(False)
+        layout.addWidget(self.advanced_container)
+
+        # Add stretch to push everything to top
         layout.addStretch()
-        detector_tab.setLayout(layout)
-        self.tab_widget.addTab(detector_tab, "Detector")
+
+        panel.setLayout(layout)
+        return panel
+
+    def _create_advanced_settings(self):
+        """Create the advanced settings (hidden by default)"""
+        container = QWidget()
+        layout = QVBoxLayout()
+
+        # You can add advanced settings groups here later
+        # For now, just add a placeholder
+        placeholder = QLabel("Advanced settings will go here\n(Background subtraction, timing, etc.)")
+        placeholder.setStyleSheet("padding: 20px; background: #f0f0f0;")
+        layout.addWidget(placeholder)
+
+        container.setLayout(layout)
+        return container
+
+    def _create_detector_preview_panel(self):
+        """Create the preview panel with camera feed"""
+        panel = QWidget()
+        layout = QVBoxLayout()
+
+        # Status bar at top
+        header_layout = QHBoxLayout()
+        self.detector_status_label = QLabel("Status: Not Started")
+        self.detector_fps_label = QLabel("FPS: 0")
+        self.pieces_detected_label = QLabel("Pieces: 0")
+
+        header_layout.addWidget(self.detector_status_label)
+        header_layout.addStretch()
+        header_layout.addWidget(self.pieces_detected_label)
+        header_layout.addWidget(self.detector_fps_label)
+        layout.addLayout(header_layout)
+
+        # Camera preview widget
+        self.detector_preview = DetectorPreviewWidget()
+        self.detector_preview.setMinimumSize(640, 480)
+        self.detector_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(self.detector_preview)
+
+        # Control buttons
+        controls_layout = QHBoxLayout()
+        self.start_preview_btn = QPushButton("Start Preview")
+        self.start_preview_btn.clicked.connect(self._toggle_preview)
+        controls_layout.addWidget(self.start_preview_btn)
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
+
+        panel.setLayout(layout)
+        return panel
+
+    def _update_entry_zone(self, value):
+        """Update entry zone percentage"""
+        self.entry_zone_label.setText(f"{value}%")
+        # Update the preview if it's running
+        if hasattr(self, 'detector_preview') and self.detector_preview.zones:
+            self.detector_preview.zones['entry'] = value / 100.0
+            self.detector_preview.update()
+
+    def _update_exit_zone(self, value):
+        """Update exit zone percentage"""
+        self.exit_zone_label.setText(f"{value}%")
+        # Update the preview if it's running
+        if hasattr(self, 'detector_preview') and self.detector_preview.zones:
+            self.detector_preview.zones['exit'] = value / 100.0
+            self.detector_preview.update()
+
+    def _toggle_advanced_settings(self):
+        """Show/hide advanced settings"""
+        is_visible = self.advanced_container.isVisible()
+        self.advanced_container.setVisible(not is_visible)
+        self.advanced_toggle_btn.setText(
+            "▲ Hide Advanced Settings" if not is_visible
+            else "▼ Show Advanced Settings"
+        )
+
+    def _open_roi_configurator(self):
+        """Open the ROI configuration dialog"""
+        # Try to get current frame from camera
+        current_frame = None
+        if hasattr(self, 'camera_module'):
+            try:
+                # This depends on your camera module implementation
+                # You might need to adjust this based on your actual camera module
+                current_frame = self.camera_module.get_current_frame()
+            except:
+                QMessageBox.warning(self, "Warning",
+                                    "Camera not running. ROI configuration will be limited.")
+
+        # Open the dialog
+        current_roi = getattr(self, 'current_roi', None)
+        dialog = ROIConfigDialog(self, current_frame, current_roi)
+
+        if dialog.exec_():  # If user clicked OK
+            new_roi = dialog.get_roi()
+            if new_roi:
+                self.current_roi = new_roi
+                x, y, w, h = new_roi
+                self.roi_info_label.setText(f"ROI: ({x}, {y}) {w}×{h}")
+
+                # Update detector module if it exists
+                if hasattr(self, 'detector_module'):
+                    self.detector_module.set_roi(new_roi, current_frame)
+
+                # Update preview
+                self.detector_preview.roi = new_roi
+                self.detector_preview.zones = {
+                    'entry': self.entry_zone_slider.value() / 100.0,
+                    'exit': self.exit_zone_slider.value() / 100.0
+                }
+                self.detector_preview.update()
+
+    def _reset_roi(self):
+        """Reset ROI to default"""
+        self.current_roi = None
+        self.roi_info_label.setText("ROI: Not Configured")
+        self.detector_preview.roi = None
+        self.detector_preview.update()
+
+    def _toggle_preview(self):
+        """Start or stop the camera preview - FIXED NULL CHECK"""
+        # FIXED: Properly check if preview_timer exists and is not None
+        if getattr(self, 'preview_timer', None) and self.preview_timer.isActive():
+            # Stop preview
+            self.preview_timer.stop()
+            self.start_preview_btn.setText("Start Preview")
+            self.detector_status_label.setText("Status: Stopped")
+
+            # Clean up camera if we have one
+            if hasattr(self, 'camera') and self.camera:
+                try:
+                    self.camera.unregister_consumer("detector_preview")
+                except:
+                    pass  # Consumer might not be registered
+
+        else:
+            # Start preview
+            try:
+                # Initialize camera if needed
+                if not hasattr(self, 'camera') or not self.camera:
+                    from camera_module import create_camera
+                    self.camera = create_camera(config_manager=self.config_manager)
+
+                    if not self.camera.is_initialized:
+                        if not self.camera.initialize():
+                            QMessageBox.warning(self, "Camera Error",
+                                                "Failed to initialize camera")
+                            return
+
+                # Create timer if it doesn't exist or is None
+                if not hasattr(self, 'preview_timer') or self.preview_timer is None:
+                    self.preview_timer = QTimer()
+                    self.preview_timer.timeout.connect(self._update_detector_preview)
+
+                # Start timer for regular updates
+                self.preview_timer.start(33)  # Update at ~30 FPS
+
+                # Start camera capture if not already running
+                if not self.camera.is_capturing:
+                    self.camera.start_capture()
+
+                # Update UI
+                self.start_preview_btn.setText("Stop Preview")
+                self.detector_status_label.setText("Status: Running")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Preview Error",
+                                     f"Failed to start preview: {str(e)}")
+                logger.error(f"Failed to start detector preview: {e}")
+
+    def _update_detector_preview(self):
+        """Update the preview (called by timer) - IMPROVED ERROR HANDLING"""
+        try:
+            # Get frame from camera
+            if not hasattr(self, 'camera') or not self.camera:
+                return
+
+            frame = self.camera.get_frame()
+            if frame is None:
+                return
+
+            # Prepare detection data for visualization
+            detection_data = {
+                'roi': getattr(self, 'current_roi', None),
+                'zones': {
+                    'entry': self.entry_zone_slider.value() / 100.0,
+                    'exit': self.exit_zone_slider.value() / 100.0
+                },
+                'pieces': []  # Will be filled by detector module if available
+            }
+
+            # If we have a detector module, get real detection data
+            if hasattr(self, 'detector_module') and self.detector_module:
+                try:
+                    # Run detection on the frame
+                    detections = self.detector_module.detect_pieces(frame)
+
+                    # Convert detections to visualization format
+                    pieces_data = []
+                    for piece in detections:
+                        piece_data = {
+                            'bbox': piece.bbox if hasattr(piece, 'bbox') else (0, 0, 0, 0),
+                            'being_processed': getattr(piece, 'being_processed', False),
+                            'captured': getattr(piece, 'captured', False),
+                            'in_exit_zone': getattr(piece, 'in_exit_zone', False)
+                        }
+                        pieces_data.append(piece_data)
+
+                    detection_data['pieces'] = pieces_data
+
+                    # Update status labels
+                    detector_data = self.detector_module.get_visualization_data()
+                    fps = detector_data.get('fps', 0)
+                    self.detector_fps_label.setText(f"FPS: {fps:.1f}")
+                    self.pieces_detected_label.setText(f"Pieces: {len(pieces_data)}")
+
+                except Exception as e:
+                    logger.warning(f"Error getting detector data: {e}")
+                    # Continue with basic preview even if detector fails
+
+            # Update the preview widget
+            if hasattr(self, 'detector_preview'):
+                self.detector_preview.update_frame(frame, detection_data)
+
+        except Exception as e:
+            logger.error(f"Error updating detector preview: {e}")
+            # Don't stop the preview entirely, just log the error
 
     def create_sorting_tab(self):
         """Create sorting configuration tab aligned with sorting module requirements"""
@@ -232,6 +1061,8 @@ class ConfigurationGUI(BaseGUIWindow):
         self.max_bins_spin.setValue(9)
         self.max_bins_spin.valueChanged.connect(self.on_max_bins_changed)
         bin_layout.addRow("Maximum Bins:", self.max_bins_spin)
+        # Connect to Arduino tab for bin position updates
+        self.max_bins_spin.valueChanged.connect(self.update_arduino_bin_count)
 
         # Overflow bin (fixed at 0)
         overflow_info = QLabel("0 (fixed)")
@@ -905,11 +1736,28 @@ class ConfigurationGUI(BaseGUIWindow):
         self.tab_widget.addTab(api_tab, "API")
 
     def create_arduino_tab(self):
-        """Create Arduino configuration tab"""
+        """Create enhanced Arduino configuration tab"""
         arduino_tab = QWidget()
         layout = QVBoxLayout()
 
-        # Connection settings
+        # Store references for cross-tab communication
+        self.arduino_widgets = {}
+
+        # === Simulation Mode === (at the top for visibility)
+        sim_group = QGroupBox("Operation Mode")
+        sim_layout = QVBoxLayout()
+
+        self.simulation_check = QCheckBox("Simulation Mode (no hardware required)")
+        self.simulation_check.stateChanged.connect(self.toggle_simulation_mode)
+        sim_layout.addWidget(self.simulation_check)
+
+        self.hardware_status_label = QLabel("Checking hardware...")
+        sim_layout.addWidget(self.hardware_status_label)
+
+        sim_group.setLayout(sim_layout)
+        layout.addWidget(sim_group)
+
+        # === Connection Settings ===
         connection_group = QGroupBox("Arduino Connection")
         connection_layout = QFormLayout()
 
@@ -927,35 +1775,131 @@ class ConfigurationGUI(BaseGUIWindow):
         # Baud rate
         self.baud_combo = QComboBox()
         self.baud_combo.addItems(["9600", "115200"])
+        self.baud_combo.setCurrentText("9600")
         connection_layout.addRow("Baud Rate:", self.baud_combo)
+
+        # Timeout
+        self.timeout_spin = QDoubleSpinBox()
+        self.timeout_spin.setRange(0.5, 10.0)
+        self.timeout_spin.setValue(2.0)
+        self.timeout_spin.setSingleStep(0.5)
+        self.timeout_spin.setSuffix(" sec")
+        connection_layout.addRow("Timeout:", self.timeout_spin)
+
+        # Connection retries
+        self.retry_spin = QSpinBox()
+        self.retry_spin.setRange(1, 10)
+        self.retry_spin.setValue(3)
+        connection_layout.addRow("Connection Retries:", self.retry_spin)
+
+        # Retry delay
+        self.retry_delay_spin = QDoubleSpinBox()
+        self.retry_delay_spin.setRange(0.5, 5.0)
+        self.retry_delay_spin.setValue(1.0)
+        self.retry_delay_spin.setSingleStep(0.5)
+        self.retry_delay_spin.setSuffix(" sec")
+        connection_layout.addRow("Retry Delay:", self.retry_delay_spin)
+
+        # Test connection button
+        self.test_connection_btn = QPushButton("Test Connection")
+        self.test_connection_btn.clicked.connect(self.test_arduino_connection)
+        connection_layout.addRow("", self.test_connection_btn)
 
         connection_group.setLayout(connection_layout)
         layout.addWidget(connection_group)
+        self.arduino_widgets['connection'] = [self.port_combo, self.refresh_ports_btn,
+                                              self.baud_combo, self.timeout_spin,
+                                              self.retry_spin, self.retry_delay_spin,
+                                              self.test_connection_btn]
 
-        # Servo settings
-        servo_group = QGroupBox("Servo Configuration")
-        servo_layout = QVBoxLayout()
+        # === Servo Hardware Settings ===
+        servo_hw_group = QGroupBox("Servo Hardware Settings")
+        servo_hw_layout = QFormLayout()
 
-        # Calibration button
-        self.calibrate_servo_btn = QPushButton("Calibrate Servo")
-        self.calibrate_servo_btn.clicked.connect(self.calibrate_servo)
-        servo_layout.addWidget(self.calibrate_servo_btn)
+        # Min pulse
+        self.min_pulse_spin = QSpinBox()
+        self.min_pulse_spin.setRange(400, 1000)
+        self.min_pulse_spin.setValue(500)
+        self.min_pulse_spin.setSuffix(" μs")
+        servo_hw_layout.addRow("Min Pulse Width:", self.min_pulse_spin)
+
+        # Max pulse
+        self.max_pulse_spin = QSpinBox()
+        self.max_pulse_spin.setRange(2000, 2600)
+        self.max_pulse_spin.setValue(2500)
+        self.max_pulse_spin.setSuffix(" μs")
+        servo_hw_layout.addRow("Max Pulse Width:", self.max_pulse_spin)
+
+        # Default position
+        self.default_pos_spin = QSpinBox()
+        self.default_pos_spin.setRange(0, 180)
+        self.default_pos_spin.setValue(90)
+        self.default_pos_spin.setSuffix("°")
+        servo_hw_layout.addRow("Home Position:", self.default_pos_spin)
+
+        # Min bin separation
+        self.min_separation_spin = QSpinBox()
+        self.min_separation_spin.setRange(10, 45)
+        self.min_separation_spin.setValue(20)
+        self.min_separation_spin.setSuffix("°")
+        self.min_separation_spin.valueChanged.connect(self.recalculate_bin_positions)
+        servo_hw_layout.addRow("Min Bin Separation:", self.min_separation_spin)
+
+        servo_hw_group.setLayout(servo_hw_layout)
+        layout.addWidget(servo_hw_group)
+        self.arduino_widgets['servo_hw'] = [self.min_pulse_spin, self.max_pulse_spin,
+                                            self.default_pos_spin, self.min_separation_spin]
+
+        # === Bin Configuration ===
+        bin_group = QGroupBox("Bin Position Configuration")
+        bin_layout = QVBoxLayout()
+
+        # Control buttons
+        btn_layout = QHBoxLayout()
+
+        self.auto_calculate_btn = QPushButton("Auto-Calculate Positions")
+        self.auto_calculate_btn.clicked.connect(self.auto_calculate_positions)
+        btn_layout.addWidget(self.auto_calculate_btn)
+
+        self.test_sweep_btn = QPushButton("Test All Positions")
+        self.test_sweep_btn.clicked.connect(self.test_sweep_positions)
+        btn_layout.addWidget(self.test_sweep_btn)
+
+        self.calibrate_servo_btn = QPushButton("Calibration Mode")
+        self.calibrate_servo_btn.setCheckable(True)
+        self.calibrate_servo_btn.toggled.connect(self.toggle_calibration_mode)
+        btn_layout.addWidget(self.calibrate_servo_btn)
+
+        bin_layout.addLayout(btn_layout)
 
         # Bin positions table
-        self.servo_table = QTableWidget(10, 2)
-        self.servo_table.setHorizontalHeaderLabels(["Bin", "Position"])
+        self.servo_table = QTableWidget(10, 3)  # Added test column
+        self.servo_table.setHorizontalHeaderLabels(["Bin", "Position (°)", "Test"])
+        self.servo_table.horizontalHeader().setStretchLastSection(False)
+        self.servo_table.setColumnWidth(0, 50)
+        self.servo_table.setColumnWidth(1, 100)
+        self.servo_table.setColumnWidth(2, 80)
 
-        for i in range(10):
-            self.servo_table.setItem(i, 0, QTableWidgetItem(str(i)))
-            self.servo_table.setItem(i, 1, QTableWidgetItem(str(90)))
+        # Initialize table with default values
+        self.setup_servo_table()
 
-        servo_layout.addWidget(self.servo_table)
+        bin_layout.addWidget(self.servo_table)
 
-        servo_group.setLayout(servo_layout)
-        layout.addWidget(servo_group)
+        # Info label
+        self.bin_info_label = QLabel("Bins will be auto-calculated based on Sorting tab settings")
+        bin_layout.addWidget(self.bin_info_label)
 
+        bin_group.setLayout(bin_layout)
+        layout.addWidget(bin_group)
+        self.arduino_widgets['bin_config'] = [self.auto_calculate_btn, self.test_sweep_btn,
+                                              self.calibrate_servo_btn, self.servo_table]
+
+        layout.addStretch()
         arduino_tab.setLayout(layout)
         self.tab_widget.addTab(arduino_tab, "Arduino")
+
+        # Check hardware on startup (delayed to allow GUI to initialize)
+        QTimer.singleShot(500, self.check_arduino_hardware)
 
     def create_system_tab(self):
         """Create system configuration tab"""
@@ -1049,19 +1993,77 @@ class ConfigurationGUI(BaseGUIWindow):
             res = camera_config.get("resolution", [1920, 1080])
             self.resolution_combo.setCurrentText(f"{res[0]}x{res[1]}")
             self.fps_spin.setValue(camera_config.get("fps", 30))
+            self.exposure_slider.setValue(camera_config.get("exposure", 0))
 
-        # Load detector settings
+        # Load detector settings - FIXED TO USE CORRECT ATTRIBUTE NAMES
         detector_config = self.config_manager.get_module_config("detector")
         if detector_config:
-            self.min_area_spin.setValue(detector_config.get("min_area", 500))
-            self.max_area_spin.setValue(detector_config.get("max_area", 50000))
-            self.threshold_slider.setValue(detector_config.get("threshold", 30))
+            # Use the actual attribute names from the new detector tab
+            self.min_piece_area_spin.setValue(detector_config.get("min_area", 1000))
+            self.max_piece_area_spin.setValue(detector_config.get("max_area", 50000))
+            self.min_updates_spin.setValue(detector_config.get("min_updates", 5))
 
-        # Load other settings...
-        # (Continue for all configuration items)
+            # Load zone settings
+            zones = detector_config.get("zones", {})
+            entry_zone = int(zones.get("entry_percentage", 15))
+            exit_zone = int(zones.get("exit_percentage", 15))
+            self.entry_zone_slider.setValue(entry_zone)
+            self.exit_zone_slider.setValue(exit_zone)
+            self._update_entry_zone(entry_zone)
+            self._update_exit_zone(exit_zone)
+
+            # Load ROI if present
+            roi = detector_config.get("roi")
+            if roi:
+                self.current_roi = roi
+                x, y, w, h = roi
+                self.roi_info_label.setText(f"ROI: ({x}, {y}) {w}×{h}")
+
+        # Load sorting settings - FIXED TO USE CORRECT METHOD
+        sorting_config = self.config_manager.get_module_config("sorting")
+        if sorting_config:
+            self.load_sorting_config(sorting_config)
+
+        # Load API settings
+        api_config = self.config_manager.get_module_config("api")
+        if api_config:
+            self.api_key_edit.setText(api_config.get("api_key", ""))
+            self.api_mode_combo.setCurrentText(api_config.get("mode", "Production"))
+            self.timeout_spin.setValue(api_config.get("timeout", 10))
+
+        # Load Arduino settings
+        arduino_config = self.config_manager.get_module_config("arduino_servo")
+        if arduino_config:
+            self.port_combo.setCurrentText(arduino_config.get("port", ""))
+            self.baud_combo.setCurrentText(str(arduino_config.get("baud_rate", 9600)))
+            self.timeout_spin.setValue(arduino_config.get("timeout", 2.0))
+            self.retry_spin.setValue(arduino_config.get("connection_retries", 3))
+            self.retry_delay_spin.setValue(arduino_config.get("retry_delay", 1.0))
+            self.simulation_check.setChecked(arduino_config.get("simulation_mode", False))
+
+            # Load servo hardware settings
+            self.min_pulse_spin.setValue(arduino_config.get("min_pulse", 500))
+            self.max_pulse_spin.setValue(arduino_config.get("max_pulse", 2500))
+            self.default_pos_spin.setValue(arduino_config.get("default_position", 90))
+            self.min_separation_spin.setValue(arduino_config.get("min_bin_separation", 20))
+
+            # Load bin positions
+            positions = arduino_config.get("bin_positions", {})
+            for i in range(10):
+                position = positions.get(str(i), 90)
+                if self.servo_table.item(i, 1):
+                    self.servo_table.item(i, 1).setText(str(position))
+
+        # Load system settings
+        system_config = self.config_manager.get_module_config("system")
+        if system_config:
+            self.threading_check.setChecked(system_config.get("threading_enabled", True))
+            self.queue_size_spin.setValue(system_config.get("queue_size", 100))
+            self.log_level_combo.setCurrentText(system_config.get("log_level", "INFO"))
+            self.save_images_check.setChecked(system_config.get("save_images", True))
 
     def get_configuration(self) -> Dict[str, Any]:
-        """Get current configuration from UI"""
+        """Get current configuration from UI - FIXED TO USE CORRECT ATTRIBUTES"""
         config = {}
 
         # Camera configuration
@@ -1073,18 +2075,20 @@ class ConfigurationGUI(BaseGUIWindow):
             'exposure': self.exposure_slider.value()
         }
 
-        # Detector configuration
+        # Detector configuration - FIXED TO USE CORRECT ATTRIBUTE NAMES
         config['detector'] = {
-            'min_area': self.min_area_spin.value(),
-            'max_area': self.max_area_spin.value(),
-            'threshold': self.threshold_slider.value()
+            'min_area': self.min_piece_area_spin.value(),
+            'max_area': self.max_piece_area_spin.value(),
+            'min_updates': self.min_updates_spin.value(),
+            'zones': {
+                'entry_percentage': self.entry_zone_slider.value(),
+                'exit_percentage': self.exit_zone_slider.value()
+            },
+            'roi': getattr(self, 'current_roi', None)
         }
 
-        # Sorting configuration
-        config['sorting'] = {
-            'strategy': self.strategy_combo.currentText(),
-            'overflow_bin': self.overflow_bin.value()
-        }
+        # Sorting configuration - USE THE DEDICATED METHOD
+        config['sorting'] = self.get_sorting_config()
 
         # API configuration
         config['api'] = {
@@ -1092,6 +2096,10 @@ class ConfigurationGUI(BaseGUIWindow):
             'mode': self.api_mode_combo.currentText(),
             'timeout': self.timeout_spin.value()
         }
+
+        # Arduino configuration
+        # Arduino configuration - Use the new dedicated method
+        config['arduino_servo'] = self.get_arduino_config()
 
         # System configuration
         config['system'] = {
@@ -1141,10 +2149,11 @@ class ConfigurationGUI(BaseGUIWindow):
     # ========== Camera Preview Methods ==========
 
     def start_camera_preview(self):
-        """Start live camera preview using consumer system"""
+        """Start live camera preview using consumer system - IMPROVED"""
         try:
             # Get or create camera instance
-            if not self.camera:
+            if not hasattr(self, 'camera') or not self.camera:
+                from camera_module import create_camera
                 self.camera = create_camera(config_manager=self.config_manager)
 
                 # Initialize if needed
@@ -1163,7 +2172,7 @@ class ConfigurationGUI(BaseGUIWindow):
             )
 
             if not success:
-                logger.warning("Preview consumer already registered")
+                logger.warning("Preview consumer already registered, continuing...")
 
             # Start camera capture if not already running
             if not self.camera.is_capturing:
@@ -1183,23 +2192,27 @@ class ConfigurationGUI(BaseGUIWindow):
                                  f"Failed to start preview: {str(e)}")
 
     def stop_camera_preview(self):
-        """Stop camera preview and unregister consumer"""
+        """Stop camera preview and unregister consumer - IMPROVED"""
         try:
-            if self.camera:
+            if hasattr(self, 'camera') and self.camera:
                 # Unregister this GUI as a consumer
-                self.camera.unregister_consumer("config_preview")
-
-                # Note: We don't stop capture here as other consumers might need it
-                # The camera module handles this efficiently
+                try:
+                    self.camera.unregister_consumer("config_preview")
+                except:
+                    pass  # Consumer might not be registered
 
             # Update UI state
             self.preview_active = False
-            self.preview_widget.setText("No Video Signal")
-            self.preview_fps_label.setText("FPS: 0.0")
-            self.start_preview_btn.setEnabled(True)
-            self.stop_preview_btn.setEnabled(False)
-            self.status_bar.showMessage("Camera preview stopped")
+            if hasattr(self, 'preview_widget'):
+                self.preview_widget.setText("No Video Signal")
+            if hasattr(self, 'preview_fps_label'):
+                self.preview_fps_label.setText("FPS: 0.0")
+            if hasattr(self, 'start_preview_btn'):
+                self.start_preview_btn.setEnabled(True)
+            if hasattr(self, 'stop_preview_btn'):
+                self.stop_preview_btn.setEnabled(False)
 
+            self.status_bar.showMessage("Camera preview stopped")
             logger.info("Camera preview stopped")
 
         except Exception as e:
@@ -1253,13 +2266,29 @@ class ConfigurationGUI(BaseGUIWindow):
             self.preview_widget.update_frame(frame)
 
     def closeEvent(self, event):
-        """Handle window close event"""
-        # Make sure to stop preview and clean up
-        if self.preview_active:
-            self.stop_camera_preview()
+        """Handle window close event - IMPROVED CLEANUP"""
+        try:
+            # Stop detector preview
+            if getattr(self, 'preview_timer', None):
+                self.preview_timer.stop()
 
-        # Call parent close event
-        super().closeEvent(event)
+            # Stop camera preview
+            if getattr(self, 'preview_active', False):
+                self.stop_camera_preview()
+
+            # Clean up camera
+            if hasattr(self, 'camera') and self.camera:
+                try:
+                    self.camera.unregister_consumer("config_preview")
+                    self.camera.unregister_consumer("detector_preview")
+                except:
+                    pass
+
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+        finally:
+            # Call parent close event
+            super().closeEvent(event)
 
     # ========== Other UI Methods ==========
 
@@ -1276,12 +2305,685 @@ class ConfigurationGUI(BaseGUIWindow):
         QTimer.singleShot(1000, lambda: self.api_status_label.setText("Connection OK"))
 
     def calibrate_servo(self):
-        """Start servo calibration"""
-        QMessageBox.information(self, "Servo Calibration",
-                                "Servo calibration would start here")
+        """Legacy calibration method - redirects to new calibration mode"""
+        # Toggle the new calibration mode button
+        if hasattr(self, 'calibrate_servo_btn'):
+            self.calibrate_servo_btn.setChecked(not self.calibrate_servo_btn.isChecked())
 
     def refresh_serial_ports(self):
         """Refresh available serial ports"""
-        # Would enumerate actual serial ports
-        self.port_combo.clear()
-        self.port_combo.addItems(["COM3", "COM4", "/dev/ttyUSB0"])
+        import serial.tools.list_ports
+
+        try:
+            # Get list of available ports
+            ports = serial.tools.list_ports.comports()
+            current_selection = self.port_combo.currentText()
+
+            self.port_combo.clear()
+
+            # Add detected ports
+            for port in ports:
+                self.port_combo.addItem(port.device)
+
+            # Add some common ports if not detected
+            common_ports = ["COM1", "COM2", "COM3", "COM4", "/dev/ttyUSB0", "/dev/ttyACM0"]
+            for port in common_ports:
+                if self.port_combo.findText(port) == -1:  # Not already in list
+                    self.port_combo.addItem(port)
+
+            # Restore previous selection if it still exists
+            index = self.port_combo.findText(current_selection)
+            if index >= 0:
+                self.port_combo.setCurrentIndex(index)
+
+        except ImportError:
+            # Fallback if pyserial not available
+            self.port_combo.clear()
+            self.port_combo.addItems(["COM1", "COM2", "COM3", "COM4", "/dev/ttyUSB0", "/dev/ttyACM0"])
+            QMessageBox.warning(self, "Serial Ports",
+                                "pyserial not installed. Showing common port names only.")
+        except Exception as e:
+            logger.error(f"Error refreshing serial ports: {e}")
+            QMessageBox.warning(self, "Error", f"Could not refresh ports: {str(e)}")
+
+        # ============= ARDUINO TAB SUPPORTING METHODS =============
+        # Add these methods after your existing refresh_serial_ports method
+
+    def setup_servo_table(self):
+            """Initialize the servo position table with test buttons"""
+            for i in range(10):
+                # Bin number (read-only)
+                bin_item = QTableWidgetItem(str(i))
+                bin_item.setFlags(bin_item.flags() & ~Qt.ItemIsEditable)
+                self.servo_table.setItem(i, 0, bin_item)
+
+                # Position (editable)
+                self.servo_table.setItem(i, 1, QTableWidgetItem(str(90)))
+
+                # Test button
+                test_btn = QPushButton("Test")
+                test_btn.clicked.connect(lambda checked, bin_num=i: self.test_single_position(bin_num))
+                self.servo_table.setCellWidget(i, 2, test_btn)
+
+    def check_arduino_hardware(self):
+        """
+        Check if Arduino hardware is connected and update UI accordingly.
+
+        This method scans available serial ports looking for Arduino devices by checking
+        for common USB-to-serial chip identifiers and port naming patterns. It automatically
+        sets simulation mode if no Arduino is detected.
+
+        The detection looks for:
+        - Common USB-serial chip names (CH340, FT232, CP210x, etc.)
+        - Arduino-specific identifiers in port descriptions
+        - Standard Arduino port naming patterns (/dev/ttyACM*, /dev/ttyUSB*)
+        """
+        arduino_found = False
+        arduino_port = None
+
+        # Comprehensive list of Arduino and USB-serial chip identifiers
+        # These cover most genuine Arduino boards and clones
+        arduino_identifiers = [
+            'arduino',  # Official Arduino boards
+            'ch340', 'ch341',  # Common Chinese clone chips
+            'ft232', 'ftdi',  # FTDI chips used in older Arduinos
+            'cp210', 'cp2102',  # Silicon Labs chips
+            'usb serial',  # Generic USB serial devices
+            'usb-serial',  # Alternative formatting
+            'usbserial',  # Another variant
+            'silabs',  # Silicon Labs
+            'pl2303',  # Prolific chips
+            'hl-340',  # Another CH340 variant
+            'usb2.0-serial',  # Generic USB 2.0 serial
+            '2341',  # Arduino's USB vendor ID
+            '2a03',  # Arduino vendor ID (hex)
+            'genuino',  # Arduino's alternative brand
+            'atmel',  # Atmel chips (used in Arduino)
+            'mega2560',  # Arduino Mega
+            'uno',  # Arduino Uno
+            'nano',  # Arduino Nano
+            'leonardo',  # Arduino Leonardo
+        ]
+
+        try:
+            # Get list of all available serial ports
+            ports = serial.tools.list_ports.comports()
+            logger.info(f"Found {len(ports)} serial ports to check")
+
+            for port in ports:
+                # Get port information (safely handle None values)
+                port_desc = (port.description or '').lower()
+                port_name = (port.device or '').lower()
+                port_manufacturer = (port.manufacturer or '').lower()
+                port_product = (port.product or '').lower()
+
+                # Log port details for debugging
+                logger.debug(f"Checking port: {port.device}")
+                logger.debug(f"  Description: {port.description}")
+                logger.debug(f"  Manufacturer: {port.manufacturer}")
+                logger.debug(f"  Product: {port.product}")
+
+                # Check if this port matches Arduino patterns
+                # Check 1: Look for identifiers in description
+                desc_match = any(identifier in port_desc for identifier in arduino_identifiers)
+
+                # Check 2: Look for identifiers in manufacturer/product
+                mfg_match = any(identifier in port_manufacturer for identifier in arduino_identifiers)
+                prod_match = any(identifier in port_product for identifier in arduino_identifiers)
+
+                # Check 3: Look for typical Arduino port names (Linux/Mac)
+                port_name_match = ('ttyacm' in port_name or
+                                   'ttyusb' in port_name or
+                                   'cu.usbmodem' in port_name or  # Mac
+                                   'cu.usbserial' in port_name)  # Mac
+
+                # Check 4: Windows COM ports with Arduino descriptors
+                windows_match = (port.device.startswith('COM') and
+                                 (desc_match or mfg_match or prod_match))
+
+                # If any check passes, we found an Arduino
+                if desc_match or mfg_match or prod_match or port_name_match or windows_match:
+                    arduino_found = True
+                    arduino_port = port.device
+                    logger.info(f"Arduino detected on port {arduino_port}")
+                    logger.info(f"  Device details: {port.description}")
+                    break
+
+            # Update UI based on detection results
+            if arduino_found:
+                # Arduino detected - enable hardware mode
+                self.hardware_status_label.setText(f"✓ Arduino detected on {arduino_port}")
+                self.hardware_status_label.setStyleSheet("color: green;")
+                self.simulation_check.setChecked(False)
+
+                # Set the detected port in the combo box
+                self.port_combo.setCurrentText(arduino_port)
+
+                # Update config to ensure hardware mode using EnhancedConfigManager API
+                if self.config_manager:
+                    self.config_manager.update_module_config("arduino_servo", {
+                        "simulation_mode": False,
+                        "port": arduino_port
+                    })
+                    logger.info("Updated config: simulation_mode=False, port=" + arduino_port)
+            else:
+                # No Arduino detected - default to simulation mode
+                self.hardware_status_label.setText("✗ No Arduino detected - defaulting to simulation")
+                self.hardware_status_label.setStyleSheet("color: orange;")
+                self.simulation_check.setChecked(True)
+
+                # Update config to ensure simulation mode using EnhancedConfigManager API
+                if self.config_manager:
+                    self.config_manager.update_module_config("arduino_servo", {
+                        "simulation_mode": True
+                    })
+                    logger.info("Updated config: simulation_mode=True (no Arduino detected)")
+
+                # Log available ports for debugging
+                if ports:
+                    logger.warning("No Arduino found among available ports:")
+                    for port in ports:
+                        logger.warning(f"  - {port.device}: {port.description}")
+                else:
+                    logger.warning("No serial ports found on system")
+
+        except ImportError:
+            # pyserial not installed
+            logger.error("pyserial not installed - cannot detect Arduino")
+            self.hardware_status_label.setText("✗ Serial library not available")
+            self.hardware_status_label.setStyleSheet("color: red;")
+            self.simulation_check.setChecked(True)
+
+            if self.config_manager:
+                self.config_manager.update_module_config("arduino_servo", {
+                    "simulation_mode": True
+                })
+
+        except Exception as e:
+            # Unexpected error during detection
+            logger.error(f"Error detecting Arduino: {e}", exc_info=True)
+            self.hardware_status_label.setText("✗ Error detecting Arduino")
+            self.hardware_status_label.setStyleSheet("color: red;")
+            self.simulation_check.setChecked(True)
+
+            if self.config_manager:
+                self.config_manager.update_module_config("arduino_servo", {
+                    "simulation_mode": True
+                })
+    def verify_arduino_connection(self):
+        """
+        Verify that Arduino is actually connected when switching to hardware mode.
+
+        This method is called after the user disables simulation mode to ensure
+        that an Arduino is actually available. If not found, it prompts the user
+        to either retry or return to simulation mode.
+        """
+        port = self.port_combo.currentText().split(" ")[
+            0] if " " in self.port_combo.currentText() else self.port_combo.currentText()
+        baud = int(self.baud_combo.currentText())
+        timeout = self.timeout_spin.value()
+
+        arduino_connected = False
+        error_message = None
+
+        try:
+            # Attempt to open serial connection to verify Arduino presence
+            logger.info(f"Verifying Arduino connection on {port}")
+            ser = serial.Serial(port, baud, timeout=timeout)
+
+            # Send a simple test command if possible
+            ser.write(b'\n')  # Send newline to clear any buffer
+            time.sleep(0.1)
+
+            # Connection successful
+            ser.close()
+            arduino_connected = True
+            logger.info(f"Arduino verified on {port}")
+
+        except serial.SerialException as e:
+            error_message = f"Cannot connect to {port}: {str(e)}"
+            logger.error(error_message)
+        except Exception as e:
+            error_message = f"Unexpected error: {str(e)}"
+            logger.error(error_message)
+
+        # Update UI based on verification result
+        if arduino_connected:
+            self.hardware_status_label.setText(f"✓ Arduino connected on {port}")
+            self.hardware_status_label.setStyleSheet("color: green;")
+        else:
+            # Arduino not found - ask user what to do
+            self.hardware_status_label.setText("✗ Arduino connection failed")
+            self.hardware_status_label.setStyleSheet("color: red;")
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("Arduino Not Found")
+            msg.setText("Could not connect to Arduino.")
+            msg.setInformativeText(
+                error_message or "Please check that Arduino is connected and the correct port is selected.")
+            msg.setStandardButtons(QMessageBox.Retry | QMessageBox.Cancel)
+            msg.setDefaultButton(QMessageBox.Retry)
+
+            # Add custom button for returning to simulation mode
+            sim_button = msg.addButton("Use Simulation", QMessageBox.ActionRole)
+
+            result = msg.exec_()
+
+            if msg.clickedButton() == sim_button:
+                # Return to simulation mode
+                logger.info("User chose to return to simulation mode")
+                self.simulation_check.setChecked(True)
+            elif result == QMessageBox.Retry:
+                # Retry the connection
+                logger.info("User chose to retry Arduino connection")
+                QTimer.singleShot(100, self.verify_arduino_connection)
+            else:
+                # User cancelled - return to simulation mode
+                logger.info("User cancelled - returning to simulation mode")
+                self.simulation_check.setChecked(True)
+
+    def update_arduino_dependent_ui(self, simulation_enabled):
+        """
+        Update UI elements that depend on Arduino mode.
+
+        This method updates various UI elements based on whether simulation
+        or hardware mode is active, ensuring consistent visual feedback.
+
+        Args:
+            simulation_enabled: True if simulation mode is active, False for hardware mode
+        """
+        # Update test button text and tooltips
+        if hasattr(self, 'test_connection_btn'):
+            if simulation_enabled:
+                self.test_connection_btn.setText("Test Connection (Disabled)")
+                self.test_connection_btn.setToolTip("Connection testing disabled in simulation mode")
+            else:
+                self.test_connection_btn.setText("Test Connection")
+                self.test_connection_btn.setToolTip("Test the Arduino serial connection")
+
+        # Update servo table appearance
+        if hasattr(self, 'servo_table'):
+            for row in range(self.servo_table.rowCount()):
+                # Update test button in column 2
+                test_button = self.servo_table.cellWidget(row, 2)
+                if test_button:
+                    if simulation_enabled:
+                        test_button.setText("Test (Sim)")
+                        test_button.setToolTip("Simulated servo movement - no hardware required")
+                    else:
+                        test_button.setText("Test")
+                        test_button.setToolTip("Test servo position with hardware")
+
+        # Update calibration button
+        if hasattr(self, 'calibrate_servo_btn'):
+            self.calibrate_servo_btn.setEnabled(not simulation_enabled)
+            if simulation_enabled:
+                self.calibrate_servo_btn.setToolTip("Calibration disabled in simulation mode")
+            else:
+                self.calibrate_servo_btn.setToolTip("Enter servo calibration mode")
+
+        # Update info labels
+        if hasattr(self, 'bin_info_label'):
+            if simulation_enabled:
+                if not self.calibrate_servo_btn.isChecked():
+                    self.bin_info_label.setText("SIMULATION MODE - Servo positions will be simulated")
+                    self.bin_info_label.setStyleSheet("color: blue; font-style: italic;")
+
+    def toggle_simulation_mode(self, state):
+        """
+        Enable/disable Arduino controls based on simulation mode selection.
+
+        This method is called when the user manually toggles the simulation mode checkbox.
+        It updates both the UI state and the underlying configuration, and can trigger
+        Arduino module reinitialization if the system is running.
+
+        Args:
+            state: Qt.Checked if simulation mode is enabled, Qt.Unchecked for hardware mode
+        """
+        # Determine if simulation mode is being enabled
+        simulation_enabled = (state == Qt.Checked)
+        hardware_enabled = not simulation_enabled
+
+        logger.info(f"User toggled simulation mode: {'ON' if simulation_enabled else 'OFF'}")
+
+        # Update configuration manager with new mode using EnhancedConfigManager API
+        if self.config_manager:
+            try:
+                # Build update dictionary
+                updates = {"simulation_mode": simulation_enabled}
+
+                # If switching to hardware mode, ensure we have a valid port
+                if hardware_enabled:
+                    current_port = self.port_combo.currentText()
+                    if current_port:
+                        # Extract just the port name if it contains additional info
+                        port_name = current_port.split(" ")[0] if " " in current_port else current_port
+                        updates["port"] = port_name
+                        logger.info(f"Hardware mode enabled with port: {port_name}")
+                    else:
+                        logger.warning("Hardware mode enabled but no port selected")
+
+                # Update the Arduino servo configuration
+                self.config_manager.update_module_config("arduino_servo", updates)
+
+                # Save configuration changes immediately
+                self.config_manager.save_config()
+                logger.info("Arduino configuration saved")
+
+            except Exception as e:
+                logger.error(f"Failed to update Arduino configuration: {e}")
+                QMessageBox.warning(self, "Configuration Error",
+                                    f"Failed to save Arduino settings: {str(e)}")
+
+        # Enable/disable all Arduino control widgets based on mode
+        for widget_group in self.arduino_widgets.values():
+            for widget in widget_group:
+                widget.setEnabled(hardware_enabled)
+
+        # Update visual feedback to show current mode
+        if simulation_enabled:
+            self.hardware_status_label.setText("Simulation mode active - hardware controls disabled")
+            self.hardware_status_label.setStyleSheet("color: blue;")
+
+            # Show informational message (only once per toggle)
+            if not hasattr(self, '_sim_mode_msg_shown'):
+                self._sim_mode_msg_shown = True
+                QMessageBox.information(self, "Simulation Mode",
+                                        "Arduino simulation mode enabled.\n\n"
+                                        "The system will simulate servo movements without "
+                                        "requiring physical Arduino hardware.")
+        else:
+            # Hardware mode - check if Arduino is actually available
+            self.hardware_status_label.setText("Hardware mode active - Checking Arduino...")
+            self.hardware_status_label.setStyleSheet("color: orange;")
+
+            # Verify Arduino is actually connected
+            QTimer.singleShot(100, self.verify_arduino_connection)
+
+        # Emit signal to notify other parts of the application about the mode change
+        # This allows the main application to reinitialize the Arduino module if needed
+        if hasattr(self, 'arduino_mode_changed'):
+            self.arduino_mode_changed.emit(simulation_enabled)
+            logger.info(f"Emitted arduino_mode_changed signal (simulation={simulation_enabled})")
+
+        # Update any dependent UI elements
+        self.update_arduino_dependent_ui(simulation_enabled)
+
+    def test_arduino_connection(self):
+        """Test the Arduino connection with current settings and verify servo response"""
+        if self.simulation_check.isChecked():
+            QMessageBox.information(self, "Simulation Mode",
+                                    "Running in simulation mode - no hardware test performed")
+            return
+
+        port = self.port_combo.currentText().split(" ")[0]  # Extract just the port
+        baud = int(self.baud_combo.currentText())
+        timeout = self.timeout_spin.value()
+
+        try:
+            import serial
+            import time
+
+            # Try to open serial connection and test servo
+            with serial.Serial(port, baud, timeout=timeout) as arduino:
+                # Wait for Arduino to initialize
+                time.sleep(1.0)
+
+                # Clear any initial messages
+                while arduino.in_waiting:
+                    arduino.readline()
+
+                # Send a test command (move to center position)
+                test_angle = 90
+                command = f"A,{test_angle}\n"
+                arduino.write(command.encode())
+
+                # Read response
+                response = arduino.readline().decode().strip()
+
+                if response and "Moved to:" in response:
+                    QMessageBox.information(self, "Connection Test",
+                                            f"✓ Arduino connection successful!\n"
+                                            f"Port: {port}\n"
+                                            f"Response: {response}\n\n"
+                                            f"Servo moved to test position ({test_angle}°)")
+                elif response:
+                    QMessageBox.warning(self, "Connection Test",
+                                        f"✓ Connected to {port}\n"
+                                        f"✗ Unexpected response: {response}\n\n"
+                                        f"Check that the Arduino is running the correct sketch.")
+                else:
+                    QMessageBox.warning(self, "Connection Test",
+                                        f"✓ Connected to {port}\n"
+                                        f"✗ No response from Arduino\n\n"
+                                        f"Check that the Arduino sketch is loaded and running.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Connection Failed",
+                                 f"✗ Failed to connect to Arduino:\n\n{str(e)}\n\n"
+                                 f"Check:\n"
+                                 f"• Arduino is connected to {port}\n"
+                                 f"• Correct port is selected\n"
+                                 f"• Arduino sketch is uploaded\n"
+                                 f"• No other programs are using the port")
+
+    def get_current_bin_count(self):
+            """Get the bin count from the Sorting tab"""
+            # This method accesses the sorting tab's bin configuration
+            if hasattr(self, 'max_bins_spin'):  # From sorting tab
+                return self.max_bins_spin.value()
+            return 9  # Default if not found
+
+    def recalculate_bin_positions(self):
+            """Recalculate bin positions when settings change"""
+            if hasattr(self, 'auto_calculate_on_change') and self.auto_calculate_on_change:
+                self.auto_calculate_positions()
+
+    def auto_calculate_positions(self):
+            """Automatically calculate evenly distributed bin positions"""
+            bin_count = self.get_current_bin_count()
+            min_separation = self.min_separation_spin.value()
+
+            # Calculate total range needed
+            total_range_needed = (bin_count - 1) * min_separation
+
+            if total_range_needed > 180:
+                QMessageBox.warning(self, "Configuration Error",
+                                    f"Cannot fit {bin_count} bins with {min_separation}° separation.\n"
+                                    f"Maximum bins with this separation: {180 // min_separation + 1}")
+                return
+
+            # Calculate positions centered around 90 degrees
+            center = 90
+            if bin_count == 1:
+                positions = [center]
+            else:
+                start_angle = center - (total_range_needed / 2)
+                positions = [start_angle + i * min_separation for i in range(bin_count)]
+
+            # Ensure all positions are within 0-180 range
+            positions = [max(0, min(180, pos)) for pos in positions]
+
+            # Update table
+            for i in range(10):
+                if i < bin_count:
+                    self.servo_table.item(i, 1).setText(f"{positions[i]:.1f}")
+                    self.servo_table.setRowHidden(i, False)
+                else:
+                    self.servo_table.setRowHidden(i, True)
+
+            self.bin_info_label.setText(f"Positions calculated for {bin_count} bins")
+
+    def test_single_position(self, bin_num):
+        """Test a single bin position with actual Arduino communication"""
+        if self.simulation_check.isChecked():
+            QMessageBox.information(self, "Test Position",
+                                    f"Simulation: Would move to bin {bin_num}")
+            return
+
+        try:
+            position = float(self.servo_table.item(bin_num, 1).text())
+
+            # Get Arduino connection settings
+            port = self.port_combo.currentText().split(" ")[0]  # Extract just the port name
+            baud = int(self.baud_combo.currentText())
+            timeout = self.timeout_spin.value()
+
+            # Establish connection and send command
+            import serial
+            import time
+
+            with serial.Serial(port, baud, timeout=timeout) as arduino:
+                # Wait for Arduino to initialize
+                time.sleep(0.5)
+
+                # Send angle command
+                command = f"A,{int(position)}\n"
+                arduino.write(command.encode())
+
+                # Read response
+                response = arduino.readline().decode().strip()
+
+                if response:
+                    QMessageBox.information(self, "Test Position",
+                                            f"Bin {bin_num}: {response}")
+                else:
+                    QMessageBox.warning(self, "Test Position",
+                                        f"Sent command but no response from Arduino")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Test Failed",
+                                 f"Failed to test position:\n{str(e)}")
+
+    def test_sweep_positions(self):
+        """Test sweep through all bin positions with actual Arduino communication"""
+        if self.simulation_check.isChecked():
+            QMessageBox.information(self, "Test Sweep",
+                                    "Simulation: Would sweep through all bin positions")
+            return
+
+        try:
+            bin_count = self.get_current_bin_count()
+            positions = []
+            for i in range(bin_count):
+                pos_text = self.servo_table.item(i, 1).text()
+                positions.append(int(float(pos_text)))
+
+            message = "Will sweep through positions:\n"
+            message += ", ".join([f"{p}°" for p in positions])
+            message += "\n\nEach position will be held for 1 second."
+
+            reply = QMessageBox.question(self, "Test Sweep", message,
+                                         QMessageBox.Yes | QMessageBox.No)
+
+            if reply == QMessageBox.Yes:
+                # Get Arduino connection settings
+                port = self.port_combo.currentText().split(" ")[0]
+                baud = int(self.baud_combo.currentText())
+                timeout = self.timeout_spin.value()
+
+                # Create progress dialog
+                progress = QProgressDialog("Testing servo positions...", "Cancel", 0, len(positions))
+                progress.setWindowModality(Qt.WindowModal)
+                progress.show()
+
+                import serial
+                import time
+
+                with serial.Serial(port, baud, timeout=timeout) as arduino:
+                    # Wait for Arduino to initialize
+                    time.sleep(0.5)
+
+                    for i, position in enumerate(positions):
+                        if progress.wasCanceled():
+                            break
+
+                        progress.setValue(i)
+                        progress.setLabelText(f"Testing bin {i} at {position}°...")
+                        QApplication.processEvents()
+
+                        # Send command
+                        command = f"A,{position}\n"
+                        arduino.write(command.encode())
+
+                        # Read response
+                        response = arduino.readline().decode().strip()
+
+                        # Hold position for 1 second
+                        time.sleep(1.0)
+
+                    progress.setValue(len(positions))
+                    progress.close()
+
+                    QMessageBox.information(self, "Sweep Complete",
+                                            "Servo position sweep completed successfully!")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Sweep Failed",
+                                 f"Failed to sweep positions:\n{str(e)}")
+
+    def toggle_calibration_mode(self, checked):
+            """Toggle calibration mode"""
+            if checked:
+                self.calibrate_servo_btn.setText("Exit Calibration")
+                self.bin_info_label.setText("CALIBRATION MODE: Manually adjust positions and test")
+                self.bin_info_label.setStyleSheet("color: red; font-weight: bold;")
+
+                # Enable manual editing of all positions
+                for i in range(10):
+                    item = self.servo_table.item(i, 1)
+                    if item:
+                        item.setFlags(item.flags() | Qt.ItemIsEditable)
+            else:
+                self.calibrate_servo_btn.setText("Calibration Mode")
+                self.bin_info_label.setText("Bins will be auto-calculated based on Sorting tab settings")
+                self.bin_info_label.setStyleSheet("")
+
+    def update_arduino_bin_count(self, value):
+            """Update Arduino tab when bin count changes in Sorting tab"""
+            if hasattr(self, 'servo_table'):  # Check if Arduino tab exists
+                self.auto_calculate_positions()
+
+    def get_arduino_config(self):
+            """Get the current Arduino configuration from the UI"""
+            config = {
+                "port": self.port_combo.currentText().split(" ")[
+                    0] if " " in self.port_combo.currentText() else self.port_combo.currentText(),
+                "baud_rate": int(self.baud_combo.currentText()),
+                "timeout": self.timeout_spin.value(),
+                "connection_retries": self.retry_spin.value(),
+                "retry_delay": self.retry_delay_spin.value(),
+                "simulation_mode": self.simulation_check.isChecked(),
+                "min_pulse": self.min_pulse_spin.value(),
+                "max_pulse": self.max_pulse_spin.value(),
+                "default_position": self.default_pos_spin.value(),
+                "min_bin_separation": self.min_separation_spin.value(),
+                "bin_positions": {}
+            }
+
+            # Get bin positions from table
+            bin_count = self.get_current_bin_count()
+            for i in range(bin_count):
+                pos_text = self.servo_table.item(i, 1).text()
+                config["bin_positions"][str(i)] = float(pos_text)
+
+            return config
+
+    def update_preview_frame(self, frame):
+        """Update the preview frame (public method for external use)"""
+        if hasattr(self, 'detector_preview'):
+            # Update the detector preview widget
+            detection_data = {
+                'roi': getattr(self, 'current_roi', None),
+                'zones': {
+                    'entry': self.entry_zone_slider.value() / 100.0,
+                    'exit': self.exit_zone_slider.value() / 100.0
+                },
+                'pieces': []  # Empty for configuration preview
+            }
+            self.detector_preview.update_frame(frame, detection_data)
+
+        if hasattr(self, 'preview_widget'):
+            # Also update the camera tab preview widget
+            self.preview_widget.update_frame(frame)
