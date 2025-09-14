@@ -139,7 +139,7 @@
             "8": 90,
             "9": 90
         },
-        "simulation_mode": false
+        "simulation_mode": true
     },
     "detector_roi": {
         "x": 412,

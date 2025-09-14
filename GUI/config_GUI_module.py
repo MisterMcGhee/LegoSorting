@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional
 from enhanced_config_manager import create_config_manager  # or your config manager
 from GUI.gui_common import BaseGUIWindow, VideoWidget, ConfirmationDialog, validate_config
 from camera_module import create_camera
+from enhanced_config_manager import ModuleConfig
 import serial
 import serial.tools.list_ports
 
@@ -122,224 +123,6 @@ class DetectorPreviewWidget(QWidget):
             painter.drawText(self.rect(), Qt.AlignCenter,
                              "No camera feed\nClick 'Start Preview' to begin")
 
-class ROIConfigDialog(QDialog):
-    """Dialog window for setting up the Region of Interest"""
-
-    def __init__(self, parent=None, current_frame=None, current_roi=None):
-        super().__init__(parent)
-        self.setWindowTitle("Configure Region of Interest")
-        self.setModal(True)  # Blocks interaction with main window
-        self.resize(800, 600)
-
-        self.current_frame = current_frame
-        self.current_roi = current_roi
-        self.temp_roi = current_roi  # Temporary ROI while configuring
-
-        self._setup_ui()
-
-    def _setup_ui(self):
-        """Create the dialog interface"""
-        layout = QVBoxLayout()
-
-        # Instructions at the top
-        instructions = QLabel(
-            "Draw ROI: Click and drag to create a rectangle\n"
-            "Adjust: Use the spin boxes below for fine tuning"
-        )
-        instructions.setStyleSheet("padding: 10px; background: #f0f0f0;")
-        layout.addWidget(instructions)
-
-        # Image display area
-        self.image_label = QLabel()
-        self.image_label.setMinimumSize(640, 480)
-        self.image_label.setStyleSheet("border: 1px solid black;")
-        self.image_label.setAlignment(Qt.AlignCenter)
-
-        # Mouse events for drawing ROI
-        self.image_label.mousePressEvent = self.mouse_press
-        self.image_label.mouseMoveEvent = self.mouse_move
-        self.image_label.mouseReleaseEvent = self.mouse_release
-
-        self.drawing = False
-        self.start_point = None
-
-        layout.addWidget(self.image_label)
-
-        # ROI info display
-        self.roi_info = QLabel("ROI: Not set")
-        layout.addWidget(self.roi_info)
-
-        # Fine adjustment controls
-        adjust_group = QGroupBox("Fine Adjustment")
-        adjust_layout = QGridLayout()
-
-        # Create spin boxes for X, Y, Width, Height
-        self.x_spin = QSpinBox()
-        self.y_spin = QSpinBox()
-        self.w_spin = QSpinBox()
-        self.h_spin = QSpinBox()
-
-        # Set ranges for spin boxes
-        if self.current_frame is not None:
-            h, w = self.current_frame.shape[:2]
-            self.x_spin.setRange(0, w)
-            self.y_spin.setRange(0, h)
-            self.w_spin.setRange(10, w)
-            self.h_spin.setRange(10, h)
-        else:
-            for spin in [self.x_spin, self.y_spin, self.w_spin, self.h_spin]:
-                spin.setRange(0, 2000)
-
-        # Connect spin boxes to update method
-        self.x_spin.valueChanged.connect(self.update_roi_from_spinboxes)
-        self.y_spin.valueChanged.connect(self.update_roi_from_spinboxes)
-        self.w_spin.valueChanged.connect(self.update_roi_from_spinboxes)
-        self.h_spin.valueChanged.connect(self.update_roi_from_spinboxes)
-
-        # Add labels and spin boxes to grid
-        adjust_layout.addWidget(QLabel("X:"), 0, 0)
-        adjust_layout.addWidget(self.x_spin, 0, 1)
-        adjust_layout.addWidget(QLabel("Width:"), 0, 2)
-        adjust_layout.addWidget(self.w_spin, 0, 3)
-
-        adjust_layout.addWidget(QLabel("Y:"), 1, 0)
-        adjust_layout.addWidget(self.y_spin, 1, 1)
-        adjust_layout.addWidget(QLabel("Height:"), 1, 2)
-        adjust_layout.addWidget(self.h_spin, 1, 3)
-
-        adjust_group.setLayout(adjust_layout)
-        layout.addWidget(adjust_group)
-
-        # Dialog buttons
-        button_layout = QHBoxLayout()
-
-        self.ok_btn = QPushButton("OK")
-        self.ok_btn.clicked.connect(self.accept)
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.clicked.connect(self.reject)
-
-        button_layout.addStretch()
-        button_layout.addWidget(self.ok_btn)
-        button_layout.addWidget(self.cancel_btn)
-        layout.addLayout(button_layout)
-
-        self.setLayout(layout)
-
-        # Show current frame if available
-        self.update_display()
-
-        # Set current ROI values if exists
-        if self.current_roi:
-            x, y, w, h = self.current_roi
-            self.x_spin.setValue(x)
-            self.y_spin.setValue(y)
-            self.w_spin.setValue(w)
-            self.h_spin.setValue(h)
-
-    def mouse_press(self, event):
-        """Start drawing ROI"""
-        self.drawing = True
-        self.start_point = event.pos()
-
-    def mouse_move(self, event):
-        """Update ROI while drawing"""
-        if self.drawing and self.start_point:
-            # Calculate rectangle from start point to current position
-            x1 = self.start_point.x()
-            y1 = self.start_point.y()
-            x2 = event.pos().x()
-            y2 = event.pos().y()
-
-            # Make sure coordinates are positive
-            x = min(x1, x2)
-            y = min(y1, y2)
-            w = abs(x2 - x1)
-            h = abs(y2 - y1)
-
-            # Scale to image coordinates
-            if self.current_frame is not None:
-                label_h = self.image_label.height()
-                label_w = self.image_label.width()
-                img_h, img_w = self.current_frame.shape[:2]
-
-                x = int(x * img_w / label_w)
-                y = int(y * img_h / label_h)
-                w = int(w * img_w / label_w)
-                h = int(h * img_h / label_h)
-
-                self.temp_roi = (x, y, w, h)
-                self.update_spinboxes()
-                self.update_display()
-
-    def mouse_release(self, event):
-        """Finish drawing ROI"""
-        self.drawing = False
-
-    def update_spinboxes(self):
-        """Update spin boxes with current ROI"""
-        if self.temp_roi:
-            x, y, w, h = self.temp_roi
-            # Block signals to prevent recursion
-            self.x_spin.blockSignals(True)
-            self.y_spin.blockSignals(True)
-            self.w_spin.blockSignals(True)
-            self.h_spin.blockSignals(True)
-
-            self.x_spin.setValue(x)
-            self.y_spin.setValue(y)
-            self.w_spin.setValue(w)
-            self.h_spin.setValue(h)
-
-            self.x_spin.blockSignals(False)
-            self.y_spin.blockSignals(False)
-            self.w_spin.blockSignals(False)
-            self.h_spin.blockSignals(False)
-
-            self.roi_info.setText(f"ROI: X={x}, Y={y}, W={w}, H={h}")
-
-    def update_roi_from_spinboxes(self):
-        """Update ROI from spin box values"""
-        self.temp_roi = (
-            self.x_spin.value(),
-            self.y_spin.value(),
-            self.w_spin.value(),
-            self.h_spin.value()
-        )
-        self.roi_info.setText(f"ROI: X={self.x_spin.value()}, Y={self.y_spin.value()}, "
-                              f"W={self.w_spin.value()}, H={self.h_spin.value()}")
-        self.update_display()
-
-    def update_display(self):
-        """Update the image display with ROI overlay"""
-        if self.current_frame is not None:
-            # Create a copy of the frame
-            display_frame = self.current_frame.copy()
-
-            # Draw ROI rectangle if it exists
-            if self.temp_roi:
-                x, y, w, h = self.temp_roi
-                cv2.rectangle(display_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-            # Convert to QPixmap and display
-            height, width = display_frame.shape[:2]
-            bytes_per_line = 3 * width
-            rgb_image = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
-            q_image = QImage(rgb_image.data, width, height,
-                             bytes_per_line, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(q_image)
-
-            # Scale to fit label
-            scaled_pixmap = pixmap.scaled(self.image_label.size(),
-                                          Qt.KeepAspectRatio,
-                                          Qt.SmoothTransformation)
-            self.image_label.setPixmap(scaled_pixmap)
-        else:
-            self.image_label.setText("No camera frame available")
-
-    def get_roi(self):
-        """Return the configured ROI"""
-        return self.temp_roi
-
 class ConfigurationGUI(BaseGUIWindow):
     """Main configuration window for system setup"""
 
@@ -358,13 +141,25 @@ class ConfigurationGUI(BaseGUIWindow):
         self.last_preview_time = time.time()
         self.preview_frame_count = 0
 
-        # Window setup (existing code continues...)
+        # ROI Defaults
+        self.current_roi = None  # Store current ROI
+        self.default_roi = None  # Store default ROI
+        self.frame_width = 640  # Default frame width
+        self.frame_height = 480  # Default frame height
+
+        # Window setup
         self.setGeometry(100, 100, 1200, 800)
         self.center_window()
 
         # Initialize UI
         self.init_ui()
         self.load_current_config()
+
+        # ADD THESE NEW LINES:
+        self.current_roi = None  # Store current ROI
+        self.default_roi = None  # Store default ROI
+        self.frame_width = 640  # Default frame width
+        self.frame_height = 480  # Default frame height
 
     def init_ui(self):
         """Initialize the user interface"""
@@ -753,18 +548,56 @@ class ConfigurationGUI(BaseGUIWindow):
         roi_group = QGroupBox("Region of Interest")
         roi_layout = QVBoxLayout()
 
-        self.roi_info_label = QLabel("ROI: Not Configured")
-        self.roi_info_label.setStyleSheet("padding: 5px; background: #f0f0f0;")
+        # Create spin boxes for ROI coordinates
+        roi_controls_layout = QFormLayout()
+
+        # X Position spin box
+        self.roi_x_spin = QSpinBox()
+        self.roi_x_spin.setRange(0, self.frame_width - 100)  # Will be updated when frame size known
+        self.roi_x_spin.setValue(0)  # Will be updated with default
+        self.roi_x_spin.setSuffix(" px")
+        self.roi_x_spin.setToolTip("X position of ROI top-left corner")
+        self.roi_x_spin.valueChanged.connect(self._update_roi_from_controls)
+        roi_controls_layout.addRow("X Position:", self.roi_x_spin)
+
+        # Y Position spin box
+        self.roi_y_spin = QSpinBox()
+        self.roi_y_spin.setRange(0, self.frame_height - 100)
+        self.roi_y_spin.setValue(0)
+        self.roi_y_spin.setSuffix(" px")
+        self.roi_y_spin.setToolTip("Y position of ROI top-left corner")
+        self.roi_y_spin.valueChanged.connect(self._update_roi_from_controls)
+        roi_controls_layout.addRow("Y Position:", self.roi_y_spin)
+
+        # Width spin box
+        self.roi_w_spin = QSpinBox()
+        self.roi_w_spin.setRange(100, self.frame_width)
+        self.roi_w_spin.setValue(100)
+        self.roi_w_spin.setSuffix(" px")
+        self.roi_w_spin.setToolTip("Width of ROI rectangle")
+        self.roi_w_spin.valueChanged.connect(self._update_roi_from_controls)
+        roi_controls_layout.addRow("Width:", self.roi_w_spin)
+
+        # Height spin box
+        self.roi_h_spin = QSpinBox()
+        self.roi_h_spin.setRange(100, self.frame_height)
+        self.roi_h_spin.setValue(100)
+        self.roi_h_spin.setSuffix(" px")
+        self.roi_h_spin.setToolTip("Height of ROI rectangle")
+        self.roi_h_spin.valueChanged.connect(self._update_roi_from_controls)
+        roi_controls_layout.addRow("Height:", self.roi_h_spin)
+
+        roi_layout.addLayout(roi_controls_layout)
+
+        # ROI info display (optional - shows current ROI)
+        self.roi_info_label = QLabel("ROI: Not Set")
+        self.roi_info_label.setStyleSheet("padding: 5px; background: #f0f0f0; font-family: monospace;")
         roi_layout.addWidget(self.roi_info_label)
 
-        roi_button_layout = QHBoxLayout()
-        self.configure_roi_btn = QPushButton("Configure ROI")
-        self.configure_roi_btn.clicked.connect(self._open_roi_configurator)
-        self.reset_roi_btn = QPushButton("Reset ROI")
-        self.reset_roi_btn.clicked.connect(self._reset_roi)
-        roi_button_layout.addWidget(self.configure_roi_btn)
-        roi_button_layout.addWidget(self.reset_roi_btn)
-        roi_layout.addLayout(roi_button_layout)
+        # Reset button
+        self.reset_roi_btn = QPushButton("Reset to Default")
+        self.reset_roi_btn.clicked.connect(self._reset_roi_to_default)
+        roi_layout.addWidget(self.reset_roi_btn)
 
         roi_group.setLayout(roi_layout)
         layout.addWidget(roi_group)
@@ -859,52 +692,8 @@ class ConfigurationGUI(BaseGUIWindow):
             else "▼ Show Advanced Settings"
         )
 
-    def _open_roi_configurator(self):
-        """Open the ROI configuration dialog"""
-        # Try to get current frame from camera
-        current_frame = None
-        if hasattr(self, 'camera_module'):
-            try:
-                # This depends on your camera module implementation
-                # You might need to adjust this based on your actual camera module
-                current_frame = self.camera_module.get_current_frame()
-            except:
-                QMessageBox.warning(self, "Warning",
-                                    "Camera not running. ROI configuration will be limited.")
-
-        # Open the dialog
-        current_roi = getattr(self, 'current_roi', None)
-        dialog = ROIConfigDialog(self, current_frame, current_roi)
-
-        if dialog.exec_():  # If user clicked OK
-            new_roi = dialog.get_roi()
-            if new_roi:
-                self.current_roi = new_roi
-                x, y, w, h = new_roi
-                self.roi_info_label.setText(f"ROI: ({x}, {y}) {w}×{h}")
-
-                # Update detector module if it exists
-                if hasattr(self, 'detector_module'):
-                    self.detector_module.set_roi(new_roi, current_frame)
-
-                # Update preview
-                self.detector_preview.roi = new_roi
-                self.detector_preview.zones = {
-                    'entry': self.entry_zone_slider.value() / 100.0,
-                    'exit': self.exit_zone_slider.value() / 100.0
-                }
-                self.detector_preview.update()
-
-    def _reset_roi(self):
-        """Reset ROI to default"""
-        self.current_roi = None
-        self.roi_info_label.setText("ROI: Not Configured")
-        self.detector_preview.roi = None
-        self.detector_preview.update()
-
     def _toggle_preview(self):
-        """Start or stop the camera preview - FIXED NULL CHECK"""
-        # FIXED: Properly check if preview_timer exists and is not None
+        """Start or stop the camera preview with ROI initialization"""
         if getattr(self, 'preview_timer', None) and self.preview_timer.isActive():
             # Stop preview
             self.preview_timer.stop()
@@ -926,33 +715,36 @@ class ConfigurationGUI(BaseGUIWindow):
                     from camera_module import create_camera
                     self.camera = create_camera(config_manager=self.config_manager)
 
-                    if not self.camera.is_initialized:
-                        if not self.camera.initialize():
-                            QMessageBox.warning(self, "Camera Error",
-                                                "Failed to initialize camera")
-                            return
+                # Initialize camera if needed
+                if not self.camera.is_initialized:
+                    if not self.camera.initialize():
+                        QMessageBox.warning(self, "Camera Error",
+                                            "Failed to initialize camera")
+                        return
 
-                # Create timer if it doesn't exist or is None
-                if not hasattr(self, 'preview_timer') or self.preview_timer is None:
+                # Get frame to determine frame size and initialize ROI
+                frame = self.camera.get_frame()
+                if frame is not None:
+                    height, width = frame.shape[:2]
+                    self._update_frame_size(width, height)
+                    self.current_frame = frame  # Store for detector module updates
+
+                # Set up preview timer
+                if not hasattr(self, 'preview_timer') or not self.preview_timer:
                     self.preview_timer = QTimer()
                     self.preview_timer.timeout.connect(self._update_detector_preview)
 
-                # Start timer for regular updates
-                self.preview_timer.start(33)  # Update at ~30 FPS
-
-                # Start camera capture if not already running
-                if not self.camera.is_capturing:
-                    self.camera.start_capture()
-
-                # Update UI
+                # Start preview updates
+                self.preview_timer.start(33)  # ~30 FPS updates
                 self.start_preview_btn.setText("Stop Preview")
                 self.detector_status_label.setText("Status: Running")
 
+                logger.info("Detector preview started with ROI initialization")
+
             except Exception as e:
+                logger.error(f"Failed to start camera preview: {e}")
                 QMessageBox.critical(self, "Preview Error",
                                      f"Failed to start preview: {str(e)}")
-                logger.error(f"Failed to start detector preview: {e}")
-
     def _update_detector_preview(self):
         """Update the preview (called by timer) - IMPROVED ERROR HANDLING"""
         try:
@@ -1689,35 +1481,42 @@ class ConfigurationGUI(BaseGUIWindow):
 
         # Update display
         self.update_available_categories()
+
     def create_api_tab(self):
         """Create API configuration tab"""
         api_tab = QWidget()
         layout = QVBoxLayout()
 
-        # API settings
+        # API settings - SIMPLIFIED: Only timeout and retry_count
         api_group = QGroupBox("API Settings")
         api_layout = QFormLayout()
 
-        # API Key
-        self.api_key_edit = QLineEdit()
-        self.api_key_edit.setEchoMode(QLineEdit.Password)
-        api_layout.addRow("API Key:", self.api_key_edit)
-
-        # Mode
-        self.api_mode_combo = QComboBox()
-        self.api_mode_combo.addItems(["Production", "Development", "Mock"])
-        api_layout.addRow("Mode:", self.api_mode_combo)
-
-        # Timeout
+        # Timeout setting with 30 second default to match API module
         self.timeout_spin = QSpinBox()
         self.timeout_spin.setRange(1, 60)
-        self.timeout_spin.setValue(10)
-        api_layout.addRow("Timeout (s):", self.timeout_spin)
+        self.timeout_spin.setValue(30)  # CHANGED: Default from 10 to 30 to match API module
+        self.timeout_spin.setSuffix(" seconds")
+        self.timeout_spin.setToolTip(
+            "Maximum time to wait for API response.\n"
+            "Default: 30 seconds (matches API module default)"
+        )
+        api_layout.addRow("Timeout:", self.timeout_spin)
+
+        # NEW: Retry count setting
+        self.retry_count_spin = QSpinBox()
+        self.retry_count_spin.setRange(0, 10)
+        self.retry_count_spin.setValue(3)  # Default matches API module
+        self.retry_count_spin.setToolTip(
+            "Number of times to retry if API call fails.\n"
+            "Set to 0 to disable retries.\n"
+            "Default: 3 retries"
+        )
+        api_layout.addRow("Retry Count:", self.retry_count_spin)
 
         api_group.setLayout(api_layout)
         layout.addWidget(api_group)
 
-        # Test connection
+        # Test connection section remains the same
         test_group = QGroupBox("Connection Test")
         test_layout = QVBoxLayout()
 
@@ -1731,10 +1530,26 @@ class ConfigurationGUI(BaseGUIWindow):
         test_group.setLayout(test_layout)
         layout.addWidget(test_group)
 
+        # Information box about Brickognize API
+        info_group = QGroupBox("API Information")
+        info_layout = QVBoxLayout()
+
+        info_label = QLabel(
+            "This system uses the Brickognize API for LEGO piece identification.\n"
+            "No API key is required for Brickognize.\n\n"
+            "The API will analyze images of LEGO pieces and return:\n"
+            "• Piece ID and name\n"
+            "• Confidence score"
+        )
+        info_label.setWordWrap(True)
+        info_layout.addWidget(info_label)
+
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+
         layout.addStretch()
         api_tab.setLayout(layout)
         self.tab_widget.addTab(api_tab, "API")
-
     def create_arduino_tab(self):
         """Create enhanced Arduino configuration tab"""
         arduino_tab = QWidget()
@@ -1995,13 +1810,12 @@ class ConfigurationGUI(BaseGUIWindow):
             self.fps_spin.setValue(camera_config.get("fps", 30))
             self.exposure_slider.setValue(camera_config.get("exposure", 0))
 
-        # Load detector settings - FIXED TO USE CORRECT ATTRIBUTE NAMES
+        # Load detector settings
         detector_config = self.config_manager.get_module_config("detector")
         if detector_config:
-            # Use the actual attribute names from the new detector tab
+            # Load detection parameters
             self.min_piece_area_spin.setValue(detector_config.get("min_area", 1000))
             self.max_piece_area_spin.setValue(detector_config.get("max_area", 50000))
-            self.min_updates_spin.setValue(detector_config.get("min_updates", 5))
 
             # Load zone settings
             zones = detector_config.get("zones", {})
@@ -2014,22 +1828,38 @@ class ConfigurationGUI(BaseGUIWindow):
 
             # Load ROI if present
             roi = detector_config.get("roi")
-            if roi:
-                self.current_roi = roi
+            if roi and len(roi) == 4:
                 x, y, w, h = roi
-                self.roi_info_label.setText(f"ROI: ({x}, {y}) {w}×{h}")
 
-        # Load sorting settings - FIXED TO USE CORRECT METHOD
+                # Set spin box values (temporarily disable signals to prevent recursive updates)
+                self.roi_x_spin.blockSignals(True)
+                self.roi_y_spin.blockSignals(True)
+                self.roi_w_spin.blockSignals(True)
+                self.roi_h_spin.blockSignals(True)
+
+                self.roi_x_spin.setValue(x)
+                self.roi_y_spin.setValue(y)
+                self.roi_w_spin.setValue(w)
+                self.roi_h_spin.setValue(h)
+
+                self.roi_x_spin.blockSignals(False)
+                self.roi_y_spin.blockSignals(False)
+                self.roi_w_spin.blockSignals(False)
+                self.roi_h_spin.blockSignals(False)
+
+                # Update ROI from controls
+                self._update_roi_from_controls()
+
+        # Load sorting settings
         sorting_config = self.config_manager.get_module_config("sorting")
         if sorting_config:
             self.load_sorting_config(sorting_config)
 
-        # Load API settings
-        api_config = self.config_manager.get_module_config("api")
+        # API settings
+        api_config = self.config_manager.get_module_config(ModuleConfig.API.value)
         if api_config:
-            self.api_key_edit.setText(api_config.get("api_key", ""))
-            self.api_mode_combo.setCurrentText(api_config.get("mode", "Production"))
-            self.timeout_spin.setValue(api_config.get("timeout", 10))
+            self.timeout_spin.setValue(api_config.get("timeout", 30))
+            self.retry_count_spin.setValue(api_config.get("retry_count", 3))
 
         # Load Arduino settings
         arduino_config = self.config_manager.get_module_config("arduino_servo")
@@ -2063,7 +1893,7 @@ class ConfigurationGUI(BaseGUIWindow):
             self.save_images_check.setChecked(system_config.get("save_images", True))
 
     def get_configuration(self) -> Dict[str, Any]:
-        """Get current configuration from UI - FIXED TO USE CORRECT ATTRIBUTES"""
+        """Get current configuration from UI"""
         config = {}
 
         # Camera configuration
@@ -2075,30 +1905,27 @@ class ConfigurationGUI(BaseGUIWindow):
             'exposure': self.exposure_slider.value()
         }
 
-        # Detector configuration - FIXED TO USE CORRECT ATTRIBUTE NAMES
+        # Detector configuration with ROI from spin boxes
         config['detector'] = {
             'min_area': self.min_piece_area_spin.value(),
             'max_area': self.max_piece_area_spin.value(),
-            'min_updates': self.min_updates_spin.value(),
             'zones': {
                 'entry_percentage': self.entry_zone_slider.value(),
                 'exit_percentage': self.exit_zone_slider.value()
             },
-            'roi': getattr(self, 'current_roi', None)
+            'roi': self.current_roi if self.current_roi else None
         }
 
-        # Sorting configuration - USE THE DEDICATED METHOD
+        # Sorting configuration
         config['sorting'] = self.get_sorting_config()
 
-        # API configuration
+        # API configuration - SIMPLIFIED: Only timeout and retry_count
         config['api'] = {
-            'api_key': self.api_key_edit.text(),
-            'mode': self.api_mode_combo.currentText(),
-            'timeout': self.timeout_spin.value()
+            'timeout': self.timeout_spin.value(),
+            'retry_count': self.retry_count_spin.value()
         }
 
         # Arduino configuration
-        # Arduino configuration - Use the new dedicated method
         config['arduino_servo'] = self.get_arduino_config()
 
         # System configuration
@@ -2297,6 +2124,108 @@ class ConfigurationGUI(BaseGUIWindow):
         # This would open a separate window for ROI configuration
         QMessageBox.information(self, "ROI Configuration",
                                 "ROI configuration would open here")
+
+    def _calculate_default_roi(self, frame_width, frame_height):
+        """Calculate default ROI as center 80% of frame"""
+        margin_x = int(frame_width * 0.1)  # 10% margin on each side
+        margin_y = int(frame_height * 0.1)  # 10% margin on top and bottom
+
+        return {
+            'x': margin_x,
+            'y': margin_y,
+            'w': frame_width - (2 * margin_x),
+            'h': frame_height - (2 * margin_y)
+        }
+
+    def _update_frame_size(self, width, height):
+        """Update frame size and adjust ROI controls accordingly"""
+        self.frame_width = width
+        self.frame_height = height
+
+        # Calculate new default ROI
+        self.default_roi = self._calculate_default_roi(width, height)
+
+        # Update spin box ranges
+        self.roi_x_spin.setRange(0, width - 100)  # Leave room for minimum width
+        self.roi_y_spin.setRange(0, height - 100)  # Leave room for minimum height
+        self.roi_w_spin.setRange(100, width)
+        self.roi_h_spin.setRange(100, height)
+
+        # If no ROI is set, use default
+        if not self.current_roi:
+            self._set_roi_controls_to_default()
+
+    def _set_roi_controls_to_default(self):
+        """Set spin box controls to default ROI values"""
+        if not self.default_roi:
+            return
+
+        # Temporarily disconnect signals to avoid recursive updates
+        self.roi_x_spin.blockSignals(True)
+        self.roi_y_spin.blockSignals(True)
+        self.roi_w_spin.blockSignals(True)
+        self.roi_h_spin.blockSignals(True)
+
+        # Set the values
+        self.roi_x_spin.setValue(self.default_roi['x'])
+        self.roi_y_spin.setValue(self.default_roi['y'])
+        self.roi_w_spin.setValue(self.default_roi['w'])
+        self.roi_h_spin.setValue(self.default_roi['h'])
+
+        # Re-enable signals
+        self.roi_x_spin.blockSignals(False)
+        self.roi_y_spin.blockSignals(False)
+        self.roi_w_spin.blockSignals(False)
+        self.roi_h_spin.blockSignals(False)
+
+        # Update the ROI
+        self._update_roi_from_controls()
+
+    def _update_roi_from_controls(self):
+        """Update ROI from spin box values"""
+        # Get current values from spin boxes
+        x = self.roi_x_spin.value()
+        y = self.roi_y_spin.value()
+        w = self.roi_w_spin.value()
+        h = self.roi_h_spin.value()
+
+        # Validate bounds (additional safety check)
+        if x + w > self.frame_width:
+            w = self.frame_width - x
+            self.roi_w_spin.blockSignals(True)
+            self.roi_w_spin.setValue(w)
+            self.roi_w_spin.blockSignals(False)
+
+        if y + h > self.frame_height:
+            h = self.frame_height - y
+            self.roi_h_spin.blockSignals(True)
+            self.roi_h_spin.setValue(h)
+            self.roi_h_spin.blockSignals(False)
+
+        # Update current ROI
+        self.current_roi = (x, y, w, h)
+
+        # Update info label
+        self.roi_info_label.setText(f"ROI: ({x}, {y}) {w}×{h}")
+
+        # Update preview widget if it exists
+        if hasattr(self, 'detector_preview') and self.detector_preview:
+            self.detector_preview.roi = self.current_roi
+            self.detector_preview.update()
+
+        # Update detector module if it exists
+        if hasattr(self, 'detector_module') and self.detector_module:
+            try:
+                current_frame = getattr(self, 'current_frame', None)
+                if current_frame is not None:
+                    self.detector_module.set_roi(self.current_roi, current_frame)
+            except Exception as e:
+                logger.warning(f"Failed to update detector module ROI: {e}")
+
+    def _reset_roi_to_default(self):
+        """Reset ROI to default center 80% of frame"""
+        if self.default_roi:
+            self._set_roi_controls_to_default()
 
     def test_api_connection(self):
         """Test API connection"""
