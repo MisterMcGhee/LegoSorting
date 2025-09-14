@@ -255,29 +255,29 @@ class ConveyorDetector:
             self.config = detector_config
             self.exit_zone_trigger_config = exit_zone_config
 
-            # Extract commonly used values
-            self.min_piece_area = detector_config["min_piece_area"]
-            self.max_piece_area = detector_config["max_piece_area"]
-            self.min_updates = detector_config["min_updates"]
+            # Extract commonly used values - FIXED KEY NAMES
+            self.min_piece_area = detector_config["min_area"]  # Changed from "min_piece_area"
+            self.max_piece_area = detector_config["max_area"]  # Changed from "max_piece_area"
+            self.min_updates = detector_config.get("min_updates", 5)  # Added .get() with default
             self.capture_cooldown = detector_config.get("capture_min_interval", 0.5)
             self.processing_timeout = detector_config.get("processing_timeout", 10.0)
 
-            # Background subtraction parameters
-            self.bg_history = detector_config["bg_history"]
-            self.bg_threshold = detector_config["bg_threshold"]
-            self.learn_rate = detector_config["learn_rate"]
+            # Background subtraction parameters - ADD .get() WITH DEFAULTS
+            self.bg_history = detector_config.get("bg_history", 500)
+            self.bg_threshold = detector_config.get("bg_threshold", 800)
+            self.learn_rate = detector_config.get("learn_rate", 0.005)
 
-            # Morphological operation parameters
-            self.morph_kernel_size = detector_config["morph_kernel_size"]
-            self.gaussian_blur = detector_config["gaussian_blur"]
+            # Morphological operation parameters - ADD .get() WITH DEFAULTS
+            self.morph_kernel_size = detector_config.get("morph_kernel_size", 5)
+            self.gaussian_blur = detector_config.get("gaussian_blur", 7)
 
-            # Zone percentages
-            self.entry_zone_percent = detector_config["entry_zone_percent"]
-            self.exit_zone_percent = detector_config["exit_zone_percent"]
+            # Zone percentages - ADD .get() WITH DEFAULTS
+            self.entry_zone_percent = detector_config.get("entry_zone_percent", 0.15)
+            self.exit_zone_percent = detector_config.get("exit_zone_percent", 0.15)
 
-            # Exit zone timing
-            self.fall_time = exit_zone_config["fall_time"]
-            self.exit_zone_enabled = exit_zone_config["enabled"]
+            # Exit zone timing - ADD .get() WITH DEFAULTS
+            self.fall_time = exit_zone_config.get("fall_time", 1.0)
+            self.exit_zone_enabled = exit_zone_config.get("enabled", True)
 
         else:
             # Use defaults if no config manager

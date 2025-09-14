@@ -478,7 +478,7 @@ class LegoSortingApplication(QObject):
                 logger.info("Processing thread stopped")
 
         # Start the thread using thread manager
-        success = self.thread_manager.start_worker(
+        success = self.thread_manager.register_worker(
             name="processing_worker",
             target=processing_thread_function,
             daemon=True,

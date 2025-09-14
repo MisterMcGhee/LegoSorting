@@ -38,6 +38,7 @@ class ModuleConfig(Enum):
     GUI = "gui_settings"
     EXIT_ZONE = "exit_zone_trigger"
     PIECE_IDENTIFIER = "piece_identifier"
+    PIECE_HISTORY = "piece_history"
 
 
 class ConfigSchema:
@@ -96,7 +97,9 @@ class ConfigSchema:
                 "max_pulse": 2500,
                 "default_position": 90,
                 "speed": 100,
-                "calibration_positions": {}
+                "calibration_positions": {},
+                "calibration_mode": False,
+                "min_bin_separation": 20
             },
 
             ModuleConfig.ARDUINO_SERVO.value: {
@@ -104,7 +107,10 @@ class ConfigSchema:
                 "baud_rate": 57600,
                 "timeout": 1.0,
                 "servo_count": 9,
-                "servo_pins": [2, 3, 4, 5, 6, 7, 8, 9, 10]
+                "servo_pins": [2, 3, 4, 5, 6, 7, 8, 9, 10],
+                "connection_retries": 3,
+                "retry_delay": 1.0,
+                "simulation_mode": False
             },
 
             ModuleConfig.API.value: {
@@ -121,7 +127,11 @@ class ConfigSchema:
                 "max_workers": 4,
                 "queue_size": 100,
                 "timeout": 30.0,
-                "priority_levels": 3
+                "priority_levels": 3,
+                "api_timeout": 30.0,  # ADD THIS
+                "processing_timeout": 60.0,  # ADD THIS
+                "polling_interval": 0.01,  # ADD THIS
+                "shutdown_timeout": 5.0
             },
 
             ModuleConfig.UI.value: {
@@ -154,6 +164,12 @@ class ConfigSchema:
                 "confidence_threshold": 0.7,
                 "save_unknown": True,
                 "unknown_dir": "unknown_pieces"
+            },
+
+            ModuleConfig.PIECE_HISTORY.value: {
+                "max_entries": 10,
+                "csv_path": "piece_history.csv",
+                "include_timestamp": True
             }
         }
 

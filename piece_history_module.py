@@ -36,7 +36,7 @@ class PieceHistory:
 
         # Configuration
         if config_manager:
-            history_config = config_manager.get_section("piece_history")
+            history_config = config_manager.get_module_config("piece_history")
             self.max_entries = history_config.get("max_entries", 10)
             self.csv_path = history_config.get("csv_path", csv_path)
             self.include_timestamp = history_config.get("include_timestamp", True)

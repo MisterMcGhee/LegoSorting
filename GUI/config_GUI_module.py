@@ -18,7 +18,6 @@ from enhanced_config_manager import ModuleConfig
 import serial
 import serial.tools.list_ports
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -122,6 +121,7 @@ class DetectorPreviewWidget(QWidget):
             painter.setPen(Qt.white)
             painter.drawText(self.rect(), Qt.AlignCenter,
                              "No camera feed\nClick 'Start Preview' to begin")
+
 
 class ConfigurationGUI(BaseGUIWindow):
     """Main configuration window for system setup"""
@@ -745,6 +745,7 @@ class ConfigurationGUI(BaseGUIWindow):
                 logger.error(f"Failed to start camera preview: {e}")
                 QMessageBox.critical(self, "Preview Error",
                                      f"Failed to start preview: {str(e)}")
+
     def _update_detector_preview(self):
         """Update the preview (called by timer) - IMPROVED ERROR HANDLING"""
         try:
@@ -1273,6 +1274,7 @@ class ConfigurationGUI(BaseGUIWindow):
         self.on_strategy_changed(current_strategy)
 
         self.status_bar.showMessage("Dropdowns refreshed from CSV data", 3000)
+
     def add_bin_assignment(self):
         """Add a new bin assignment"""
         if not self.config_manager:
@@ -1550,6 +1552,7 @@ class ConfigurationGUI(BaseGUIWindow):
         layout.addStretch()
         api_tab.setLayout(layout)
         self.tab_widget.addTab(api_tab, "API")
+
     def create_arduino_tab(self):
         """Create enhanced Arduino configuration tab"""
         arduino_tab = QWidget()
@@ -1804,7 +1807,22 @@ class ConfigurationGUI(BaseGUIWindow):
         # Load camera settings
         camera_config = self.config_manager.get_module_config("camera")
         if camera_config:
-            self.camera_device.setCurrentText(str(camera_config.get("device_id", 0)))
+            # Load camera device - find by device ID, not by text
+            device_id = camera_config.get("device_id", 0)
+            device_found = False
+            for i in range(self.camera_device.count()):
+                if self.camera_device.itemData(i) == device_id:
+                    self.camera_device.setCurrentIndex(i)
+                    device_found = True
+                    break
+
+            # If device not found in dropdown, add it as fallback
+            if not device_found:
+                fallback_text = f"Camera {device_id}"
+                self.camera_device.addItem(fallback_text, userData=device_id)
+                self.camera_device.setCurrentIndex(self.camera_device.count() - 1)
+
+            # Load other camera settings
             res = camera_config.get("resolution", [1920, 1080])
             self.resolution_combo.setCurrentText(f"{res[0]}x{res[1]}")
             self.fps_spin.setValue(camera_config.get("fps", 30))
@@ -1899,7 +1917,7 @@ class ConfigurationGUI(BaseGUIWindow):
         # Camera configuration
         resolution = self.resolution_combo.currentText().split('x')
         config['camera'] = {
-            'device_id': int(self.camera_device.currentText()),
+            'device_id': self.camera_device.currentData(),
             'resolution': [int(resolution[0]), int(resolution[1])],
             'fps': self.fps_spin.value(),
             'exposure': self.exposure_slider.value()
@@ -2279,20 +2297,20 @@ class ConfigurationGUI(BaseGUIWindow):
         # Add these methods after your existing refresh_serial_ports method
 
     def setup_servo_table(self):
-            """Initialize the servo position table with test buttons"""
-            for i in range(10):
-                # Bin number (read-only)
-                bin_item = QTableWidgetItem(str(i))
-                bin_item.setFlags(bin_item.flags() & ~Qt.ItemIsEditable)
-                self.servo_table.setItem(i, 0, bin_item)
+        """Initialize the servo position table with test buttons"""
+        for i in range(10):
+            # Bin number (read-only)
+            bin_item = QTableWidgetItem(str(i))
+            bin_item.setFlags(bin_item.flags() & ~Qt.ItemIsEditable)
+            self.servo_table.setItem(i, 0, bin_item)
 
-                # Position (editable)
-                self.servo_table.setItem(i, 1, QTableWidgetItem(str(90)))
+            # Position (editable)
+            self.servo_table.setItem(i, 1, QTableWidgetItem(str(90)))
 
-                # Test button
-                test_btn = QPushButton("Test")
-                test_btn.clicked.connect(lambda checked, bin_num=i: self.test_single_position(bin_num))
-                self.servo_table.setCellWidget(i, 2, test_btn)
+            # Test button
+            test_btn = QPushButton("Test")
+            test_btn.clicked.connect(lambda checked, bin_num=i: self.test_single_position(bin_num))
+            self.servo_table.setCellWidget(i, 2, test_btn)
 
     def check_arduino_hardware(self):
         """
@@ -2439,6 +2457,7 @@ class ConfigurationGUI(BaseGUIWindow):
                 self.config_manager.update_module_config("arduino_servo", {
                     "simulation_mode": True
                 })
+
     def verify_arduino_connection(self):
         """
         Verify that Arduino is actually connected when switching to hardware mode.
@@ -2698,51 +2717,51 @@ class ConfigurationGUI(BaseGUIWindow):
                                  f"• No other programs are using the port")
 
     def get_current_bin_count(self):
-            """Get the bin count from the Sorting tab"""
-            # This method accesses the sorting tab's bin configuration
-            if hasattr(self, 'max_bins_spin'):  # From sorting tab
-                return self.max_bins_spin.value()
-            return 9  # Default if not found
+        """Get the bin count from the Sorting tab"""
+        # This method accesses the sorting tab's bin configuration
+        if hasattr(self, 'max_bins_spin'):  # From sorting tab
+            return self.max_bins_spin.value()
+        return 9  # Default if not found
 
     def recalculate_bin_positions(self):
-            """Recalculate bin positions when settings change"""
-            if hasattr(self, 'auto_calculate_on_change') and self.auto_calculate_on_change:
-                self.auto_calculate_positions()
+        """Recalculate bin positions when settings change"""
+        if hasattr(self, 'auto_calculate_on_change') and self.auto_calculate_on_change:
+            self.auto_calculate_positions()
 
     def auto_calculate_positions(self):
-            """Automatically calculate evenly distributed bin positions"""
-            bin_count = self.get_current_bin_count()
-            min_separation = self.min_separation_spin.value()
+        """Automatically calculate evenly distributed bin positions"""
+        bin_count = self.get_current_bin_count()
+        min_separation = self.min_separation_spin.value()
 
-            # Calculate total range needed
-            total_range_needed = (bin_count - 1) * min_separation
+        # Calculate total range needed
+        total_range_needed = (bin_count - 1) * min_separation
 
-            if total_range_needed > 180:
-                QMessageBox.warning(self, "Configuration Error",
-                                    f"Cannot fit {bin_count} bins with {min_separation}° separation.\n"
-                                    f"Maximum bins with this separation: {180 // min_separation + 1}")
-                return
+        if total_range_needed > 180:
+            QMessageBox.warning(self, "Configuration Error",
+                                f"Cannot fit {bin_count} bins with {min_separation}° separation.\n"
+                                f"Maximum bins with this separation: {180 // min_separation + 1}")
+            return
 
-            # Calculate positions centered around 90 degrees
-            center = 90
-            if bin_count == 1:
-                positions = [center]
+        # Calculate positions centered around 90 degrees
+        center = 90
+        if bin_count == 1:
+            positions = [center]
+        else:
+            start_angle = center - (total_range_needed / 2)
+            positions = [start_angle + i * min_separation for i in range(bin_count)]
+
+        # Ensure all positions are within 0-180 range
+        positions = [max(0, min(180, pos)) for pos in positions]
+
+        # Update table
+        for i in range(10):
+            if i < bin_count:
+                self.servo_table.item(i, 1).setText(f"{positions[i]:.1f}")
+                self.servo_table.setRowHidden(i, False)
             else:
-                start_angle = center - (total_range_needed / 2)
-                positions = [start_angle + i * min_separation for i in range(bin_count)]
+                self.servo_table.setRowHidden(i, True)
 
-            # Ensure all positions are within 0-180 range
-            positions = [max(0, min(180, pos)) for pos in positions]
-
-            # Update table
-            for i in range(10):
-                if i < bin_count:
-                    self.servo_table.item(i, 1).setText(f"{positions[i]:.1f}")
-                    self.servo_table.setRowHidden(i, False)
-                else:
-                    self.servo_table.setRowHidden(i, True)
-
-            self.bin_info_label.setText(f"Positions calculated for {bin_count} bins")
+        self.bin_info_label.setText(f"Positions calculated for {bin_count} bins")
 
     def test_single_position(self, bin_num):
         """Test a single bin position with actual Arduino communication"""
@@ -2853,51 +2872,51 @@ class ConfigurationGUI(BaseGUIWindow):
                                  f"Failed to sweep positions:\n{str(e)}")
 
     def toggle_calibration_mode(self, checked):
-            """Toggle calibration mode"""
-            if checked:
-                self.calibrate_servo_btn.setText("Exit Calibration")
-                self.bin_info_label.setText("CALIBRATION MODE: Manually adjust positions and test")
-                self.bin_info_label.setStyleSheet("color: red; font-weight: bold;")
+        """Toggle calibration mode"""
+        if checked:
+            self.calibrate_servo_btn.setText("Exit Calibration")
+            self.bin_info_label.setText("CALIBRATION MODE: Manually adjust positions and test")
+            self.bin_info_label.setStyleSheet("color: red; font-weight: bold;")
 
-                # Enable manual editing of all positions
-                for i in range(10):
-                    item = self.servo_table.item(i, 1)
-                    if item:
-                        item.setFlags(item.flags() | Qt.ItemIsEditable)
-            else:
-                self.calibrate_servo_btn.setText("Calibration Mode")
-                self.bin_info_label.setText("Bins will be auto-calculated based on Sorting tab settings")
-                self.bin_info_label.setStyleSheet("")
+            # Enable manual editing of all positions
+            for i in range(10):
+                item = self.servo_table.item(i, 1)
+                if item:
+                    item.setFlags(item.flags() | Qt.ItemIsEditable)
+        else:
+            self.calibrate_servo_btn.setText("Calibration Mode")
+            self.bin_info_label.setText("Bins will be auto-calculated based on Sorting tab settings")
+            self.bin_info_label.setStyleSheet("")
 
     def update_arduino_bin_count(self, value):
-            """Update Arduino tab when bin count changes in Sorting tab"""
-            if hasattr(self, 'servo_table'):  # Check if Arduino tab exists
-                self.auto_calculate_positions()
+        """Update Arduino tab when bin count changes in Sorting tab"""
+        if hasattr(self, 'servo_table'):  # Check if Arduino tab exists
+            self.auto_calculate_positions()
 
     def get_arduino_config(self):
-            """Get the current Arduino configuration from the UI"""
-            config = {
-                "port": self.port_combo.currentText().split(" ")[
-                    0] if " " in self.port_combo.currentText() else self.port_combo.currentText(),
-                "baud_rate": int(self.baud_combo.currentText()),
-                "timeout": self.timeout_spin.value(),
-                "connection_retries": self.retry_spin.value(),
-                "retry_delay": self.retry_delay_spin.value(),
-                "simulation_mode": self.simulation_check.isChecked(),
-                "min_pulse": self.min_pulse_spin.value(),
-                "max_pulse": self.max_pulse_spin.value(),
-                "default_position": self.default_pos_spin.value(),
-                "min_bin_separation": self.min_separation_spin.value(),
-                "bin_positions": {}
-            }
+        """Get the current Arduino configuration from the UI"""
+        config = {
+            "port": self.port_combo.currentText().split(" ")[
+                0] if " " in self.port_combo.currentText() else self.port_combo.currentText(),
+            "baud_rate": int(self.baud_combo.currentText()),
+            "timeout": self.timeout_spin.value(),
+            "connection_retries": self.retry_spin.value(),
+            "retry_delay": self.retry_delay_spin.value(),
+            "simulation_mode": self.simulation_check.isChecked(),
+            "min_pulse": self.min_pulse_spin.value(),
+            "max_pulse": self.max_pulse_spin.value(),
+            "default_position": self.default_pos_spin.value(),
+            "min_bin_separation": self.min_separation_spin.value(),
+            "bin_positions": {}
+        }
 
-            # Get bin positions from table
-            bin_count = self.get_current_bin_count()
-            for i in range(bin_count):
-                pos_text = self.servo_table.item(i, 1).text()
-                config["bin_positions"][str(i)] = float(pos_text)
+        # Get bin positions from table
+        bin_count = self.get_current_bin_count()
+        for i in range(bin_count):
+            pos_text = self.servo_table.item(i, 1).text()
+            config["bin_positions"][str(i)] = float(pos_text)
 
-            return config
+        return config
 
     def update_preview_frame(self, frame):
         """Update the preview frame (public method for external use)"""
