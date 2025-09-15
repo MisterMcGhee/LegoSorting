@@ -155,7 +155,7 @@ class ConfigSchema:
                 "enabled": True,
                 "fall_time": 1.0,
                 "priority_method": "rightmost",
-                "min_piece_spacing": 50,
+                "piece_spacing": 50,
                 "cooldown_time": 0.5
             },
 

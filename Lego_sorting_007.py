@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Lego_Sorting_007.py - Main orchestration for the Lego Sorting System
 
@@ -17,6 +16,7 @@ import signal
 import argparse
 import logging
 import time
+import threading
 from typing import Optional, Dict, Any, List
 from enum import Enum
 from dataclasses import dataclass
@@ -54,6 +54,14 @@ from error_module import setup_logging, get_logger
 
 logger = get_logger(__name__)
 
+def list_all_windows():
+    """Debug function to list all Qt windows"""
+    from PyQt5.QtWidgets import QApplication
+    windows = []
+    for widget in QApplication.topLevelWidgets():
+        if widget.isVisible():
+            windows.append(f"  - {widget.__class__.__name__}: {widget.windowTitle()} (size: {widget.size()})")
+    return windows
 
 # ============= Application States =============
 
@@ -330,55 +338,59 @@ class LegoSortingApplication(QObject):
     def setup_camera_to_detector_flow(self):
         """Connect camera frame distribution to detector"""
 
-        def detector_callback(frame: np.ndarray):
-            """Process each camera frame for piece detection"""
+        # First, unregister any existing detector consumer
+        if self.camera:
+            self.camera.unregister_consumer("detector")
+            logger.info("Unregistered any existing detector consumer")
 
+        def detector_callback(frame: np.ndarray):
+            """
+            Process each camera frame for piece detection and GUI updates.
+            """
             if not self.is_running or self.is_paused:
                 return
 
             try:
-                # Update frame counter
+                logger.debug(
+                    f"[{threading.current_thread().name}] Detector callback called - frame shape: {frame.shape}")
+
                 self.frame_count += 1
                 self.metrics_tracker.record_frame()
 
-                # Run detection
-                detections = self.detector.detect_pieces(frame)
+                # CALL REAL DETECTOR (not bypass)
+                detection_result = self.detector.process_frame_for_consumer(frame)
 
-                # Process each detected piece
-                new_pieces = 0
-                for piece in detections:
-                    # Only process new pieces that aren't already being processed
-                    if (hasattr(piece, 'is_new') and piece.is_new and
-                            not piece.being_processed):
+                gui_detection_data = {
+                    'frame_count': self.frame_count,
+                    'detection_result': detection_result
+                }
 
-                        # Queue the piece for processing
-                        if self._queue_piece_for_processing(piece, frame):
-                            new_pieces += 1
-                            self.metrics_tracker.record_detection()
-
-                # Update GUI with detection visualization
                 if self.sorting_gui:
-                    detection_data = self.detector.get_visualization_data()
-                    # Add frame count to detection data
-                    detection_data['frame_count'] = self.frame_count
-                    detection_data['new_pieces'] = new_pieces
-
-                    # Use thread-safe signal
-                    self.gui_update_signal.emit(frame.copy(), detection_data)
+                    self.gui_update_signal.emit(frame.copy(), gui_detection_data)
 
             except Exception as e:
                 logger.error(f"Error in detector callback: {e}", exc_info=True)
                 self.error_signal.emit(str(e))
 
         # Register detector as synchronous high-priority consumer
-        self.camera.register_consumer(
+        success = self.camera.register_consumer(
             name="detector",
             callback=detector_callback,
-            processing_type="sync",  # Synchronous for frame-by-frame processing
+            processing_type="async",
             priority=90  # High priority
         )
-        logger.info("Camera to detector flow established")
 
+        if success:
+            logger.info("Camera to detector flow established successfully")
+        else:
+            logger.error("Failed to register detector consumer - this is the problem!")
+
+            # Try to get consumer list for debugging
+            # DEBUG: Check camera consumer state
+            if hasattr(self.camera, 'consumers'):
+                logger.info(f"Camera consumers after registration: {list(self.camera.consumers.keys())}")
+                logger.info(f"Camera is capturing: {self.camera.is_capturing}")
+                logger.info(f"Camera initialized: {self.camera.is_initialized}")
     def _queue_piece_for_processing(self, piece, frame) -> bool:
         """Queue a detected piece for API processing"""
 
@@ -514,6 +526,7 @@ class LegoSortingApplication(QObject):
         self.config_gui.center_window()
         self.current_state = ApplicationState.CONFIGURING
         logger.info(f"Configuration GUI displayed with config_manager: {self.config_manager}")
+
     def show_sorting_gui(self):
         """Display sorting interface"""
 
@@ -532,6 +545,24 @@ class LegoSortingApplication(QObject):
         # Set Arduino status
         self.sorting_gui.set_arduino_status(self.servo_module is not None)
 
+        # CRITICAL: Ensure camera is capturing frames for the GUI
+        if self.camera:
+            # Set camera status in GUI
+            self.sorting_gui.set_camera_status(self.camera.is_initialized)
+
+            # Start camera capture if not already running
+            if not self.camera.is_capturing:
+                capture_started = self.camera.start_capture()
+                if capture_started:
+                    logger.info("Started camera capture for sorting GUI")
+                else:
+                    logger.error("Failed to start camera capture for sorting GUI")
+                    self.sorting_gui.set_camera_status(False)
+        else:
+            logger.error("No camera available for sorting GUI")
+            self.sorting_gui.set_camera_status(False)
+
+        # Show the GUI
         self.sorting_gui.show()
         self.sorting_gui.center_window()
         self.current_state = ApplicationState.SORTING
@@ -666,12 +697,26 @@ class LegoSortingApplication(QObject):
 
         self.current_state = ApplicationState.INITIALIZING
 
+        # Checkpoint 1
+        logger.info("=== CHECKPOINT 1: Before validation ===")
+        windows = list_all_windows()
+        logger.info(f"Windows open: {len(windows)}")
+        for w in windows:
+            logger.info(w)
+
         # Validate configuration first
         is_valid, error_msg = validate_config(self.config_manager)
         if not is_valid:
             QMessageBox.warning(None, "Invalid Configuration", error_msg)
             self.current_state = ApplicationState.CONFIGURING
             return False
+
+        # Checkpoint 2
+        logger.info("=== CHECKPOINT 2: Before initialize_system ===")
+        windows = list_all_windows()
+        logger.info(f"Windows open: {len(windows)}")
+        for w in windows:
+            logger.info(w)
 
         # Save configuration
         self.config_manager.save_config()
@@ -681,6 +726,13 @@ class LegoSortingApplication(QObject):
         if not self.initialize_system():
             self.current_state = ApplicationState.ERROR
             return False
+
+        # Checkpoint 3
+        logger.info("=== CHECKPOINT 3: After initialize_system ===")
+        windows = list_all_windows()
+        logger.info(f"Windows open: {len(windows)}")
+        for w in windows:
+            logger.info(w)
 
         # Setup data flows
         self.setup_camera_to_detector_flow()

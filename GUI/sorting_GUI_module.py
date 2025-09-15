@@ -68,8 +68,17 @@ class SortingGUI(BaseGUIWindow):
         panel = QWidget()
         layout = QVBoxLayout()
 
+        # Debug: Check before creating VideoWidget
+        logger.info(f"Creating VideoWidget - current parent: {panel}")
+
         # Video display
-        self.video_widget = VideoWidget()
+        self.video_widget = VideoWidget(panel)
+
+        # Debug: Check VideoWidget properties
+        logger.info(f"VideoWidget created - type: {type(self.video_widget)}")
+        logger.info(f"VideoWidget parent: {self.video_widget.parent()}")
+        logger.info(f"VideoWidget is window: {self.video_widget.isWindow()}")
+
         self.video_widget.setMinimumSize(800, 600)
         layout.addWidget(self.video_widget)
 

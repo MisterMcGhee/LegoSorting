@@ -392,34 +392,62 @@ class ConveyorDetector:
     # ========================================================================
     # These methods handle processing video frames to detect pieces
 
+    # In detector_module.py, replace process_frame_for_consumer with:
     def process_frame_for_consumer(self, frame: np.ndarray) -> Dict[str, Any]:
-        """
-        Main entry point for the camera frame consumer system.
-        This method is called by the camera module for each frame.
+        """Debug version to find deadlock cause"""
+        import threading
 
-        Args:
-            frame: Video frame from camera
+        thread_name = threading.current_thread().name
+        logger.info(f"[{thread_name}] Attempting to acquire detector lock...")
 
-        Returns:
-            Dictionary with visualization data for GUI
-        """
-        with self.lock:
+        if not self.lock.acquire(timeout=2.0):
+            logger.error(f"[{thread_name}] Could not acquire detector lock - possible deadlock")
+            return {"error": "detector_busy"}
+
+        try:
+            logger.info(f"[{thread_name}] Lock acquired, starting detection...")
+
+            logger.debug(f"[{thread_name}] Checking ROI...")
             if self.roi is None:
+                logger.error(f"[{thread_name}] ROI is None!")
                 return {"error": "ROI not configured"}
+            logger.debug(f"[{thread_name}] ROI OK: {self.roi}")
 
-            # Update frame counter and FPS
+            logger.debug(f"[{thread_name}] Checking bg_subtractor...")
+            if self.bg_subtractor is None:
+                logger.error(f"[{thread_name}] bg_subtractor is None!")
+                return {"error": "Background subtractor not initialized"}
+            logger.debug(f"[{thread_name}] bg_subtractor OK")
+
+            logger.debug(f"[{thread_name}] Updating FPS...")
             self._update_fps()
 
-            # Process the frame to detect and track pieces
+            logger.debug(f"[{thread_name}] Preprocessing frame...")
             roi_img, mask = self._preprocess_frame(frame)
+
+            logger.debug(f"[{thread_name}] Detecting pieces...")
             detected_pieces = self._detect_pieces_in_mask(mask)
+
+            logger.debug(f"[{thread_name}] Updating tracking...")
             self._update_tracking(detected_pieces)
 
-            # Check for any pieces that need processing
+            logger.debug(f"[{thread_name}] Checking captures...")
             self._check_and_trigger_captures(frame)
 
-            # Return data for visualization (GUI will handle drawing)
-            return self.get_visualization_data()
+            logger.debug(f"[{thread_name}] Getting visualization data...")
+            result = self.get_visualization_data()
+
+            logger.info(f"[{thread_name}] Detection completed successfully")
+            return result
+
+        except Exception as e:
+            logger.error(f"[{thread_name}] Exception in detector: {e}", exc_info=True)
+            return {"error": f"detector_exception: {e}"}
+
+        finally:
+            logger.info(f"[{thread_name}] Releasing detector lock...")
+            self.lock.release()
+
 
     def _update_fps(self):
         """Update FPS calculation for performance monitoring"""
@@ -956,42 +984,42 @@ class ConveyorDetector:
         Get all detection data for visualization.
         This is what the GUI uses to draw the detection overlay.
 
-        Returns:
-            Dictionary with all visualization data
+        NOTE: This method assumes the caller already holds the lock!
         """
-        with self.lock:
-            if self.roi is None:
-                return {"error": "ROI not configured"}
+        # REMOVE: with self.lock:  â† Delete this line
+        if self.roi is None:
+            return {"error": "ROI not configured"}
 
-            # Prepare tracked pieces data
-            pieces_data = []
-            for piece in self.tracked_pieces:
-                pieces_data.append({
-                    "id": piece.id,
-                    "bbox": piece.bbox,  # In ROI coordinates
-                    "fully_in_frame": piece.fully_in_frame,
-                    "being_processed": piece.being_processed,
-                    "captured": piece.captured,
-                    "in_exit_zone": piece.in_exit_zone,
-                    "update_count": piece.update_count,
-                    "is_priority": piece == self.current_priority_piece,
-                    "center": piece.center
-                })
+        # Prepare tracked pieces data
+        pieces_data = []
+        for piece in self.tracked_pieces:
+            pieces_data.append({
+                "id": piece.id,
+                "bbox": piece.bbox,  # In ROI coordinates
+                "fully_in_frame": piece.fully_in_frame,
+                "being_processed": piece.being_processed,
+                "captured": piece.captured,
+                "in_exit_zone": piece.in_exit_zone,
+                "update_count": piece.update_count,
+                "is_priority": piece == self.current_priority_piece,
+                "center": piece.center
+            })
 
-            return {
-                "roi": self.roi,
-                "entry_zone": self.entry_zone,
-                "valid_zone": self.valid_zone,
-                "exit_zone": self.exit_zone,
-                "tracked_pieces": pieces_data,
-                "fps": self.fps,
-                "frame_count": self.frame_count,
-                "pieces_in_exit_zone": len(self.pieces_in_exit_zone),
-                "active_pieces": sum(1 for p in self.tracked_pieces
-                                   if not p.captured and not p.being_processed),
-                "processing_pieces": sum(1 for p in self.tracked_pieces
-                                       if p.being_processed)
-            }
+        return {
+            "roi": self.roi,
+            "entry_zone": self.entry_zone,
+            "valid_zone": self.valid_zone,
+            "exit_zone": self.exit_zone,
+            "tracked_pieces": pieces_data,
+            "fps": self.fps,
+            "frame_count": self.frame_count,
+            "pieces_in_exit_zone": len(self.pieces_in_exit_zone),
+            "active_pieces": sum(1 for p in self.tracked_pieces
+                                 if not p.captured and not p.being_processed),
+            "processing_pieces": sum(1 for p in self.tracked_pieces
+                                     if p.being_processed)
+        }
+
 
     def update_piece_result(self, piece_id: int, result: Dict[str, Any]):
         """
@@ -1065,67 +1093,94 @@ def create_detector(detector_type: str = "conveyor", config_manager=None) -> Con
 
 
 # ============================================================================
-# STANDALONE TESTING
+# STANDALONE TESTING - CLEANED VERSION (NO OPENCV WINDOWS)
 # ============================================================================
 # This section only runs if the file is executed directly (not imported)
 
 if __name__ == "__main__":
-    """Test detector with real camera feed"""
+    """Test detector with real camera feed - Console output only"""
     import sys
+    import time
 
     logging.basicConfig(level=logging.INFO)
 
     # Import camera module for real testing
     from camera_module import create_camera
 
-    print("Detector Module Camera Test")
-    print("===========================")
-    print("Press 'q' to quit, 's' to simulate a piece")
+    print("Detector Module Console Test")
+    print("============================")
+    print("Testing detector functionality with text output only")
+    print("Press Ctrl+C to quit")
 
-    # Create real camera and detector
-    camera = create_camera()
-    detector = create_detector("conveyor")
+    try:
+        # Create real camera and detector
+        camera = create_camera()
+        detector = create_detector("conveyor")
 
-    # Get first frame to set ROI
-    camera.initialize()
-    ret, frame = camera.cap.read()
+        # Get first frame to set ROI
+        camera.initialize()
+        ret, frame = camera.cap.read()
 
-    if ret:
-        # Set ROI (you might want to adjust these values)
-        detector.set_roi((400, 200, 800, 400), frame)
+        if ret:
+            # Set ROI (you might want to adjust these values)
+            detector.set_roi((400, 200, 800, 400), frame)
+            print(f"ROI set to: (400, 200, 800, 400)")
 
-        # Process frames from camera
-        while True:
-            ret, frame = camera.cap.read()
-            if not ret:
-                break
+            frame_count = 0
+            start_time = time.time()
 
-            # Process frame
-            result = detector.process_frame_for_consumer(frame)
+            # Process frames from camera
+            while True:
+                ret, frame = camera.cap.read()
+                if not ret:
+                    print("Failed to read frame from camera")
+                    break
 
-            # Show statistics
-            print(f"\rFPS: {result.get('fps', 0):.1f} | "
-                  f"Active: {result.get('active_pieces', 0)} | "
-                  f"Processing: {result.get('processing_pieces', 0)} | "
-                  f"Exit Zone: {result.get('pieces_in_exit_zone', 0)}",
-                  end='')
+                frame_count += 1
 
-            # Display frame with basic visualization
-            display_frame = frame.copy()
-            if 'roi' in result:
-                x, y, w, h = result['roi']
-                cv2.rectangle(display_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                # Process frame
+                result = detector.process_frame_for_consumer(frame)
 
-            cv2.imshow('Detector Test', display_frame)
+                # Show statistics every 30 frames (about once per second)
+                if frame_count % 30 == 0:
+                    elapsed = time.time() - start_time
+                    actual_fps = frame_count / elapsed if elapsed > 0 else 0
 
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
-                break
-            elif key == ord('s'):
-                print("\n[Simulating piece detection]")
+                    print(f"\n--- Frame {frame_count} ---")
+                    print(f"Actual FPS: {actual_fps:.1f}")
+                    print(f"Detector FPS: {result.get('fps', 0):.1f}")
+                    print(f"Active pieces: {result.get('active_pieces', 0)}")
+                    print(f"Processing pieces: {result.get('processing_pieces', 0)}")
+                    print(f"Exit zone pieces: {result.get('pieces_in_exit_zone', 0)}")
 
-    # Cleanup
-    cv2.destroyAllWindows()
-    camera.release()
-    detector.release()
-    print("\nTest complete!")
+                    if 'roi' in result:
+                        x, y, w, h = result['roi']
+                        print(f"ROI: x={x}, y={y}, w={w}, h={h}")
+
+                # Simple way to exit - check if we've run for more than 60 seconds
+                if frame_count > 1800:  # ~60 seconds at 30 FPS
+                    print("\nTest completed after ~60 seconds")
+                    break
+
+        else:
+            print("ERROR: Could not read initial frame from camera")
+            print("Check camera connection and permissions")
+
+    except KeyboardInterrupt:
+        print("\nTest interrupted by user (Ctrl+C)")
+
+    except Exception as e:
+        print(f"\nError during testing: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+    finally:
+        # Cleanup - NO OpenCV window cleanup needed
+        print("\nCleaning up...")
+        try:
+            camera.release()
+            detector.release()
+        except:
+            pass
+        print("Test complete!")
