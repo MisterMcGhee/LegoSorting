@@ -344,29 +344,33 @@ class LegoSortingApplication(QObject):
             logger.info("Unregistered any existing detector consumer")
 
         def detector_callback(frame: np.ndarray):
-            """
-            Process each camera frame for piece detection and GUI updates.
-            """
+            """Process each camera frame for piece detection and GUI updates"""
             if not self.is_running or self.is_paused:
                 return
 
             try:
-                logger.debug(
-                    f"[{threading.current_thread().name}] Detector callback called - frame shape: {frame.shape}")
-
                 self.frame_count += 1
+
+                # Debug logging every 30 frames
+                if self.frame_count % 30 == 0:
+                    logger.info(f"Detector processing frame {self.frame_count}, shape: {frame.shape}")
+
                 self.metrics_tracker.record_frame()
 
-                # CALL REAL DETECTOR (not bypass)
+                # Process frame in detector
                 detection_result = self.detector.process_frame_for_consumer(frame)
 
-                gui_detection_data = {
-                    'frame_count': self.frame_count,
-                    'detection_result': detection_result
-                }
+                # Get tracked pieces data
+                pieces_data = self.detector.get_tracked_pieces_data()
 
+                # Send to GUI
                 if self.sorting_gui:
-                    self.gui_update_signal.emit(frame.copy(), gui_detection_data)
+                    if self.frame_count % 30 == 0:  # Debug log
+                        logger.info(f"Sending frame {self.frame_count} to GUI")
+                    self.gui_update_signal.emit(frame.copy(), pieces_data)
+                else:
+                    if self.frame_count == 1:  # Log once
+                        logger.warning("sorting_gui is None - frames not being displayed")
 
             except Exception as e:
                 logger.error(f"Error in detector callback: {e}", exc_info=True)
@@ -376,7 +380,7 @@ class LegoSortingApplication(QObject):
         success = self.camera.register_consumer(
             name="detector",
             callback=detector_callback,
-            processing_type="async",
+            processing_type="sync",
             priority=90  # High priority
         )
 
@@ -528,9 +532,18 @@ class LegoSortingApplication(QObject):
         logger.info(f"Configuration GUI displayed with config_manager: {self.config_manager}")
 
     def show_sorting_gui(self):
-        """Display sorting interface"""
+        """Display sorting interface with debug tracking"""
 
+        logger.info("Creating sorting GUI...")
         self.sorting_gui = SortingGUI(self.config_manager)
+
+        # Send ROI configuration to GUI once
+        if self.detector:
+            roi_config = self.detector.get_roi_configuration()
+            self.sorting_gui.set_roi_configuration(roi_config)
+            logger.info(f"ROI configuration sent to GUI: {roi_config.get('roi', 'No ROI')}")
+        else:
+            logger.warning("No detector available for ROI configuration")
 
         # Connect control signals
         self.sorting_gui.pause_requested.connect(self.pause_sorting)
@@ -539,25 +552,32 @@ class LegoSortingApplication(QObject):
         self.sorting_gui.settings_requested.connect(self.return_to_configuration)
 
         # Connect update signals
+        logger.info("Connecting gui_update_signal to sorting_gui.update_frame")
         self.gui_update_signal.connect(self.sorting_gui.update_frame)
         self.metrics_tracker.metrics_updated.connect(self.sorting_gui.update_metrics)
 
         # Set Arduino status
         self.sorting_gui.set_arduino_status(self.servo_module is not None)
 
-        # CRITICAL: Ensure camera is capturing frames for the GUI
+        # CRITICAL: Check camera and start capture
         if self.camera:
+            logger.info(f"Camera state: initialized={self.camera.is_initialized}, capturing={self.camera.is_capturing}")
+
             # Set camera status in GUI
             self.sorting_gui.set_camera_status(self.camera.is_initialized)
 
             # Start camera capture if not already running
             if not self.camera.is_capturing:
+                logger.info("Starting camera capture...")
                 capture_started = self.camera.start_capture()
                 if capture_started:
-                    logger.info("Started camera capture for sorting GUI")
+                    logger.info("Camera capture started successfully")
                 else:
-                    logger.error("Failed to start camera capture for sorting GUI")
+                    logger.error("Failed to start camera capture")
                     self.sorting_gui.set_camera_status(False)
+            else:
+                logger.info("Camera already capturing")
+
         else:
             logger.error("No camera available for sorting GUI")
             self.sorting_gui.set_camera_status(False)
@@ -566,7 +586,15 @@ class LegoSortingApplication(QObject):
         self.sorting_gui.show()
         self.sorting_gui.center_window()
         self.current_state = ApplicationState.SORTING
+
+        # DEBUG: Force process events to ensure GUI updates
+        QApplication.processEvents()
+
         logger.info("Sorting GUI displayed")
+
+        # DEBUG: Verify window is visible
+        logger.info(f"GUI visible: {self.sorting_gui.isVisible()}")
+        logger.info(f"GUI size: {self.sorting_gui.size()}")
 
     def show_camera_preview(self):
         """Show camera preview in configuration window"""
@@ -727,39 +755,39 @@ class LegoSortingApplication(QObject):
             self.current_state = ApplicationState.ERROR
             return False
 
-        # Checkpoint 3
-        logger.info("=== CHECKPOINT 3: After initialize_system ===")
-        windows = list_all_windows()
-        logger.info(f"Windows open: {len(windows)}")
-        for w in windows:
-            logger.info(w)
-
         # Setup data flows
+        logger.info("Setting up camera to detector flow...")
         self.setup_camera_to_detector_flow()
+
+        # MOVED: Set running flag BEFORE starting workers
+        self.is_running = True
+        self.current_state = ApplicationState.SORTING
+
+        # NOW start processing worker (it checks is_running)
         self.start_processing_worker()
 
         # Start metrics tracking
         self.metrics_tracker.start_session()
 
         # Start camera capture
-        self.camera.start_capture()
+        logger.info("Starting camera capture...")
+        if self.camera:
+            self.camera.start_capture()
+            logger.info("Camera capture started")
 
-        # Update state
-        self.is_running = True
-        self.current_state = ApplicationState.SORTING
-
-        # Show sorting GUI
+        # Hide config GUI and show sorting GUI
         if self.config_gui:
             self.config_gui.hide()
+
+        logger.info("Showing sorting GUI...")
         self.show_sorting_gui()
 
         # Start periodic updates
-        self.update_timer.start(1000)  # Update every second
+        self.update_timer.start(1000)
 
         logger.info("Sorting started successfully")
         self.state_changed.emit(ApplicationState.SORTING)
         return True
-
     @pyqtSlot()
     def pause_sorting(self):
         """Pause sorting operation"""

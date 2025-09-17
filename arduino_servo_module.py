@@ -1,9 +1,6 @@
 """
-arduino_servo_module.py - Arduino-based servo control for the Lego sorting application
-
-This module handles communication with an Arduino to control the servo motor
-that directs sorted Lego pieces to the appropriate bins. It implements the
-same interface as servo_module.py but uses Arduino for hardware control.
+arduino_servo_module.py - SIMPLIFIED VERSION
+Arduino-based servo control that loads saved bin positions from config GUI
 """
 
 import time
@@ -11,6 +8,7 @@ import logging
 import serial
 import threading
 from enhanced_config_manager import ModuleConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,7 +30,6 @@ class ArduinoServoModule:
         self.min_pulse = 500
         self.max_pulse = 2500
         self.default_position = 90
-        self.calibration_mode = False
         self.simulation_mode = False
         self.min_bin_separation = 20
 
@@ -44,12 +41,11 @@ class ArduinoServoModule:
         if config_manager:
             self.config_manager = config_manager
 
-            # NEW: Get complete validated configurations
+            # Get configurations - read from arduino_servo config where GUI saves everything
             arduino_config = config_manager.get_module_config(ModuleConfig.ARDUINO_SERVO.value)
-            servo_config = config_manager.get_module_config(ModuleConfig.SERVO.value)
             sorting_config = config_manager.get_module_config(ModuleConfig.SORTING.value)
 
-            # Apply Arduino servo settings - all fields guaranteed
+            # Apply Arduino connection settings
             self.port = arduino_config["port"]
             self.baud_rate = arduino_config["baud_rate"]
             self.timeout = arduino_config["timeout"]
@@ -57,103 +53,68 @@ class ArduinoServoModule:
             self.retry_delay = arduino_config["retry_delay"]
             self.simulation_mode = arduino_config["simulation_mode"]
 
-            # Apply servo settings - all fields guaranteed
-            self.min_pulse = servo_config["min_pulse"]
-            self.max_pulse = servo_config["max_pulse"]
-            self.default_position = servo_config["default_position"]
-            self.calibration_mode = servo_config["calibration_mode"]
-            self.min_bin_separation = servo_config["min_bin_separation"]
+            # Apply servo hardware settings from arduino_servo config
+            self.min_pulse = arduino_config.get("min_pulse", 500)
+            self.max_pulse = arduino_config.get("max_pulse", 2500)
+            self.default_position = arduino_config.get("default_position", 90)
+            self.min_bin_separation = arduino_config.get("min_bin_separation", 20)
 
             # Get bin configuration from sorting
             self.max_bins = sorting_config["max_bins"]
             self.overflow_bin = sorting_config["overflow_bin"]
+
+            # Load saved bin positions from config GUI
+            saved_positions = arduino_config.get("bin_positions", {})
+            if saved_positions:
+                self.bin_positions = {str(k): float(v) for k, v in saved_positions.items()}
+                logger.info(f"Loaded saved bin positions: {self.bin_positions}")
+                print(f"Using saved bin positions: {self.bin_positions}")
+            else:
+                logger.warning("No bin positions found in config - positions must be set via config GUI")
+                print("WARNING: No bin positions configured. Please set positions in config GUI.")
         else:
             self.config_manager = None
             self.max_bins = 9
             self.overflow_bin = 0
+            logger.warning("No config manager provided - bin positions must be set manually")
 
         # Initialize connection variables
         self.arduino = None
         self.initialized = False
         self.lock = threading.RLock()
 
-        # Calculate bin positions dynamically
-        self._calculate_bin_positions()
-
-        # If simulation mode is enabled, skip Arduino connection
+        # Connect to Arduino or enable simulation mode
         if self.simulation_mode:
             logger.info("Simulation mode enabled. Skipping Arduino connection.")
             print("Simulation mode enabled. Skipping Arduino connection.")
             self.initialized = True
         else:
-            # Connect to Arduino
             self._connect_to_arduino()
 
-        # Run initialization test sequence if connection successful
-        if self.initialized:
-            self._run_initialization_test_sequence()
+    def set_bin_positions(self, positions_dict):
+        """Set specific bin positions (used by GUI)
 
-        # If in calibration mode, run calibration
-        if self.calibration_mode and self.initialized:
-            print("Starting servo calibration mode...")
-            self.calibrate()
-            # Turn off calibration mode after running
-            if self.config_manager:
-                self.config_manager.set("servo", "calibration_mode", False)
-                self.config_manager.save_config()
+        Args:
+            positions_dict: Dictionary of {bin_number: angle} pairs
+        """
+        self.bin_positions = {str(k): float(v) for k, v in positions_dict.items()}
+        logger.info(f"Updated bin positions: {self.bin_positions}")
+
+        # Save to config if available
+        if self.config_manager:
+            arduino_config = self.config_manager.get_module_config(ModuleConfig.ARDUINO_SERVO.value)
+            arduino_config["bin_positions"] = self.bin_positions
+            self.config_manager.update_module_config(ModuleConfig.ARDUINO_SERVO.value, arduino_config)
+            self.config_manager.save_config()
+
+    def get_bin_positions(self):
+        """Get current bin positions dictionary"""
+        return self.bin_positions.copy()
 
     def set_max_bins(self, max_bins: int):
-        """Update max_bins setting and recalculate positions"""
+        """Update max_bins setting"""
         self.max_bins = max_bins
         logger.info(f"Updated max_bins to {max_bins}")
-        # Positions will be recalculated by calling _calculate_bin_positions()r
-
-    def _calculate_bin_positions(self):
-        """Calculate bin positions dynamically based on max_bins and minimum bin separation"""
-        # Bin 0 (overflow bin) is always at 0 degrees
-        self.bin_positions[str(self.overflow_bin)] = 0
-
-        # Distribute remaining bins evenly across 1-180 degrees
-        remaining_bins = self.max_bins
-
-        # If overflow bin is included in max_bins count, adjust accordingly
-        if self.overflow_bin < self.max_bins:
-            remaining_bins -= 1
-
-        # Calculate maximum number of bins possible with minimum separation
-        max_possible_bins = int(180 / self.min_bin_separation)
-
-        if remaining_bins > max_possible_bins:
-            logger.warning(f"Warning: Requested {remaining_bins} bins, but only {max_possible_bins} " +
-                           f"possible with minimum separation of {self.min_bin_separation} degrees")
-            print(f"Warning: Requested {remaining_bins} bins, but only {max_possible_bins} " +
-                  f"possible with minimum separation of {self.min_bin_separation} degrees")
-            remaining_bins = max_possible_bins
-
-        if remaining_bins > 0:
-            # Calculate step size based on min_bin_separation or even distribution, whichever is larger
-            step = max(self.min_bin_separation, 180 / remaining_bins)
-
-            # Assign positions to each bin
-            current_angle = step
-            assigned_bins = 0
-
-            for bin_num in range(1, self.max_bins + 1):
-                # Skip overflow bin if it's not bin 0
-                if bin_num == self.overflow_bin:
-                    continue
-
-                # Stop if we've reached the maximum possible bins
-                if assigned_bins >= max_possible_bins or current_angle > 180:
-                    break
-
-                self.bin_positions[str(bin_num)] = int(current_angle)
-                current_angle += step
-                assigned_bins += 1
-
-        logger.info(
-            f"Dynamically calculated bin positions with min separation of {self.min_bin_separation} degrees: {self.bin_positions}")
-        print(f"Bin positions: {self.bin_positions}")
 
     def _connect_to_arduino(self):
         """Connect to the Arduino device"""
@@ -184,9 +145,8 @@ class ArduinoServoModule:
 
                     # Configure servo parameters
                     self._send_command(f"S,{self.min_pulse},{self.max_pulse}")
-                    # Don't wait for response as it's not critical
 
-                    # Move to default position
+                    # Move to default position to confirm connection
                     self.move_to_angle(self.default_position)
                     return
 
@@ -214,18 +174,19 @@ class ArduinoServoModule:
                     print("Switching to simulation mode.")
                     logger.info("User selected simulation mode after connection failure.")
                     self.simulation_mode = True
-                    self.initialized = True  # Mark as initialized for simulation mode
+                    self.initialized = True
 
                     # Update config if available
                     if self.config_manager:
-                        self.config_manager.set("arduino_servo", "simulation_mode", True)
+                        arduino_config = self.config_manager.get_module_config(ModuleConfig.ARDUINO_SERVO.value)
+                        arduino_config["simulation_mode"] = True
+                        self.config_manager.update_module_config(ModuleConfig.ARDUINO_SERVO.value, arduino_config)
                         self.config_manager.save_config()
                         logger.info("Updated config: simulation_mode=True")
                     return
                 elif user_input == 'q':
                     print("Quitting application due to Arduino connection failure.")
                     logger.error("User quit application due to Arduino connection failure.")
-                    # Exit application
                     import sys
                     sys.exit(1)
                 else:
@@ -257,46 +218,6 @@ class ArduinoServoModule:
             except Exception as e:
                 logger.error(f"Error sending command to Arduino: {str(e)}")
                 return False
-
-    def _run_initialization_test_sequence(self):
-        """Run a sequence to demonstrate the servo is properly connected.
-
-        This moves the servo through all configured bin positions to show
-        the connection is working and verify the mechanical setup.
-        """
-        logger.info("Running servo initialization test sequence")
-        print("\n===== ARDUINO SERVO INITIALIZATION TEST =====")
-        print("Moving through all configured bin positions...")
-
-        try:
-            # First move to the default position
-            print(f"Moving to default position ({self.default_position} degrees)")
-            self.move_to_angle(self.default_position)
-            time.sleep(1.0)
-
-            # Collect bin positions
-            positions = []
-            for bin_num, angle in self.bin_positions.items():
-                positions.append((int(bin_num), angle))
-
-            # Sort by position value to make the sweep smooth
-            positions.sort(key=lambda x: x[1])
-
-            # Move to each position
-            for bin_num, angle in positions:
-                print(f"Moving to bin {bin_num} ({angle} degrees)")
-                self.move_to_angle(angle)
-                time.sleep(0.8)  # Short delay between positions
-
-            # Return to default position
-            print(f"Returning to default position ({self.default_position} degrees)")
-            self.move_to_angle(self.default_position)
-            print("Initialization test sequence complete!")
-            print("========================================\n")
-
-        except Exception as e:
-            logger.error(f"Error during initialization test sequence: {str(e)}")
-            print(f"Error during test sequence: {str(e)}")
 
     def _read_response(self, timeout=2.0):
         """Read a response from the Arduino
@@ -364,7 +285,6 @@ class ArduinoServoModule:
             if response and f"Moved to: {angle}" in response:
                 logger.debug(f"Confirmed: Moved servo to {angle} degrees")
             else:
-                # Continue even if we don't get a response or the expected response
                 logger.debug(f"Moved servo to {angle} degrees (no confirmation)")
 
             return True
@@ -390,7 +310,7 @@ class ArduinoServoModule:
         # Convert bin_number to string for dictionary lookup
         bin_key = str(bin_number)
 
-        # If we don't have a position for this bin, use the overflow bin
+        # Check if we have a position for this bin
         if bin_key not in self.bin_positions:
             logger.warning(f"No position defined for bin {bin_number}, using overflow bin")
             bin_key = str(self.overflow_bin)
@@ -406,92 +326,9 @@ class ArduinoServoModule:
 
         if success:
             self.current_bin = bin_number
+            logger.info(f"Moved to bin {bin_number} at {angle} degrees")
 
         return success
-
-    def calibrate(self):
-        """Interactive calibration of bin positions using text console interface"""
-        if not self.initialized:
-            logger.error("Arduino not initialized")
-            return False
-
-        print("\n======== SERVO CALIBRATION ========")
-        print("For each bin, use these controls:")
-        print("  '+': Increase angle by 1 degree")
-        print("  '-': Decrease angle by 1 degree")
-        print("  '>': Increase angle by 5 degrees")
-        print("  '<': Decrease angle by 5 degrees")
-        print("  's': Save position and move to next bin")
-        print("  'q': Quit calibration")
-        print("==================================\n")
-
-        # Start with calculated positions
-        positions = self.bin_positions.copy()
-
-        # Calibrate each bin up to max_bins
-        for bin_num in range(self.max_bins + 1):
-            is_overflow = bin_num == self.overflow_bin
-            bin_label = f"OVERFLOW BIN ({bin_num})" if is_overflow else f"Bin {bin_num}"
-
-            # Get current position or default
-            current_pos = int(positions.get(str(bin_num), self.default_position))
-            self.move_to_angle(current_pos)
-
-            print(f"\nCalibrating position for {bin_label}")
-            print(f"Current angle: {current_pos} degrees")
-            print("Enter command (+, -, >, <, s, q): ", end="", flush=True)
-
-            while True:
-                # Get a single character input without requiring Enter
-                try:
-                    import msvcrt  # Windows
-                    command = msvcrt.getch().decode().lower()
-                except (ImportError, AttributeError):
-                    try:
-                        import tty, termios, sys  # Unix/Linux/MacOS
-                        fd = sys.stdin.fileno()
-                        old_settings = termios.tcgetattr(fd)
-                        try:
-                            tty.setraw(fd)
-                            command = sys.stdin.read(1).lower()
-                        finally:
-                            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                    except (ImportError, AttributeError):
-                        # Fall back to regular input if can't get single char input
-                        command = input().lower()[0] if input() else ""
-
-                if command == '+':
-                    current_pos += 1
-                    print(f"\rCurrent angle: {current_pos} degrees    ", end="", flush=True)
-                elif command == '-':
-                    current_pos -= 1
-                    print(f"\rCurrent angle: {current_pos} degrees    ", end="", flush=True)
-                elif command == '>':
-                    current_pos += 5
-                    print(f"\rCurrent angle: {current_pos} degrees    ", end="", flush=True)
-                elif command == '<':
-                    current_pos -= 5
-                    print(f"\rCurrent angle: {current_pos} degrees    ", end="", flush=True)
-                elif command == 's':
-                    print(f"\nSaved position for {bin_label}: {current_pos} degrees")
-                    break
-                elif command == 'q':
-                    print("\nCalibration aborted")
-                    return False
-
-                # Ensure position stays within valid range
-                current_pos = max(0, min(180, current_pos))
-                self.move_to_angle(current_pos)
-
-            # Store the confirmed position
-            positions[str(bin_num)] = current_pos
-
-        # Store calibrated positions temporarily for this session
-        # But they won't be saved to config since we're using dynamic calculation
-        self.bin_positions = positions
-
-        print("Calibration complete! Note: These positions are only for this session and won't be saved.")
-        return True
 
     def release(self):
         """Release hardware resources"""
@@ -527,47 +364,3 @@ def create_arduino_servo_module(config_manager=None):
         ArduinoServoModule instance
     """
     return ArduinoServoModule(config_manager)
-
-
-# Example usage
-if __name__ == "__main__":
-    # Basic logging setup
-    logging.basicConfig(level=logging.INFO)
-
-    # Create instance
-    servo = create_arduino_servo_module()
-
-    try:
-        print("Testing Arduino servo control")
-
-        if not servo.initialized:
-            print("Arduino initialization failed, exiting")
-            exit(1)
-
-        # Test movement sequence
-        print("Moving to various positions...")
-        test_positions = [0, 45, 90, 135, 180, 90]
-
-        for pos in test_positions:
-            print(f"Moving to {pos} degrees")
-            servo.move_to_angle(pos)
-            time.sleep(1.5)
-
-        # Test bin movement (if bins are configured)
-        bin_count = min(5, len(servo.bin_positions))
-        if bin_count > 0:
-            print("Testing bin positions...")
-            for bin_num in range(bin_count):
-                print(f"Moving to bin {bin_num}")
-                servo.move_to_bin(bin_num)
-                time.sleep(1.5)
-
-        print("Servo test complete, moving to default position")
-        servo.move_to_angle(servo.default_position)
-
-    except KeyboardInterrupt:
-        print("\nTest interrupted by user")
-
-    finally:
-        # Clean up
-        servo.release()

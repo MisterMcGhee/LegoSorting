@@ -394,60 +394,21 @@ class ConveyorDetector:
 
     # In detector_module.py, replace process_frame_for_consumer with:
     def process_frame_for_consumer(self, frame: np.ndarray) -> Dict[str, Any]:
-        """Debug version to find deadlock cause"""
-        import threading
-
-        thread_name = threading.current_thread().name
-        logger.info(f"[{thread_name}] Attempting to acquire detector lock...")
-
-        if not self.lock.acquire(timeout=2.0):
-            logger.error(f"[{thread_name}] Could not acquire detector lock - possible deadlock")
-            return {"error": "detector_busy"}
-
-        try:
-            logger.info(f"[{thread_name}] Lock acquired, starting detection...")
-
-            logger.debug(f"[{thread_name}] Checking ROI...")
+        """Process frame for piece detection"""
+        with self.lock:
             if self.roi is None:
-                logger.error(f"[{thread_name}] ROI is None!")
                 return {"error": "ROI not configured"}
-            logger.debug(f"[{thread_name}] ROI OK: {self.roi}")
 
-            logger.debug(f"[{thread_name}] Checking bg_subtractor...")
             if self.bg_subtractor is None:
-                logger.error(f"[{thread_name}] bg_subtractor is None!")
                 return {"error": "Background subtractor not initialized"}
-            logger.debug(f"[{thread_name}] bg_subtractor OK")
 
-            logger.debug(f"[{thread_name}] Updating FPS...")
             self._update_fps()
-
-            logger.debug(f"[{thread_name}] Preprocessing frame...")
             roi_img, mask = self._preprocess_frame(frame)
-
-            logger.debug(f"[{thread_name}] Detecting pieces...")
             detected_pieces = self._detect_pieces_in_mask(mask)
-
-            logger.debug(f"[{thread_name}] Updating tracking...")
             self._update_tracking(detected_pieces)
-
-            logger.debug(f"[{thread_name}] Checking captures...")
             self._check_and_trigger_captures(frame)
 
-            logger.debug(f"[{thread_name}] Getting visualization data...")
-            result = self.get_visualization_data()
-
-            logger.info(f"[{thread_name}] Detection completed successfully")
-            return result
-
-        except Exception as e:
-            logger.error(f"[{thread_name}] Exception in detector: {e}", exc_info=True)
-            return {"error": f"detector_exception: {e}"}
-
-        finally:
-            logger.info(f"[{thread_name}] Releasing detector lock...")
-            self.lock.release()
-
+            return self.get_tracked_pieces_data()
 
     def _update_fps(self):
         """Update FPS calculation for performance monitoring"""
@@ -978,7 +939,82 @@ class ConveyorDetector:
     # DATA OUTPUT SECTION
     # ========================================================================
     # These methods provide data to other modules (mainly GUI)
+    def get_roi_configuration(self) -> Dict[str, Any]:
+        """
+        Get static ROI configuration for initial GUI setup.
+        This should be called once when ROI is set.
 
+        Returns:
+            Dictionary with ROI and zone boundaries in frame coordinates
+        """
+        with self.lock:
+            if self.roi is None:
+                return {"error": "ROI not configured"}
+
+            return {
+                "roi": self.roi,  # (x, y, width, height) in frame coords
+                "entry_zone": self.entry_zone,  # (x_start, x_end) in frame coords
+                "valid_zone": self.valid_zone,  # (x_start, x_end) in frame coords
+                "exit_zone": self.exit_zone  # (x_start, x_end) in frame coords
+            }
+
+    def get_tracked_pieces_data(self) -> Dict[str, Any]:
+        """
+        Get dynamic tracking data with frame-relative coordinates.
+        This is called every frame to update piece positions.
+
+        Returns:
+            Dictionary with piece data and statistics
+        """
+        with self.lock:
+            if self.roi is None:
+                return {"error": "ROI not configured"}
+
+            # Get ROI offset for coordinate conversion
+            roi_x, roi_y = self.roi[0], self.roi[1]
+
+            # Build piece data with frame coordinates
+            pieces_data = []
+            for piece in self.tracked_pieces:
+                # Convert bbox from ROI coords to frame coords
+                x, y, w, h = piece.bbox
+                frame_x = roi_x + x
+                frame_y = roi_y + y
+
+                # Determine piece status for color coding
+                if piece.captured:
+                    status = "processed"
+                elif piece.being_processed:
+                    status = "processing"
+                else:
+                    status = "detected"
+
+                pieces_data.append({
+                    "id": piece.id,
+                    "bbox": (frame_x, frame_y, w, h),  # Now in frame coordinates!
+                    "status": status,  # For GUI color coding
+                    "fully_in_frame": piece.fully_in_frame,
+                    "in_exit_zone": piece.in_exit_zone,
+                    "is_priority": piece == self.current_priority_piece,
+                    # Convert center to frame coords too
+                    "center": (piece.center[0] + roi_x, piece.center[1] + roi_y)
+                })
+
+            return {
+                "tracked_pieces": pieces_data,
+                "fps": self.fps,
+                "frame_count": self.frame_count,
+                "statistics": {
+                    "pieces_in_exit_zone": len(self.pieces_in_exit_zone),
+                    "active_pieces": sum(1 for p in self.tracked_pieces
+                                         if not p.captured and not p.being_processed),
+                    "processing_pieces": sum(1 for p in self.tracked_pieces
+                                             if p.being_processing)
+                }
+            }
+
+    # DEPRECATED: Use get_roi_configuration() and get_tracked_pieces_data() instead
+    # This method is kept for backward compatibility and will be removed in next version
     def get_visualization_data(self) -> Dict[str, Any]:
         """
         Get all detection data for visualization.

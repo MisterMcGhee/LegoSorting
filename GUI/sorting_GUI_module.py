@@ -8,12 +8,13 @@ from PyQt5.QtGui import *
 import cv2
 import numpy as np
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from GUI.gui_common import BaseGUIWindow, VideoWidget, StatusDisplay, format_time
 
 import logging
-
 logger = logging.getLogger(__name__)
+logger.info("sorting_GUI_module imported")
+
 
 
 class SortingGUI(BaseGUIWindow):
@@ -26,67 +27,124 @@ class SortingGUI(BaseGUIWindow):
     settings_requested = pyqtSignal()  # Return to configuration
 
     def __init__(self, config_manager=None):
+        logger.info("SortingGUI.__init__ starting")
+
         super().__init__(config_manager, "Lego Sorting System - Active Sorting")
+        logger.info("Parent class initialized")
 
         # State
         self.is_paused = False
         self.start_time = time.time()
         self.frame_count = 0
         self.piece_count = 0
+        logger.info("State variables initialized")
+
+        # ROI and zone configuration (set once during initialization)
+        self.roi_config = None
+        self.roi_bounds = None
+        self.zones = None
+        logger.info("ROI variables initialized")
 
         # Window setup
         self.setGeometry(100, 100, 1400, 900)
+        logger.info("Geometry set")
+
         self.center_window()
+        logger.info("Window centered")
 
         # Initialize UI
+        logger.info("Calling init_ui...")
         self.init_ui()
+        logger.info("init_ui complete")
+
+        logger.info("Calling setup_timers...")
         self.setup_timers()
+        logger.info("setup_timers complete")
+
+        logger.info("SortingGUI.__init__ complete")
+
+    def set_roi_configuration(self, roi_data: Dict[str, Any]):
+        """
+        Set the ROI configuration - PHASE 1: STORE BUT DON'T USE
+        """
+        if "error" in roi_data:
+            self.add_log_message(f"ROI configuration error: {roi_data['error']}", "ERROR")
+            return
+
+        # PHASE 1: Store the configuration but don't use it for drawing yet
+        self.roi_bounds = roi_data.get("roi")
+        self.zones = {
+            "entry": roi_data.get("entry_zone"),
+            "valid": roi_data.get("valid_zone"),
+            "exit": roi_data.get("exit_zone")
+        }
+
+        if self.roi_bounds:
+            x, y, w, h = self.roi_bounds
+            # PHASE 1: Just log that we received ROI, don't use it for drawing
+            self.add_log_message(f"ROI configured but not displayed: {w}x{h} at ({x},{y})", "INFO")
 
     def init_ui(self):
         """Initialize the user interface"""
+        logger.debug("Starting UI initialization...")
+
         # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+        logger.debug("Central widget created")
 
         # Main layout - horizontal split
         main_layout = QHBoxLayout()
         central_widget.setLayout(main_layout)
+        logger.debug("Main layout created")
 
         # Left panel - Video and controls
+        logger.debug("Creating left panel...")
         left_panel = self.create_left_panel()
         main_layout.addWidget(left_panel, stretch=3)
+        logger.debug("Left panel added")
 
         # Right panel - Information displays
+        logger.debug("Creating right panel...")
         right_panel = self.create_right_panel()
         main_layout.addWidget(right_panel, stretch=1)
+        logger.debug("Right panel added")
 
         # Status bar
+        logger.debug("Creating status bar...")
         self.create_status_bar()
+        logger.debug("UI initialization complete")
 
     def create_left_panel(self) -> QWidget:
         """Create left panel with video and controls"""
+        logger.info("create_left_panel starting")
+
         panel = QWidget()
         layout = QVBoxLayout()
+        logger.info("Left panel base created")
 
         # Debug: Check before creating VideoWidget
         logger.info(f"Creating VideoWidget - current parent: {panel}")
 
         # Video display
         self.video_widget = VideoWidget(panel)
-
-        # Debug: Check VideoWidget properties
-        logger.info(f"VideoWidget created - type: {type(self.video_widget)}")
-        logger.info(f"VideoWidget parent: {self.video_widget.parent()}")
-        logger.info(f"VideoWidget is window: {self.video_widget.isWindow()}")
+        logger.info(f"VideoWidget created successfully")
 
         self.video_widget.setMinimumSize(800, 600)
+        logger.info("VideoWidget size set")
+
         layout.addWidget(self.video_widget)
+        logger.info("VideoWidget added to layout")
 
         # Control buttons
         controls = self.create_control_buttons()
+        logger.info("Control buttons created")
+
         layout.addWidget(controls)
+        logger.info("Controls added to layout")
 
         panel.setLayout(layout)
+        logger.info("create_left_panel complete")
         return panel
 
     def create_right_panel(self) -> QWidget:
@@ -223,67 +281,130 @@ class SortingGUI(BaseGUIWindow):
 
     def setup_timers(self):
         """Setup update timers"""
+        logger.info("setup_timers starting")
+
         # UI update timer (10 Hz)
         self.ui_timer = QTimer()
+        logger.info("UI timer created")
+
         self.ui_timer.timeout.connect(self.update_ui)
+        logger.info("UI timer connected")
+
         self.ui_timer.start(100)
+        logger.info("UI timer started")
 
         # Metrics update timer (1 Hz)
         self.metrics_timer = QTimer()
+        logger.info("Metrics timer created")
+
         self.metrics_timer.timeout.connect(self.update_metrics)
+        logger.info("Metrics timer connected")
+
         self.metrics_timer.start(1000)
+        logger.info("Metrics timer started")
+
+        logger.info("setup_timers complete")
 
     # ========== Update Methods ==========
 
-    def update_frame(self, frame: np.ndarray, detections: Dict[str, Any] = None):
-        """Update video display with new frame"""
+    def update_frame(self, frame: np.ndarray, pieces_data: Dict[str, Any] = None):
+        """PHASE 1: Display raw camera feed only"""
+
         if frame is None:
+            logger.warning("Received None frame in update_frame")
             return
 
         self.frame_count += 1
 
-        # Draw detections if provided
-        if detections:
-            frame = self.draw_detections(frame, detections)
+        if self.frame_count % 30 == 0:
+            logger.info(f"GUI processing frame {self.frame_count}")
 
-        # Update video widget
+        # PHASE 1: COMMENT OUT THESE LINES
+        # if self.roi_bounds:
+        #     frame = self.draw_roi_overlay(frame)
+
+        # if pieces_data and 'tracked_pieces' in pieces_data:
+        #     frame = self.draw_tracked_pieces(frame, pieces_data['tracked_pieces'])
+
+        # PHASE 1: ONLY THIS LINE SHOULD RUN
         self.video_widget.update_frame(frame)
 
-    def draw_detections(self, frame: np.ndarray, detections: Dict[str, Any]) -> np.ndarray:
-        """Draw detection overlays on frame"""
+    def draw_roi_overlay(self, frame: np.ndarray) -> np.ndarray:
+        """Draw static ROI and zone boundaries on frame - DISABLED IN PHASE 1"""
+        # PHASE 1: This method exists but won't be called
         display_frame = frame.copy()
 
-        # Draw ROI if present
-        if 'roi' in detections:
-            roi = detections['roi']
+        # Draw main ROI rectangle
+        if self.roi_bounds:
+            x, y, w, h = self.roi_bounds
             cv2.rectangle(display_frame,
-                          (roi[0], roi[1]),
-                          (roi[0] + roi[2], roi[1] + roi[3]),
-                          (0, 255, 0), 2)
+                          (x, y),
+                          (x + w, y + h),
+                          (0, 255, 0), 2)  # Green for ROI
 
-        # Draw detected pieces
-        if 'pieces' in detections:
-            for piece in detections['pieces']:
-                x, y, w, h = piece['bbox']
-                color = self.get_piece_color(piece)
-                cv2.rectangle(display_frame, (x, y), (x + w, y + h), color, 2)
+            # Draw zone dividers if available
+            if self.zones:
+                # Entry zone boundary
+                if self.zones.get("entry"):
+                    entry_end = self.zones["entry"][1]
+                    cv2.line(display_frame,
+                             (entry_end, y),
+                             (entry_end, y + h),
+                             (255, 255, 0), 1)  # Yellow line
 
-                # Add label
-                label = f"ID: {piece.get('id', '?')}"
-                cv2.putText(display_frame, label, (x, y - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                # Exit zone boundary
+                if self.zones.get("exit"):
+                    exit_start = self.zones["exit"][0]
+                    cv2.line(display_frame,
+                             (exit_start, y),
+                             (exit_start, y + h),
+                             (0, 255, 255), 1)  # Cyan line
 
         return display_frame
 
-    def get_piece_color(self, piece: Dict) -> tuple:
-        """Get color for piece based on status"""
-        status = piece.get('status', 'detected')
+    def draw_tracked_pieces(self, frame: np.ndarray, pieces: List[Dict]) -> np.ndarray:
+        """Draw tracked pieces with color coding based on status"""
+        display_frame = frame.copy()
+
+        for piece in pieces:
+            # Get piece position (now already in frame coordinates!)
+            x, y, w, h = piece['bbox']
+
+            # Get color based on status
+            status = piece.get('status', 'detected')
+            color = self.get_piece_color(status)
+
+            # Draw rectangle around piece
+            cv2.rectangle(display_frame, (x, y), (x + w, y + h), color, 2)
+
+            # Add label with piece ID
+            label = f"ID: {piece.get('id', '?')}"
+            if piece.get('in_exit_zone'):
+                label += " [EXIT]"
+
+            cv2.putText(display_frame, label, (x, y - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+        return display_frame
+
+    def get_piece_color(self, status: str) -> tuple:
+        """
+        Get color for piece based on status string.
+
+        Args:
+            status: Status string ('detected', 'processing', 'processed', 'error')
+
+        Returns:
+            Tuple of BGR color values for OpenCV
+        """
         colors = {
-            'detected': (0, 0, 255),  # Red
-            'processing': (0, 165, 255),  # Orange
-            'processed': (0, 255, 0),  # Green
-            'error': (0, 0, 128)  # Dark red
+            'detected': (0, 0, 255),  # Red - newly detected piece
+            'processing': (0, 165, 255),  # Orange - being processed by API
+            'processed': (0, 255, 0),  # Green - processing complete
+            'error': (0, 0, 128)  # Dark red - processing error
         }
+
+        # Return the color for the status, or gray if status unknown
         return colors.get(status, (128, 128, 128))
 
     def update_piece_display(self, piece_data: Dict[str, Any]):

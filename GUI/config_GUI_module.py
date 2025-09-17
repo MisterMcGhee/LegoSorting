@@ -1800,14 +1800,13 @@ class ConfigurationGUI(BaseGUIWindow):
     # ========== Configuration Methods ==========
 
     def load_current_config(self):
-        """Load current configuration into UI"""
+        """Load current configuration into UI - FIXED VERSION"""
         if not self.config_manager:
             return
 
-        # Load camera settings
+        # Load camera settings (existing code unchanged)
         camera_config = self.config_manager.get_module_config("camera")
         if camera_config:
-            # Load camera device - find by device ID, not by text
             device_id = camera_config.get("device_id", 0)
             device_found = False
             for i in range(self.camera_device.count()):
@@ -1816,26 +1815,22 @@ class ConfigurationGUI(BaseGUIWindow):
                     device_found = True
                     break
 
-            # If device not found in dropdown, add it as fallback
             if not device_found:
                 fallback_text = f"Camera {device_id}"
                 self.camera_device.addItem(fallback_text, userData=device_id)
                 self.camera_device.setCurrentIndex(self.camera_device.count() - 1)
 
-            # Load other camera settings
             res = camera_config.get("resolution", [1920, 1080])
             self.resolution_combo.setCurrentText(f"{res[0]}x{res[1]}")
             self.fps_spin.setValue(camera_config.get("fps", 30))
             self.exposure_slider.setValue(camera_config.get("exposure", 0))
 
-        # Load detector settings
+        # Load detector settings (existing code unchanged)
         detector_config = self.config_manager.get_module_config("detector")
         if detector_config:
-            # Load detection parameters
             self.min_piece_area_spin.setValue(detector_config.get("min_area", 1000))
             self.max_piece_area_spin.setValue(detector_config.get("max_area", 50000))
 
-            # Load zone settings
             zones = detector_config.get("zones", {})
             entry_zone = int(zones.get("entry_percentage", 15))
             exit_zone = int(zones.get("exit_percentage", 15))
@@ -1844,12 +1839,9 @@ class ConfigurationGUI(BaseGUIWindow):
             self._update_entry_zone(entry_zone)
             self._update_exit_zone(exit_zone)
 
-            # Load ROI if present
             roi = detector_config.get("roi")
             if roi and len(roi) == 4:
                 x, y, w, h = roi
-
-                # Set spin box values (temporarily disable signals to prevent recursive updates)
                 self.roi_x_spin.blockSignals(True)
                 self.roi_y_spin.blockSignals(True)
                 self.roi_w_spin.blockSignals(True)
@@ -1865,23 +1857,23 @@ class ConfigurationGUI(BaseGUIWindow):
                 self.roi_w_spin.blockSignals(False)
                 self.roi_h_spin.blockSignals(False)
 
-                # Update ROI from controls
                 self._update_roi_from_controls()
 
-        # Load sorting settings
+        # Load sorting settings (existing code unchanged)
         sorting_config = self.config_manager.get_module_config("sorting")
         if sorting_config:
             self.load_sorting_config(sorting_config)
 
-        # API settings
+        # API settings (existing code unchanged)
         api_config = self.config_manager.get_module_config(ModuleConfig.API.value)
         if api_config:
             self.timeout_spin.setValue(api_config.get("timeout", 30))
             self.retry_count_spin.setValue(api_config.get("retry_count", 3))
 
-        # Load Arduino settings
+        # FIXED: Load Arduino settings from arduino_servo config (where GUI saves them)
         arduino_config = self.config_manager.get_module_config("arduino_servo")
         if arduino_config:
+            # Arduino connection settings
             self.port_combo.setCurrentText(arduino_config.get("port", ""))
             self.baud_combo.setCurrentText(str(arduino_config.get("baud_rate", 9600)))
             self.timeout_spin.setValue(arduino_config.get("timeout", 2.0))
@@ -1889,20 +1881,20 @@ class ConfigurationGUI(BaseGUIWindow):
             self.retry_delay_spin.setValue(arduino_config.get("retry_delay", 1.0))
             self.simulation_check.setChecked(arduino_config.get("simulation_mode", False))
 
-            # Load servo hardware settings
+            # FIXED: Load servo hardware settings from arduino_servo config
             self.min_pulse_spin.setValue(arduino_config.get("min_pulse", 500))
             self.max_pulse_spin.setValue(arduino_config.get("max_pulse", 2500))
             self.default_pos_spin.setValue(arduino_config.get("default_position", 90))
             self.min_separation_spin.setValue(arduino_config.get("min_bin_separation", 20))
 
-            # Load bin positions
+            # FIXED: Load actual bin positions (user-configured positions)
             positions = arduino_config.get("bin_positions", {})
             for i in range(10):
                 position = positions.get(str(i), 90)
                 if self.servo_table.item(i, 1):
                     self.servo_table.item(i, 1).setText(str(position))
 
-        # Load system settings
+        # Load system settings (existing code unchanged)
         system_config = self.config_manager.get_module_config("system")
         if system_config:
             self.threading_check.setChecked(system_config.get("threading_enabled", True))
@@ -1911,10 +1903,10 @@ class ConfigurationGUI(BaseGUIWindow):
             self.save_images_check.setChecked(system_config.get("save_images", True))
 
     def get_configuration(self) -> Dict[str, Any]:
-        """Get current configuration from UI"""
+        """Get current configuration from UI - FIXED VERSION"""
         config = {}
 
-        # Camera configuration
+        # Camera configuration (unchanged)
         resolution = self.resolution_combo.currentText().split('x')
         config['camera'] = {
             'device_id': self.camera_device.currentData(),
@@ -1923,7 +1915,7 @@ class ConfigurationGUI(BaseGUIWindow):
             'exposure': self.exposure_slider.value()
         }
 
-        # Detector configuration with ROI from spin boxes
+        # Detector configuration (unchanged)
         config['detector'] = {
             'min_area': self.min_piece_area_spin.value(),
             'max_area': self.max_piece_area_spin.value(),
@@ -1934,19 +1926,19 @@ class ConfigurationGUI(BaseGUIWindow):
             'roi': self.current_roi if self.current_roi else None
         }
 
-        # Sorting configuration
+        # Sorting configuration (unchanged)
         config['sorting'] = self.get_sorting_config()
 
-        # API configuration - SIMPLIFIED: Only timeout and retry_count
+        # API configuration (unchanged)
         config['api'] = {
             'timeout': self.timeout_spin.value(),
             'retry_count': self.retry_count_spin.value()
         }
 
-        # Arduino configuration
+        # FIXED: Arduino configuration - keep all servo settings in arduino_servo
         config['arduino_servo'] = self.get_arduino_config()
 
-        # System configuration
+        # System configuration (unchanged)
         config['system'] = {
             'threading_enabled': self.threading_check.isChecked(),
             'queue_size': self.queue_size_spin.value(),
@@ -2729,7 +2721,7 @@ class ConfigurationGUI(BaseGUIWindow):
             self.auto_calculate_positions()
 
     def auto_calculate_positions(self):
-        """Automatically calculate evenly distributed bin positions"""
+        """Automatically calculate evenly distributed bin positions - ENHANCED"""
         bin_count = self.get_current_bin_count()
         min_separation = self.min_separation_spin.value()
 
@@ -2753,7 +2745,7 @@ class ConfigurationGUI(BaseGUIWindow):
         # Ensure all positions are within 0-180 range
         positions = [max(0, min(180, pos)) for pos in positions]
 
-        # Update table
+        # Update table AND save to config immediately
         for i in range(10):
             if i < bin_count:
                 self.servo_table.item(i, 1).setText(f"{positions[i]:.1f}")
@@ -2761,10 +2753,16 @@ class ConfigurationGUI(BaseGUIWindow):
             else:
                 self.servo_table.setRowHidden(i, True)
 
-        self.bin_info_label.setText(f"Positions calculated for {bin_count} bins")
+        # ADDED: Save the calculated positions to config immediately
+        if self.config_manager:
+            config = self.get_arduino_config()
+            self.config_manager.update_module_config("arduino_servo", config)
+            self.config_manager.save_config()
+
+        self.bin_info_label.setText(f"Positions calculated and saved for {bin_count} bins")
 
     def test_single_position(self, bin_num):
-        """Test a single bin position with actual Arduino communication"""
+        """Test a single bin position - ENHANCED to save position changes"""
         if self.simulation_check.isChecked():
             QMessageBox.information(self, "Test Position",
                                     f"Simulation: Would move to bin {bin_num}")
@@ -2774,7 +2772,7 @@ class ConfigurationGUI(BaseGUIWindow):
             position = float(self.servo_table.item(bin_num, 1).text())
 
             # Get Arduino connection settings
-            port = self.port_combo.currentText().split(" ")[0]  # Extract just the port name
+            port = self.port_combo.currentText().split(" ")[0]
             baud = int(self.baud_combo.currentText())
             timeout = self.timeout_spin.value()
 
@@ -2783,19 +2781,21 @@ class ConfigurationGUI(BaseGUIWindow):
             import time
 
             with serial.Serial(port, baud, timeout=timeout) as arduino:
-                # Wait for Arduino to initialize
                 time.sleep(0.5)
-
-                # Send angle command
                 command = f"A,{int(position)}\n"
                 arduino.write(command.encode())
-
-                # Read response
                 response = arduino.readline().decode().strip()
 
                 if response:
                     QMessageBox.information(self, "Test Position",
                                             f"Bin {bin_num}: {response}")
+
+                    # ADDED: Save position changes to config after successful test
+                    if self.config_manager:
+                        config = self.get_arduino_config()
+                        self.config_manager.update_module_config("arduino_servo", config)
+                        self.config_manager.save_config()
+
                 else:
                     QMessageBox.warning(self, "Test Position",
                                         f"Sent command but no response from Arduino")
@@ -2803,7 +2803,6 @@ class ConfigurationGUI(BaseGUIWindow):
         except Exception as e:
             QMessageBox.critical(self, "Test Failed",
                                  f"Failed to test position:\n{str(e)}")
-
     def test_sweep_positions(self):
         """Test sweep through all bin positions with actual Arduino communication"""
         if self.simulation_check.isChecked():
@@ -2894,8 +2893,9 @@ class ConfigurationGUI(BaseGUIWindow):
             self.auto_calculate_positions()
 
     def get_arduino_config(self):
-        """Get the current Arduino configuration from the UI"""
+        """Get the current Arduino configuration from the UI - FIXED VERSION"""
         config = {
+            # Arduino connection settings (correct location)
             "port": self.port_combo.currentText().split(" ")[
                 0] if " " in self.port_combo.currentText() else self.port_combo.currentText(),
             "baud_rate": int(self.baud_combo.currentText()),
@@ -2903,18 +2903,27 @@ class ConfigurationGUI(BaseGUIWindow):
             "connection_retries": self.retry_spin.value(),
             "retry_delay": self.retry_delay_spin.value(),
             "simulation_mode": self.simulation_check.isChecked(),
+
+            # FIXED: Servo hardware settings (kept in arduino_servo config where GUI saves them)
             "min_pulse": self.min_pulse_spin.value(),
             "max_pulse": self.max_pulse_spin.value(),
             "default_position": self.default_pos_spin.value(),
             "min_bin_separation": self.min_separation_spin.value(),
+            "calibration_mode": False,  # Add this field
+
+            # FIXED: Bin positions (actual user-configured positions)
             "bin_positions": {}
         }
 
-        # Get bin positions from table
+        # Get bin positions from table (the positions user actually set)
         bin_count = self.get_current_bin_count()
         for i in range(bin_count):
-            pos_text = self.servo_table.item(i, 1).text()
-            config["bin_positions"][str(i)] = float(pos_text)
+            if self.servo_table.item(i, 1):
+                pos_text = self.servo_table.item(i, 1).text()
+                try:
+                    config["bin_positions"][str(i)] = float(pos_text)
+                except ValueError:
+                    config["bin_positions"][str(i)] = 90.0  # Default fallback
 
         return config
 
