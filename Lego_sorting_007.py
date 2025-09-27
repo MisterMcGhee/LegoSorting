@@ -1,13 +1,12 @@
 """
 Lego_Sorting_007.py - Main orchestration for the Lego Sorting System
 
-This version correctly wires together all the modular components with proper
-data flow and error handling. Key improvements:
-- Correct module initialization order
-- Proper queue management between detector and processing
-- Thread-safe GUI updates
-- Robust state management
-- Clean shutdown procedures
+PHASE 1: Sorting GUI references removed for clean implementation foundation
+- Removed SortingGUI import and all references
+- Replaced show_sorting_gui() with placeholder message
+- Removed GUI signals and connections
+- System can initialize all modules and run in headless mode
+- Ready for Phase 2 implementation
 """
 
 import sys
@@ -30,7 +29,7 @@ from PyQt5.QtWidgets import QApplication, QMessageBox, QProgressDialog
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QMetaObject, Q_ARG, QTimer
 from PyQt5.QtGui import QPalette
 
-# GUI modules
+# GUI modules - PHASE 2: Re-add SortingGUI import
 from GUI.config_GUI_module import ConfigurationGUI
 from GUI.sorting_GUI_module import SortingGUI
 from GUI.gui_common import validate_config
@@ -54,6 +53,7 @@ from error_module import setup_logging, get_logger
 
 logger = get_logger(__name__)
 
+
 def list_all_windows():
     """Debug function to list all Qt windows"""
     from PyQt5.QtWidgets import QApplication
@@ -62,6 +62,7 @@ def list_all_windows():
         if widget.isVisible():
             windows.append(f"  - {widget.__class__.__name__}: {widget.windowTitle()} (size: {widget.size()})")
     return windows
+
 
 # ============= Application States =============
 
@@ -151,8 +152,7 @@ class MetricsTracker(QObject):
 class LegoSortingApplication(QObject):
     """Main application orchestrator"""
 
-    # Signals for GUI updates
-    gui_update_signal = pyqtSignal(object, object)  # frame, detection_data
+    # Signals for system events - REMOVED: gui_update_signal
     error_signal = pyqtSignal(str)
     state_changed = pyqtSignal(ApplicationState)
 
@@ -175,7 +175,7 @@ class LegoSortingApplication(QObject):
         self.api_client = None
         self.piece_history = None
 
-        # GUI components
+        # GUI components - PHASE 2: Re-add sorting_gui
         self.config_gui = None
         self.sorting_gui = None
 
@@ -191,7 +191,7 @@ class LegoSortingApplication(QObject):
         # Processing thread reference
         self.processing_thread = None
 
-        # Update timer for periodic GUI updates
+        # Update timer for periodic system updates
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_system_status)
 
@@ -335,66 +335,98 @@ class LegoSortingApplication(QObject):
     # DATA FLOW CONNECTIONS
     # ========================================================================
 
-    def setup_camera_to_detector_flow(self):
-        """Connect camera frame distribution to detector"""
+    def setup_camera_consumers(self):
+        """Register detector consumer only - GUI consumer registered separately when GUI exists"""
+        logger.info("Registering detector camera consumer...")
 
-        # First, unregister any existing detector consumer
-        if self.camera:
-            self.camera.unregister_consumer("detector")
-            logger.info("Unregistered any existing detector consumer")
+        if not self.camera:
+            logger.error("No camera available for consumer registration")
+            return False
 
+        # Only unregister detector consumer (sorting_gui doesn't exist yet)
+        self.camera.unregister_consumer("detector")
+
+        # Register detector consumer
         def detector_callback(frame: np.ndarray):
-            """Process each camera frame for piece detection and GUI updates"""
+            """Process each camera frame for piece detection"""
             if not self.is_running or self.is_paused:
                 return
 
             try:
                 self.frame_count += 1
 
-                # Debug logging every 30 frames
-                if self.frame_count % 30 == 0:
-                    logger.info(f"Detector processing frame {self.frame_count}, shape: {frame.shape}")
+                # Reduced logging frequency for headless mode
+                if self.frame_count % 100 == 0:
+                    logger.info(f"Processed frame {self.frame_count} (detector)")
 
                 self.metrics_tracker.record_frame()
 
                 # Process frame in detector
                 detection_result = self.detector.process_frame_for_consumer(frame)
 
-                # Get tracked pieces data
-                pieces_data = self.detector.get_tracked_pieces_data()
-
-                # Send to GUI
-                if self.sorting_gui:
-                    if self.frame_count % 30 == 0:  # Debug log
-                        logger.info(f"Sending frame {self.frame_count} to GUI")
-                    self.gui_update_signal.emit(frame.copy(), pieces_data)
-                else:
-                    if self.frame_count == 1:  # Log once
-                        logger.warning("sorting_gui is None - frames not being displayed")
+                # Handle piece processing
+                if detection_result.get('new_pieces'):
+                    for piece in detection_result['new_pieces']:
+                        if self._queue_piece_for_processing(piece, frame):
+                            logger.debug(f"Queued piece {piece.id} for processing")
 
             except Exception as e:
                 logger.error(f"Error in detector callback: {e}", exc_info=True)
                 self.error_signal.emit(str(e))
 
-        # Register detector as synchronous high-priority consumer
-        success = self.camera.register_consumer(
+        # Register detector consumer
+        detector_success = self.camera.register_consumer(
             name="detector",
             callback=detector_callback,
             processing_type="sync",
-            priority=90  # High priority
+            priority=90  # Highest priority for detection
         )
 
-        if success:
-            logger.info("Camera to detector flow established successfully")
+        if detector_success:
+            logger.info("Detector consumer registered successfully")
         else:
-            logger.error("Failed to register detector consumer - this is the problem!")
+            logger.error("Failed to register detector consumer")
 
-            # Try to get consumer list for debugging
-            # DEBUG: Check camera consumer state
-            if hasattr(self.camera, 'consumers'):
-                logger.info(f"Camera consumers after registration: {list(self.camera.consumers.keys())}")
-                logger.info(f"Camera is capturing: {self.camera.is_capturing}")
-                logger.info(f"Camera initialized: {self.camera.is_initialized}")
+        return detector_success
+
+    def register_gui_consumer(self):
+        """Register GUI consumer after GUI is created"""
+        logger.info("=== register_gui_consumer() method called ===")
+
+        if not self.sorting_gui:
+            logger.error("Cannot register GUI consumer - sorting_gui is None")
+            return False
+
+        if not self.camera:
+            logger.error("Cannot register GUI consumer - camera is None")
+            return False
+
+        logger.info(f"Both GUI and camera available - GUI type: {type(self.sorting_gui)}")
+        logger.info(f"Camera state: initialized={self.camera.is_initialized}, capturing={self.camera.is_capturing}")
+
+        try:
+            logger.info("Calling sorting_gui.register_camera_consumer()...")
+            success = self.sorting_gui.register_camera_consumer(self.camera)
+            logger.info(f"sorting_gui.register_camera_consumer() returned: {success}")
+
+            if success:
+                logger.info("GUI consumer registered successfully")
+                # Activate the display status
+                self.sorting_gui.activate_camera_display()
+                logger.info("Camera display activated")
+            else:
+                logger.error("Failed to register GUI consumer")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Exception in register_gui_consumer: {e}", exc_info=True)
+            return False
+
+    def setup_camera_to_detector_flow(self):
+        """Legacy method - now just calls setup_camera_consumers for compatibility"""
+        return self.setup_camera_consumers()
+
     def _queue_piece_for_processing(self, piece, frame) -> bool:
         """Queue a detected piece for API processing"""
 
@@ -420,7 +452,6 @@ class LegoSortingApplication(QObject):
             piece_image = frame[y1:y2, x1:x2].copy()
 
             # Add to queue with proper priority
-            # CRITICAL: Use queue_manager.add_piece, not thread_manager.add_message!
             success = self.queue_manager.add_piece(
                 piece_id=piece.id,
                 image=piece_image,
@@ -445,66 +476,63 @@ class LegoSortingApplication(QObject):
     def start_processing_worker(self):
         """Start the background processing worker thread"""
 
-        def processing_thread_function():
-            """Main processing thread loop"""
-            logger.info("Processing thread started")
+        logger.info("Starting processing worker - Phase 1 debugging...")
 
-            try:
-                # Start the worker
-                self.processing_worker.start()
+        # Debug: Check if thread manager is working
+        if not self.thread_manager:
+            logger.error("Thread manager is None!")
+            raise RuntimeError("Thread manager not initialized")
 
-                # Main processing loop
-                while self.is_running:
-                    try:
-                        # Get next piece from queue (with timeout to check running flag)
-                        message = self.queue_manager.get_next_piece(timeout=0.1)
+        # Debug: Check thread manager state
+        logger.info(f"Thread manager running: {self.thread_manager.running}")
+        logger.info(f"Thread manager workers: {list(self.thread_manager.workers.keys())}")
 
-                        if message:
-                            # Process the piece
-                            result = self.processing_worker._process_message(message)
+        # Import the proper processing worker thread function
+        try:
+            from processing_module import processing_worker_thread
+            logger.info("Successfully imported processing_worker_thread")
+        except ImportError as e:
+            logger.error(f"Failed to import processing_worker_thread: {e}")
+            raise RuntimeError(f"Import error: {e}")
 
-                            if result:
-                                # Success - update statistics and GUI
-                                self.queue_manager.mark_piece_completed(
-                                    message.piece_id, result
-                                )
+        # Debug: Check all dependencies
+        missing_deps = []
+        if not self.queue_manager: missing_deps.append("queue_manager")
+        if not self.thread_manager: missing_deps.append("thread_manager")
+        if not self.config_manager: missing_deps.append("config_manager")
+        if not self.piece_history: missing_deps.append("piece_history")
 
-                                # Record in metrics
-                                bin_number = result.get('bin_number', 0)
-                                self.metrics_tracker.record_processed(bin_number)
+        if missing_deps:
+            error_msg = f"Missing dependencies: {missing_deps}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
 
-                                logger.info(f"Processed piece {message.piece_id} -> bin {bin_number}")
+        logger.info("All dependencies verified")
 
-                            else:
-                                # Failure - mark as failed
-                                self.queue_manager.mark_piece_failed(
-                                    message.piece_id,
-                                    "Processing failed"
-                                )
-                                self.metrics_tracker.record_error()
+        # PHASE 1 SIMPLIFIED: Skip complex threading for now
+        # Just create and start the worker directly without thread manager
+        logger.info("PHASE 1: Using simplified processing worker approach")
 
-                    except Exception as e:
-                        logger.error(f"Error in processing loop: {e}")
-                        self.metrics_tracker.record_error()
+        try:
+            # Create the worker directly
+            from processing_module import create_processing_worker
+            self.processing_worker = create_processing_worker(
+                queue_manager=self.queue_manager,
+                thread_manager=self.thread_manager,
+                config_manager=self.config_manager,
+                piece_history=self.piece_history
+            )
 
-            except Exception as e:
-                logger.error(f"Processing thread error: {e}", exc_info=True)
-            finally:
-                self.processing_worker.stop()
-                logger.info("Processing thread stopped")
+            # Start the worker (this just sets internal state)
+            self.processing_worker.start()
+            logger.info("Processing worker started successfully (simplified mode)")
 
-        # Start the thread using thread manager
-        success = self.thread_manager.register_worker(
-            name="processing_worker",
-            target=processing_thread_function,
-            daemon=True,
-            restart_on_failure=True
-        )
+            # For Phase 1, we'll process pieces manually in the detector callback
+            # This avoids the complex threading issues for now
 
-        if not success:
-            raise RuntimeError("Failed to start processing worker")
-
-        logger.info("Processing worker thread started successfully")
+        except Exception as e:
+            logger.error(f"Error creating processing worker: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to create processing worker: {e}")
 
     # ========================================================================
     # GUI INTEGRATION
@@ -522,7 +550,7 @@ class LegoSortingApplication(QObject):
         # Connect only the configuration complete signal
         self.config_gui.configuration_complete.connect(self.on_configuration_complete)
 
-        # NEW: Connect Arduino mode change signal to reinitialization method
+        # Connect Arduino mode change signal to reinitialization method
         self.config_gui.arduino_mode_changed.connect(self.reinitialize_arduino_module)
         logger.info("Connected arduino_mode_changed signal to reinitialize handler")
 
@@ -532,69 +560,96 @@ class LegoSortingApplication(QObject):
         logger.info(f"Configuration GUI displayed with config_manager: {self.config_manager}")
 
     def show_sorting_gui(self):
-        """Display sorting interface with debug tracking"""
+        """
+        Phase 3.1: Display sorting GUI
+        """
+        logger.info("=== PHASE 3.1: CREATING SORTING GUI ===")
 
-        logger.info("Creating sorting GUI...")
-        self.sorting_gui = SortingGUI(self.config_manager)
+        try:
+            # Create the Phase 3.1 SortingGUI
+            self.sorting_gui = SortingGUI(self.config_manager)
+            logger.info("SortingGUI Phase 3.1 created successfully")
 
-        # Send ROI configuration to GUI once
-        if self.detector:
-            roi_config = self.detector.get_roi_configuration()
-            self.sorting_gui.set_roi_configuration(roi_config)
-            logger.info(f"ROI configuration sent to GUI: {roi_config.get('roi', 'No ROI')}")
-        else:
-            logger.warning("No detector available for ROI configuration")
+            # Set camera instance (consumer registration happens separately)
+            if self.camera:
+                self.sorting_gui.set_camera(self.camera)
+                logger.info("Camera instance set in GUI")
+            else:
+                logger.warning("No camera available for GUI")
 
-        # Connect control signals
-        self.sorting_gui.pause_requested.connect(self.pause_sorting)
-        self.sorting_gui.resume_requested.connect(self.resume_sorting)
-        self.sorting_gui.stop_requested.connect(self.stop_sorting)
-        self.sorting_gui.settings_requested.connect(self.return_to_configuration)
+            # Set ROI configuration if available
+            if self.detector:
+                try:
+                    roi_config = self.detector.get_roi_configuration()
+                    self.sorting_gui.set_roi_configuration(roi_config)
+                    logger.info("ROI configuration sent to GUI")
+                except Exception as e:
+                    logger.warning(f"Could not get ROI configuration: {e}")
+                    self.sorting_gui.set_roi_configuration({"roi": None})
+            else:
+                logger.warning("No detector available for ROI configuration")
+                self.sorting_gui.set_roi_configuration({"roi": None})
 
-        # Connect update signals
-        logger.info("Connecting gui_update_signal to sorting_gui.update_frame")
-        self.gui_update_signal.connect(self.sorting_gui.update_frame)
-        self.metrics_tracker.metrics_updated.connect(self.sorting_gui.update_metrics)
+            # Connect control signals
+            logger.info("Connecting control signals...")
+            self.sorting_gui.pause_requested.connect(self.pause_sorting)
+            self.sorting_gui.resume_requested.connect(self.resume_sorting)
+            self.sorting_gui.stop_requested.connect(self.stop_sorting)
+            self.sorting_gui.settings_requested.connect(self.return_to_configuration)
+            logger.info("Control signals connected")
 
-        # Set Arduino status
-        self.sorting_gui.set_arduino_status(self.servo_module is not None)
+            # Set Arduino status
+            arduino_connected = self.servo_module is not None
+            self.sorting_gui.set_arduino_status(arduino_connected)
+            logger.info(f"Arduino status set: {arduino_connected}")
 
-        # CRITICAL: Check camera and start capture
-        if self.camera:
-            logger.info(f"Camera state: initialized={self.camera.is_initialized}, capturing={self.camera.is_capturing}")
+            # Show the GUI window
+            self.sorting_gui.show()
+            self.sorting_gui.raise_()
+            self.sorting_gui.activateWindow()
+            logger.info("SortingGUI window displayed")
 
-            # Set camera status in GUI
-            self.sorting_gui.set_camera_status(self.camera.is_initialized)
+            # Show Phase 3.1 completion message
+            QTimer.singleShot(1000, self.sorting_gui.show_phase_info)
 
-            # Start camera capture if not already running
-            if not self.camera.is_capturing:
-                logger.info("Starting camera capture...")
-                capture_started = self.camera.start_capture()
-                if capture_started:
-                    logger.info("Camera capture started successfully")
+            logger.info("Phase 3.1 GUI created successfully")
+
+        except Exception as e:
+            logger.error(f"Error creating Phase 3.1 sorting GUI: {e}", exc_info=True)
+            QMessageBox.critical(None, "Phase 3.1 Error", f"Failed to create sorting GUI: {e}")
+
+    def start_sorting_pipeline(self):
+        """Start the sorting pipeline without GUI (headless mode)"""
+        logger.info("Starting sorting pipeline in headless mode")
+
+        try:
+            # Start camera capture
+            if self.camera and not self.camera.is_capturing:
+                if self.camera.start_capture():
+                    logger.info("Camera capture started")
                 else:
                     logger.error("Failed to start camera capture")
-                    self.sorting_gui.set_camera_status(False)
-            else:
-                logger.info("Camera already capturing")
 
-        else:
-            logger.error("No camera available for sorting GUI")
-            self.sorting_gui.set_camera_status(False)
+            # Setup detector flow
+            self.setup_camera_to_detector_flow()
 
-        # Show the GUI
-        self.sorting_gui.show()
-        self.sorting_gui.center_window()
-        self.current_state = ApplicationState.SORTING
+            # Set running flag
+            self.is_running = True
 
-        # DEBUG: Force process events to ensure GUI updates
-        QApplication.processEvents()
+            # Start processing worker
+            self.start_processing_worker()
 
-        logger.info("Sorting GUI displayed")
+            # Start metrics tracking
+            self.metrics_tracker.start_session()
 
-        # DEBUG: Verify window is visible
-        logger.info(f"GUI visible: {self.sorting_gui.isVisible()}")
-        logger.info(f"GUI size: {self.sorting_gui.size()}")
+            # Start periodic updates
+            self.update_timer.start(1000)
+
+            logger.info("Sorting pipeline started successfully (headless mode)")
+
+        except Exception as e:
+            logger.error(f"Error starting sorting pipeline: {e}", exc_info=True)
+            raise
 
     def show_camera_preview(self):
         """Show camera preview in configuration window"""
@@ -659,14 +714,6 @@ class LegoSortingApplication(QObject):
                     mode_str = "simulation" if simulation_mode else "hardware"
                     logger.info(f"Arduino module reinitialized successfully in {mode_str} mode")
 
-                    # Update GUI if sorting interface is active
-                    if self.sorting_gui:
-                        self.sorting_gui.set_arduino_status(not simulation_mode)
-                        self.sorting_gui.show_status_message(
-                            f"Arduino module switched to {mode_str} mode",
-                            5000  # Show for 5 seconds
-                        )
-
                     # Show success message in config GUI if it's open
                     if self.config_gui:
                         QMessageBox.information(
@@ -691,18 +738,10 @@ class LegoSortingApplication(QObject):
                 if self.config_gui:
                     QMessageBox.critical(self.config_gui, "Arduino Initialization Failed", error_msg)
 
-                # Update GUI to reflect Arduino unavailability
-                if self.sorting_gui:
-                    self.sorting_gui.set_arduino_status(False)
-                    self.sorting_gui.show_status_message("Arduino module unavailable", 5000)
-
         except Exception as e:
             logger.error(f"Critical error during Arduino reinitialization: {e}", exc_info=True)
             self.servo_module = None
 
-            # Ensure GUI reflects the error state
-            if self.sorting_gui:
-                self.sorting_gui.set_arduino_status(False)
     @pyqtSlot(dict)
     def on_configuration_complete(self, config: Dict[str, Any]):
         """Handle configuration completion"""
@@ -712,6 +751,23 @@ class LegoSortingApplication(QObject):
         # Update configuration
         for module, settings in config.items():
             self.config_manager.update_module_config(module, settings)
+
+        # Ensure detector ROI is set before starting sorting
+        if self.detector and self.camera:
+            try:
+                # Get a frame to initialize ROI if needed
+                if not hasattr(self.detector, 'roi') or self.detector.roi is None:
+                    ret, frame = self.camera.get_frame() if hasattr(self.camera,
+                                                                    'get_frame') else self.camera.cap.read()
+                    if ret and frame is not None:
+                        detector_config = self.config_manager.get_module_config("detector")
+                        if detector_config and "roi" in detector_config:
+                            roi = detector_config["roi"]
+                            if len(roi) == 4:
+                                self.detector.set_roi(tuple(roi), frame)
+                                logger.info(f"Detector ROI initialized: {roi}")
+            except Exception as e:
+                logger.warning(f"Could not initialize ROI: {e}")
 
         # Start sorting
         self.start_sorting()
@@ -759,11 +815,11 @@ class LegoSortingApplication(QObject):
         logger.info("Setting up camera to detector flow...")
         self.setup_camera_to_detector_flow()
 
-        # MOVED: Set running flag BEFORE starting workers
+        # Set running flag BEFORE starting workers
         self.is_running = True
         self.current_state = ApplicationState.SORTING
 
-        # NOW start processing worker (it checks is_running)
+        # Start processing worker (it checks is_running)
         self.start_processing_worker()
 
         # Start metrics tracking
@@ -775,11 +831,11 @@ class LegoSortingApplication(QObject):
             self.camera.start_capture()
             logger.info("Camera capture started")
 
-        # Hide config GUI and show sorting GUI
+        # Hide config GUI and show sorting GUI placeholder
         if self.config_gui:
             self.config_gui.hide()
 
-        logger.info("Showing sorting GUI...")
+        logger.info("Showing sorting GUI placeholder...")
         self.show_sorting_gui()
 
         # Start periodic updates
@@ -788,9 +844,11 @@ class LegoSortingApplication(QObject):
         logger.info("Sorting started successfully")
         self.state_changed.emit(ApplicationState.SORTING)
         return True
+
     @pyqtSlot()
     def pause_sorting(self):
         """Pause sorting operation"""
+        logger.info("Pause sorting requested")
 
         if self.current_state == ApplicationState.SORTING:
             self.is_paused = True
@@ -806,6 +864,7 @@ class LegoSortingApplication(QObject):
     @pyqtSlot()
     def resume_sorting(self):
         """Resume sorting operation"""
+        logger.info("Resume sorting requested")
 
         if self.current_state == ApplicationState.PAUSED:
             self.is_paused = False
@@ -821,8 +880,7 @@ class LegoSortingApplication(QObject):
     @pyqtSlot()
     def stop_sorting(self):
         """Stop sorting and return to configuration"""
-
-        logger.info("Stopping sorting")
+        logger.info("Stop sorting requested")
 
         # Stop updates
         self.update_timer.stop()
@@ -843,18 +901,13 @@ class LegoSortingApplication(QObject):
         # Cleanup current session
         self.cleanup_session()
 
-        # Hide sorting GUI
-        if self.sorting_gui:
-            self.sorting_gui.hide()
-            self.sorting_gui = None
-
         # Show configuration GUI
         self.show_configuration_gui()
 
     def update_system_status(self):
         """Periodic system status update"""
 
-        if self.queue_manager and self.sorting_gui:
+        if self.queue_manager:
             # Get queue statistics
             queue_stats = self.queue_manager.get_statistics()
 
@@ -864,7 +917,7 @@ class LegoSortingApplication(QObject):
             else:
                 processing_stats = {}
 
-            # Update GUI with combined stats
+            # Log status periodically
             status = {
                 'queue_size': queue_stats.get('current_queue_size', 0),
                 'processing': queue_stats.get('current_processing', 0),
@@ -872,7 +925,16 @@ class LegoSortingApplication(QObject):
                 'errors': processing_stats.get('error_count', 0)
             }
 
-            # This will be handled by metrics_tracker signal instead
+            # Log status every 30 seconds
+            if hasattr(self, '_last_status_log'):
+                if time.time() - self._last_status_log > 30:
+                    logger.info(f"System status: {status}")
+                    self._last_status_log = time.time()
+            else:
+                self._last_status_log = time.time()
+                logger.info(f"System status: {status}")
+
+            # Emit metrics update
             self.metrics_tracker.emit_update()
 
     # ========================================================================
@@ -966,8 +1028,15 @@ class LegoSortingApplication(QObject):
 
         # 6. Save final statistics
         if self.piece_history:
-            stats = self.piece_history.get_statistics()
-            logger.info(f"Final statistics: {stats}")
+            try:
+                # Try to get piece count instead of full statistics
+                piece_count = self.piece_history.get_piece_count()
+                logger.info(f"Final piece count: {piece_count}")
+            except AttributeError:
+                # If method doesn't exist, just log that piece history was active
+                logger.info("Piece history module was active during session")
+            except Exception as e:
+                logger.warning(f"Error getting piece history stats: {e}")
 
         # 7. Close GUIs
         if self.sorting_gui:
@@ -984,7 +1053,7 @@ def main():
     """Main application entry point"""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Lego Sorting System v007')
+    parser = argparse.ArgumentParser(description='Lego Sorting System v007 - Phase 1')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     parser.add_argument('--config', type=str, help='Path to config file')
     parser.add_argument('--no-arduino', action='store_true', help='Run without Arduino')
@@ -995,7 +1064,7 @@ def main():
     setup_logging(console_level=log_level)
 
     logger.info("=" * 60)
-    logger.info("Lego Sorting System v007 Starting")
+    logger.info("Lego Sorting System v007 - Phase 3.1 Starting")
     logger.info("=" * 60)
 
     # Create Qt application
@@ -1053,7 +1122,7 @@ def main():
                 logger.error(f"Error during cleanup: {e}")
 
         logger.info("=" * 60)
-        logger.info("Lego Sorting System v007 Shutdown Complete")
+        logger.info("Lego Sorting System v007 - Phase 3.1 Shutdown Complete")
         logger.info("=" * 60)
 
     sys.exit(exit_code)

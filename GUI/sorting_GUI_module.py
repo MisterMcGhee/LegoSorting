@@ -1,5 +1,15 @@
 """
-sorting_gui_module.py - Active sorting GUI for Lego Sorting System
+sorting_GUI_module.py - Phase 3.1: Live Camera Feed
+
+This module implements the LEGO Sorting System GUI with live camera feed.
+Phase 3.1 adds actual camera frame consumption and display.
+
+Phase 3.1 Goals:
+- Replace camera placeholder with live video feed
+- Register as camera consumer using existing pattern
+- Convert OpenCV frames to Qt format
+- Handle frame display and updates
+- Maintain proper cleanup when closing
 """
 
 from PyQt5.QtWidgets import *
@@ -8,568 +18,674 @@ from PyQt5.QtGui import *
 import cv2
 import numpy as np
 import time
-from typing import Dict, Any, Optional, List
-from GUI.gui_common import BaseGUIWindow, VideoWidget, StatusDisplay, format_time
+from typing import Dict, Any, Optional
+from GUI.gui_common import BaseGUIWindow, VideoWidget
 
 import logging
 logger = logging.getLogger(__name__)
-logger.info("sorting_GUI_module imported")
-
 
 
 class SortingGUI(BaseGUIWindow):
-    """Main GUI window for active sorting operation"""
+    """
+    Main GUI window for active sorting operation
 
-    # Signals
+    Phase 3.1: Live camera feed implementation
+    """
+
+    # Signals for control
     pause_requested = pyqtSignal()
     resume_requested = pyqtSignal()
     stop_requested = pyqtSignal()
-    settings_requested = pyqtSignal()  # Return to configuration
+    settings_requested = pyqtSignal()
+
+    # Signal for frame updates (emitted in main thread)
+    frame_update_signal = pyqtSignal(np.ndarray)
 
     def __init__(self, config_manager=None):
-        logger.info("SortingGUI.__init__ starting")
+        super().__init__(config_manager, "LEGO Sorting System - Active Sorting (Phase 3.1)")
+        logger.info("SortingGUI Phase 3.1 - Live Camera Feed")
 
-        super().__init__(config_manager, "Lego Sorting System - Active Sorting")
-        logger.info("Parent class initialized")
-
-        # State
+        # State variables
         self.is_paused = False
-        self.start_time = time.time()
-        self.frame_count = 0
-        self.piece_count = 0
-        logger.info("State variables initialized")
-
-        # ROI and zone configuration (set once during initialization)
         self.roi_config = None
-        self.roi_bounds = None
-        self.zones = None
-        logger.info("ROI variables initialized")
+
+        # Camera integration - Phase 3.1
+        self.camera = None
+        self.camera_active = False
+        self.frame_count = 0
+        self.last_fps_time = time.time()
+        self.fps_counter = 0
 
         # Window setup
         self.setGeometry(100, 100, 1400, 900)
-        logger.info("Geometry set")
-
         self.center_window()
-        logger.info("Window centered")
+
+        # Connect frame update signal to slot (for thread safety)
+        self.frame_update_signal.connect(self.update_camera_display)
 
         # Initialize UI
-        logger.info("Calling init_ui...")
         self.init_ui()
-        logger.info("init_ui complete")
 
-        logger.info("Calling setup_timers...")
-        self.setup_timers()
-        logger.info("setup_timers complete")
-
-        logger.info("SortingGUI.__init__ complete")
-
-    def set_roi_configuration(self, roi_data: Dict[str, Any]):
-        """
-        Set the ROI configuration - PHASE 1: STORE BUT DON'T USE
-        """
-        if "error" in roi_data:
-            self.add_log_message(f"ROI configuration error: {roi_data['error']}", "ERROR")
-            return
-
-        # PHASE 1: Store the configuration but don't use it for drawing yet
-        self.roi_bounds = roi_data.get("roi")
-        self.zones = {
-            "entry": roi_data.get("entry_zone"),
-            "valid": roi_data.get("valid_zone"),
-            "exit": roi_data.get("exit_zone")
-        }
-
-        if self.roi_bounds:
-            x, y, w, h = self.roi_bounds
-            # PHASE 1: Just log that we received ROI, don't use it for drawing
-            self.add_log_message(f"ROI configured but not displayed: {w}x{h} at ({x},{y})", "INFO")
+        logger.info("SortingGUI Phase 3.1 initialization complete")
 
     def init_ui(self):
-        """Initialize the user interface"""
-        logger.debug("Starting UI initialization...")
+        """Initialize the user interface with placeholder panels"""
+        logger.info("Initializing Phase 2 UI layout...")
 
-        # Create central widget
+        # Create central widget and main layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        logger.debug("Central widget created")
 
-        # Main layout - horizontal split
-        main_layout = QHBoxLayout()
-        central_widget.setLayout(main_layout)
-        logger.debug("Main layout created")
+        # Main horizontal layout
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
 
-        # Left panel - Video and controls
-        logger.debug("Creating left panel...")
-        left_panel = self.create_left_panel()
-        main_layout.addWidget(left_panel, stretch=3)
-        logger.debug("Left panel added")
+        # Left side: Camera feed (largest section)
+        self.create_camera_section(main_layout)
 
-        # Right panel - Information displays
-        logger.debug("Creating right panel...")
-        right_panel = self.create_right_panel()
-        main_layout.addWidget(right_panel, stretch=1)
-        logger.debug("Right panel added")
+        # Right side: Information and controls
+        self.create_right_panel(main_layout)
 
-        # Status bar
-        logger.debug("Creating status bar...")
-        self.create_status_bar()
-        logger.debug("UI initialization complete")
+        # Set layout proportions: 70% camera, 30% right panel
+        main_layout.setStretch(0, 7)  # Camera section
+        main_layout.setStretch(1, 3)  # Right panel
 
-    def create_left_panel(self) -> QWidget:
-        """Create left panel with video and controls"""
-        logger.info("create_left_panel starting")
+        logger.info("Phase 2 UI layout created successfully")
 
-        panel = QWidget()
-        layout = QVBoxLayout()
-        logger.info("Left panel base created")
+    def create_camera_section(self, parent_layout):
+        """Create the camera feed section with live video display"""
+        logger.info("Creating camera section with live feed...")
 
-        # Debug: Check before creating VideoWidget
-        logger.info(f"Creating VideoWidget - current parent: {panel}")
+        # Camera section frame
+        camera_frame = QFrame()
+        camera_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
+        camera_frame.setLineWidth(2)
 
-        # Video display
-        self.video_widget = VideoWidget(panel)
-        logger.info(f"VideoWidget created successfully")
+        # Camera layout
+        camera_layout = QVBoxLayout(camera_frame)
 
-        self.video_widget.setMinimumSize(800, 600)
-        logger.info("VideoWidget size set")
-
-        layout.addWidget(self.video_widget)
-        logger.info("VideoWidget added to layout")
-
-        # Control buttons
-        controls = self.create_control_buttons()
-        logger.info("Control buttons created")
-
-        layout.addWidget(controls)
-        logger.info("Controls added to layout")
-
-        panel.setLayout(layout)
-        logger.info("create_left_panel complete")
-        return panel
-
-    def create_right_panel(self) -> QWidget:
-        """Create right panel with information displays"""
-        panel = QWidget()
-        layout = QVBoxLayout()
-
-        # Metrics display
-        metrics_group = QGroupBox("System Metrics")
-        metrics_layout = QFormLayout()
-
-        self.fps_label = QLabel("0.0")
-        metrics_layout.addRow("FPS:", self.fps_label)
-
-        self.processed_label = QLabel("0")
-        metrics_layout.addRow("Pieces Processed:", self.processed_label)
-
-        self.runtime_label = QLabel("00:00")
-        metrics_layout.addRow("Runtime:", self.runtime_label)
-
-        self.queue_label = QLabel("0")
-        metrics_layout.addRow("Queue Size:", self.queue_label)
-
-        metrics_group.setLayout(metrics_layout)
-        layout.addWidget(metrics_group)
-
-        # Current piece display
-        piece_group = QGroupBox("Current Piece")
-        piece_layout = QVBoxLayout()
-
-        self.piece_image_label = QLabel()
-        self.piece_image_label.setMinimumHeight(150)
-        self.piece_image_label.setStyleSheet("border: 1px solid #555;")
-        self.piece_image_label.setScaledContents(True)
-        self.piece_image_label.setText("No piece")
-        self.piece_image_label.setAlignment(Qt.AlignCenter)
-        piece_layout.addWidget(self.piece_image_label)
-
-        self.piece_info_label = QLabel("Waiting for piece...")
-        self.piece_info_label.setWordWrap(True)
-        piece_layout.addWidget(self.piece_info_label)
-
-        piece_group.setLayout(piece_layout)
-        layout.addWidget(piece_group)
-
-        # Bin status display
-        bin_group = QGroupBox("Bin Status")
-        bin_layout = QGridLayout()
-
-        self.bin_indicators = []
-        for i in range(10):
-            indicator = QLabel(f"Bin {i}")
-            indicator.setAlignment(Qt.AlignCenter)
-            indicator.setStyleSheet("""
-                QLabel {
-                    background-color: #444;
-                    border: 1px solid #666;
-                    padding: 5px;
-                    border-radius: 3px;
-                }
-            """)
-            bin_layout.addWidget(indicator, i // 5, i % 5)
-            self.bin_indicators.append(indicator)
-
-        bin_group.setLayout(bin_layout)
-        layout.addWidget(bin_group)
-
-        # System log
-        log_group = QGroupBox("System Log")
-        log_layout = QVBoxLayout()
-
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(150)
-        log_layout.addWidget(self.log_text)
-
-        log_group.setLayout(log_layout)
-        layout.addWidget(log_group)
-
-        layout.addStretch()
-        panel.setLayout(layout)
-        return panel
-
-    def create_control_buttons(self) -> QWidget:
-        """Create control button panel"""
-        widget = QWidget()
-        layout = QHBoxLayout()
-
-        # Pause/Resume button
-        self.pause_btn = QPushButton("Pause")
-        self.pause_btn.clicked.connect(self.toggle_pause)
-        self.pause_btn.setMinimumWidth(100)
-
-        # Stop button
-        self.stop_btn = QPushButton("Stop Sorting")
-        self.stop_btn.clicked.connect(self.stop_sorting)
-        self.stop_btn.setMinimumWidth(100)
-        self.stop_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
+        # Title
+        camera_title = QLabel("Live Camera Feed")
+        camera_title.setAlignment(Qt.AlignCenter)
+        camera_title.setStyleSheet("""
+            QLabel {
+                font-size: 16px;
+                font-weight: bold;
+                color: #2E86AB;
+                padding: 5px;
+                background-color: #F8F9FA;
+                border: 1px solid #E9ECEF;
+                border-radius: 5px;
             }
         """)
+        camera_layout.addWidget(camera_title)
+
+        # Phase 3.1: Replace placeholder with actual VideoWidget
+        self.video_widget = VideoWidget()
+        self.video_widget.setText("Initializing Camera Feed...")
+        self.video_widget.setStyleSheet("""
+            VideoWidget {
+                background-color: #2C3E50;
+                color: #ECF0F1;
+                border: 2px solid #34495E;
+                border-radius: 10px;
+                min-height: 400px;
+            }
+        """)
+        camera_layout.addWidget(self.video_widget)
+
+        # Camera status bar
+        camera_status_layout = QHBoxLayout()
+
+        self.camera_status_label = QLabel("Camera: Connecting...")
+        self.camera_status_label.setStyleSheet("color: #F39C12; font-weight: bold;")
+        camera_status_layout.addWidget(self.camera_status_label)
+
+        camera_status_layout.addStretch()
+
+        self.frame_counter_label = QLabel("Frames: 0")
+        self.frame_counter_label.setStyleSheet("color: #7F8C8D;")
+        camera_status_layout.addWidget(self.frame_counter_label)
+
+        self.fps_label = QLabel("FPS: 0.0")
+        self.fps_label.setStyleSheet("color: #7F8C8D;")
+        camera_status_layout.addWidget(self.fps_label)
+
+        camera_layout.addLayout(camera_status_layout)
+
+        parent_layout.addWidget(camera_frame)
+        logger.info("Camera section with live feed created")
+
+    def create_right_panel(self, parent_layout):
+        """Create the right panel with info and controls"""
+        logger.info("Creating right panel sections...")
+
+        # Right panel container
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setSpacing(10)
+
+        # Recently processed piece section
+        self.create_recent_piece_section(right_layout)
+
+        # Bin status section
+        self.create_bin_status_section(right_layout)
+
+        # Control panel section
+        self.create_control_section(right_layout)
+
+        # Add stretch to push everything up
+        right_layout.addStretch()
+
+        parent_layout.addWidget(right_panel)
+        logger.info("Right panel sections created")
+
+    def create_recent_piece_section(self, parent_layout):
+        """Create the recently processed piece panel"""
+        logger.info("Creating recent piece section placeholder...")
+
+        # Section frame
+        piece_frame = QFrame()
+        piece_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
+        piece_frame.setFixedHeight(200)
+
+        piece_layout = QVBoxLayout(piece_frame)
+
+        # Title
+        piece_title = QLabel("🧱 Recently Processed Piece")
+        piece_title.setAlignment(Qt.AlignCenter)
+        piece_title.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #27AE60;
+                padding: 5px;
+                background-color: #F8F9FA;
+                border: 1px solid #E9ECEF;
+                border-radius: 3px;
+            }
+        """)
+        piece_layout.addWidget(piece_title)
+
+        # Placeholder content
+        self.piece_placeholder = QLabel()
+        self.piece_placeholder.setAlignment(Qt.AlignCenter)
+        self.piece_placeholder.setText(
+            "📦 RECENT PIECE PLACEHOLDER\n\n"
+            "Phase 4 Implementation:\n"
+            "• Piece image thumbnail\n"
+            "• Element ID and name\n"
+            "• Confidence score\n"
+            "• Category information\n"
+            "• Bin assignment"
+        )
+        self.piece_placeholder.setStyleSheet("""
+            QLabel {
+                background-color: #F7F9FC;
+                color: #2C3E50;
+                border: 1px dashed #BDC3C7;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 11px;
+            }
+        """)
+        piece_layout.addWidget(self.piece_placeholder)
+
+        parent_layout.addWidget(piece_frame)
+        logger.info("Recent piece section placeholder created")
+
+    def create_bin_status_section(self, parent_layout):
+        """Create the bin status display section"""
+        logger.info("Creating bin status section placeholder...")
+
+        # Section frame
+        bin_frame = QFrame()
+        bin_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
+        bin_frame.setFixedHeight(250)
+
+        bin_layout = QVBoxLayout(bin_frame)
+
+        # Title
+        bin_title = QLabel("📊 Bin Status")
+        bin_title.setAlignment(Qt.AlignCenter)
+        bin_title.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #8E44AD;
+                padding: 5px;
+                background-color: #F8F9FA;
+                border: 1px solid #E9ECEF;
+                border-radius: 3px;
+            }
+        """)
+        bin_layout.addWidget(bin_title)
+
+        # Placeholder content
+        self.bin_placeholder = QLabel()
+        self.bin_placeholder.setAlignment(Qt.AlignCenter)
+        self.bin_placeholder.setText(
+            "🗂️ BIN STATUS PLACEHOLDER\n\n"
+            "Phase 5 Implementation:\n"
+            "• Bin 1-9 + Overflow\n"
+            "• Assigned categories\n"
+            "• Current piece counts\n"
+            "• Capacity progress bars\n"
+            "• Reset bin buttons\n"
+            "• Warning indicators"
+        )
+        self.bin_placeholder.setStyleSheet("""
+            QLabel {
+                background-color: #FDF6E3;
+                color: #2C3E50;
+                border: 1px dashed #BDC3C7;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 11px;
+            }
+        """)
+        bin_layout.addWidget(self.bin_placeholder)
+
+        parent_layout.addWidget(bin_frame)
+        logger.info("Bin status section placeholder created")
+
+    def create_control_section(self, parent_layout):
+        """Create the control panel section"""
+        logger.info("Creating control section...")
+
+        # Section frame
+        control_frame = QFrame()
+        control_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
+        control_frame.setFixedHeight(180)
+
+        control_layout = QVBoxLayout(control_frame)
+
+        # Title
+        control_title = QLabel("🎮 System Controls")
+        control_title.setAlignment(Qt.AlignCenter)
+        control_title.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #E67E22;
+                padding: 5px;
+                background-color: #F8F9FA;
+                border: 1px solid #E9ECEF;
+                border-radius: 3px;
+            }
+        """)
+        control_layout.addWidget(control_title)
+
+        # Control buttons
+        button_layout = QVBoxLayout()
+        button_layout.setSpacing(8)
+
+        # Pause/Resume button
+        self.pause_button = QPushButton("⏸️ Pause Sorting")
+        self.pause_button.setFixedHeight(35)
+        self.pause_button.clicked.connect(self.toggle_pause)
+        self.pause_button.setStyleSheet("""
+            QPushButton {
+                background-color: #F39C12;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #E67E22;
+            }
+            QPushButton:pressed {
+                background-color: #D35400;
+            }
+        """)
+        button_layout.addWidget(self.pause_button)
+
+        # Stop button
+        self.stop_button = QPushButton("⏹️ Stop Sorting")
+        self.stop_button.setFixedHeight(35)
+        self.stop_button.clicked.connect(self.stop_sorting)
+        self.stop_button.setStyleSheet("""
+            QPushButton {
+                background-color: #E74C3C;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #C0392B;
+            }
+            QPushButton:pressed {
+                background-color: #A93226;
+            }
+        """)
+        button_layout.addWidget(self.stop_button)
 
         # Settings button
-        self.settings_btn = QPushButton("Settings")
-        self.settings_btn.clicked.connect(self.open_settings)
-        self.settings_btn.setMinimumWidth(100)
-
-        layout.addStretch()
-        layout.addWidget(self.pause_btn)
-        layout.addWidget(self.stop_btn)
-        layout.addWidget(self.settings_btn)
-        layout.addStretch()
-
-        widget.setLayout(layout)
-        return widget
-
-    def create_status_bar(self):
-        """Create status bar"""
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-
-        # Add permanent widgets
-        self.status_label = QLabel("Sorting Active")
-        self.camera_status = QLabel("Camera: OK")
-        self.arduino_status = QLabel("Arduino: OK")
-
-        self.status_bar.addWidget(self.status_label)
-        self.status_bar.addPermanentWidget(self.camera_status)
-        self.status_bar.addPermanentWidget(self.arduino_status)
-
-    def setup_timers(self):
-        """Setup update timers"""
-        logger.info("setup_timers starting")
-
-        # UI update timer (10 Hz)
-        self.ui_timer = QTimer()
-        logger.info("UI timer created")
-
-        self.ui_timer.timeout.connect(self.update_ui)
-        logger.info("UI timer connected")
-
-        self.ui_timer.start(100)
-        logger.info("UI timer started")
-
-        # Metrics update timer (1 Hz)
-        self.metrics_timer = QTimer()
-        logger.info("Metrics timer created")
-
-        self.metrics_timer.timeout.connect(self.update_metrics)
-        logger.info("Metrics timer connected")
-
-        self.metrics_timer.start(1000)
-        logger.info("Metrics timer started")
-
-        logger.info("setup_timers complete")
-
-    # ========== Update Methods ==========
-
-    def update_frame(self, frame: np.ndarray, pieces_data: Dict[str, Any] = None):
-        """PHASE 1: Display raw camera feed only"""
-
-        if frame is None:
-            logger.warning("Received None frame in update_frame")
-            return
-
-        self.frame_count += 1
-
-        if self.frame_count % 30 == 0:
-            logger.info(f"GUI processing frame {self.frame_count}")
-
-        # PHASE 1: COMMENT OUT THESE LINES
-        # if self.roi_bounds:
-        #     frame = self.draw_roi_overlay(frame)
-
-        # if pieces_data and 'tracked_pieces' in pieces_data:
-        #     frame = self.draw_tracked_pieces(frame, pieces_data['tracked_pieces'])
-
-        # PHASE 1: ONLY THIS LINE SHOULD RUN
-        self.video_widget.update_frame(frame)
-
-    def draw_roi_overlay(self, frame: np.ndarray) -> np.ndarray:
-        """Draw static ROI and zone boundaries on frame - DISABLED IN PHASE 1"""
-        # PHASE 1: This method exists but won't be called
-        display_frame = frame.copy()
-
-        # Draw main ROI rectangle
-        if self.roi_bounds:
-            x, y, w, h = self.roi_bounds
-            cv2.rectangle(display_frame,
-                          (x, y),
-                          (x + w, y + h),
-                          (0, 255, 0), 2)  # Green for ROI
-
-            # Draw zone dividers if available
-            if self.zones:
-                # Entry zone boundary
-                if self.zones.get("entry"):
-                    entry_end = self.zones["entry"][1]
-                    cv2.line(display_frame,
-                             (entry_end, y),
-                             (entry_end, y + h),
-                             (255, 255, 0), 1)  # Yellow line
-
-                # Exit zone boundary
-                if self.zones.get("exit"):
-                    exit_start = self.zones["exit"][0]
-                    cv2.line(display_frame,
-                             (exit_start, y),
-                             (exit_start, y + h),
-                             (0, 255, 255), 1)  # Cyan line
-
-        return display_frame
-
-    def draw_tracked_pieces(self, frame: np.ndarray, pieces: List[Dict]) -> np.ndarray:
-        """Draw tracked pieces with color coding based on status"""
-        display_frame = frame.copy()
-
-        for piece in pieces:
-            # Get piece position (now already in frame coordinates!)
-            x, y, w, h = piece['bbox']
-
-            # Get color based on status
-            status = piece.get('status', 'detected')
-            color = self.get_piece_color(status)
-
-            # Draw rectangle around piece
-            cv2.rectangle(display_frame, (x, y), (x + w, y + h), color, 2)
-
-            # Add label with piece ID
-            label = f"ID: {piece.get('id', '?')}"
-            if piece.get('in_exit_zone'):
-                label += " [EXIT]"
-
-            cv2.putText(display_frame, label, (x, y - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-        return display_frame
-
-    def get_piece_color(self, status: str) -> tuple:
-        """
-        Get color for piece based on status string.
-
-        Args:
-            status: Status string ('detected', 'processing', 'processed', 'error')
-
-        Returns:
-            Tuple of BGR color values for OpenCV
-        """
-        colors = {
-            'detected': (0, 0, 255),  # Red - newly detected piece
-            'processing': (0, 165, 255),  # Orange - being processed by API
-            'processed': (0, 255, 0),  # Green - processing complete
-            'error': (0, 0, 128)  # Dark red - processing error
-        }
-
-        # Return the color for the status, or gray if status unknown
-        return colors.get(status, (128, 128, 128))
-
-    def update_piece_display(self, piece_data: Dict[str, Any]):
-        """Update current piece display"""
-        if 'image' in piece_data:
-            # Convert numpy array to QPixmap
-            image = piece_data['image']
-            height, width = image.shape[:2]
-
-            if len(image.shape) == 3:
-                bytes_per_line = 3 * width
-                q_image = QImage(image.data, width, height,
-                                 bytes_per_line, QImage.Format_RGB888)
-            else:
-                q_image = QImage(image.data, width, height,
-                                 width, QImage.Format_Grayscale8)
-
-            pixmap = QPixmap.fromImage(q_image)
-            scaled = pixmap.scaled(150, 150, Qt.KeepAspectRatio)
-            self.piece_image_label.setPixmap(scaled)
-
-        # Update piece info
-        info_text = f"ID: {piece_data.get('id', 'Unknown')}\n"
-        info_text += f"Category: {piece_data.get('category', 'Unknown')}\n"
-        info_text += f"Bin: {piece_data.get('bin', 'TBD')}"
-        self.piece_info_label.setText(info_text)
-
-        self.piece_count += 1
-
-    def update_metrics(self):
-        """Update metrics display"""
-        # Calculate runtime
-        runtime = time.time() - self.start_time
-        self.runtime_label.setText(format_time(runtime))
-
-        # Calculate FPS
-        if runtime > 0:
-            fps = self.frame_count / runtime
-            self.fps_label.setText(f"{fps:.1f}")
-
-    def update_ui(self):
-        """Regular UI updates"""
-        # This is called by timer for any regular updates needed
-        pass
-
-    def update_bin_status(self, bin_number: int, status: str):
-        """Update bin indicator status"""
-        if 0 <= bin_number < len(self.bin_indicators):
-            colors = {
-                'active': '#4CAF50',  # Green
-                'idle': '#444',  # Gray
-                'error': '#f44336'  # Red
+        self.settings_button = QPushButton("⚙️ Settings")
+        self.settings_button.setFixedHeight(35)
+        self.settings_button.clicked.connect(self.open_settings)
+        self.settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: #95A5A6;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 12px;
             }
-            color = colors.get(status, '#444')
-            self.bin_indicators[bin_number].setStyleSheet(f"""
-                QLabel {{
-                    background-color: {color};
-                    border: 1px solid #666;
-                    padding: 5px;
-                    border-radius: 3px;
-                }}
-            """)
+            QPushButton:hover {
+                background-color: #7F8C8D;
+            }
+            QPushButton:pressed {
+                background-color: #6C7B7D;
+            }
+        """)
+        button_layout.addWidget(self.settings_button)
 
-    def add_log_message(self, message: str, level: str = "INFO"):
-        """Add message to system log"""
-        timestamp = time.strftime("%H:%M:%S")
+        control_layout.addLayout(button_layout)
 
-        colors = {
-            "DEBUG": "#888",
-            "INFO": "#FFF",
-            "WARNING": "#FFA500",
-            "ERROR": "#FF4444"
-        }
-        color = colors.get(level, "#FFF")
+        # Status display
+        self.status_label = QLabel("Status: Ready for Phase 3")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("""
+            QLabel {
+                color: #27AE60;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 5px;
+                background-color: #D5EDDA;
+                border: 1px solid #C3E6CB;
+                border-radius: 3px;
+            }
+        """)
+        control_layout.addWidget(self.status_label)
 
-        html_message = f'<span style="color: {color};">[{timestamp}] {message}</span>'
-        self.log_text.append(html_message)
+        parent_layout.addWidget(control_frame)
+        logger.info("Control section created")
 
-        # Auto-scroll to bottom
-        scrollbar = self.log_text.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+    # ========== PHASE 3.1: CAMERA INTEGRATION METHODS ==========
 
-    # ========== Control Methods ==========
+    def set_camera(self, camera):
+        """Set camera instance for live feed"""
+        self.camera = camera
+        logger.info("Camera instance set for sorting GUI")
+
+    def register_camera_consumer(self, camera):
+        """Register as camera consumer during initialization (before capture starts)"""
+        if not camera:
+            logger.error("No camera provided for consumer registration")
+            return False
+
+        try:
+            logger.info("Registering sorting GUI as camera consumer...")
+
+            # Debug: Check for any OpenCV windows before registration
+            import cv2
+            logger.info(f"OpenCV windows before consumer registration: {cv2.getWindowImageRect('any_window') if hasattr(cv2, 'getWindowImageRect') else 'Cannot check'}")
+
+            success = camera.register_consumer(
+                name="sorting_gui",
+                callback=self._camera_frame_callback,
+                processing_type="async",
+                priority=20  # High priority for GUI display
+            )
+
+            if success:
+                self.camera = camera
+                self.camera_active = True
+                logger.info("Sorting GUI registered as camera consumer successfully")
+
+                # Debug: Check for OpenCV windows after registration
+                logger.info(f"OpenCV windows after consumer registration: {cv2.getWindowImageRect('any_window') if hasattr(cv2, 'getWindowImageRect') else 'Cannot check'}")
+
+                return True
+            else:
+                logger.error("Failed to register sorting GUI as camera consumer")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error registering sorting GUI as camera consumer: {e}", exc_info=True)
+            return False
+
+    def activate_camera_display(self):
+        """Activate camera display after capture has started"""
+        logger.info("Activating camera display...")
+
+        # Debug: Check for OpenCV windows before activation
+        import cv2
+        try:
+            # Try to detect any OpenCV windows
+            logger.info("Checking for OpenCV windows...")
+            # OpenCV doesn't have a direct way to list windows, so we'll check other things
+        except Exception as e:
+            logger.warning(f"Could not check OpenCV windows: {e}")
+
+        if self.camera_active:
+            self.camera_status_label.setText("Camera: Active")
+            self.camera_status_label.setStyleSheet("color: #27AE60; font-weight: bold;")
+            logger.info("Camera display activated")
+        else:
+            self.camera_status_label.setText("Camera: Not Registered")
+            self.camera_status_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
+            logger.warning("Camera display activation failed - not registered as consumer")
+
+    def stop_camera_feed(self):
+        """Stop camera feed and unregister consumer"""
+        if self.camera and self.camera_active:
+            try:
+                self.camera.unregister_consumer("sorting_gui")
+                self.camera_active = False
+                self.camera_status_label.setText("Camera: Stopped")
+                self.camera_status_label.setStyleSheet("color: #95A5A6; font-weight: bold;")
+                self.video_widget.setText("Camera Feed Stopped")
+                logger.info("Camera feed stopped for sorting GUI")
+            except Exception as e:
+                logger.error(f"Error stopping camera feed: {e}")
+
+    def _camera_frame_callback(self, frame: np.ndarray):
+        """
+        Callback function for camera frames.
+
+        This runs in a camera thread, so we emit a signal to update GUI in main thread.
+        """
+        try:
+            # Debug: Log first frame callback
+            if self.frame_count == 0:
+                logger.info(f"FIRST camera callback - frame shape: {frame.shape}, dtype: {frame.dtype}")
+                # Check if any windows exist when first frame arrives
+                import cv2
+                logger.info("First frame callback - checking for any OpenCV windows or displays")
+
+            # Update frame counter
+            self.frame_count += 1
+
+            # Calculate FPS periodically
+            current_time = time.time()
+            self.fps_counter += 1
+
+            if current_time - self.last_fps_time >= 1.0:  # Update every second
+                fps = self.fps_counter / (current_time - self.last_fps_time)
+                self.fps_counter = 0
+                self.last_fps_time = current_time
+
+                # Log FPS periodically
+                if self.frame_count % 30 == 0:
+                    logger.info(f"GUI camera feed FPS: {fps:.1f}")
+
+                # Emit signal to update FPS in main thread
+                QMetaObject.invokeMethod(
+                    self.fps_label,
+                    "setText",
+                    Qt.QueuedConnection,
+                    Q_ARG(str, f"FPS: {fps:.1f}")
+                )
+
+            # Emit signal for frame update (thread-safe)
+            self.frame_update_signal.emit(frame.copy())
+
+        except Exception as e:
+            logger.error(f"Error in camera frame callback: {e}", exc_info=True)
+
+    @pyqtSlot(np.ndarray)
+    def update_camera_display(self, frame):
+        """
+        Update camera display in main GUI thread.
+
+        This slot receives frames via signal and updates the VideoWidget.
+        """
+        try:
+            # CHECKPOINT 5: Before first VideoWidget update
+            if self.frame_count == 1:
+                reply = QMessageBox.question(
+                    self,
+                    "Black Window Debug - Checkpoint 5",
+                    "First camera frame received and about to update VideoWidget.\n\n"
+                    "Is there a black window visible now?\n"
+                    "(About to call VideoWidget.update_frame())",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                logger.info(f"CHECKPOINT 5 - Black window present: {reply == QMessageBox.Yes}")
+
+            # Update frame counter display
+            self.frame_counter_label.setText(f"Frames: {self.frame_count}")
+
+            # Update video widget - this might be where extra window appears
+            self.video_widget.update_frame(frame)
+
+            # CHECKPOINT 6: After first VideoWidget update
+            if self.frame_count == 1:
+                reply = QMessageBox.question(
+                    self,
+                    "Black Window Debug - Checkpoint 6",
+                    "VideoWidget.update_frame() completed for first frame.\n\n"
+                    "Is there a black window visible now?\n"
+                    "(First frame has been displayed in VideoWidget)",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                logger.info(f"CHECKPOINT 6 - Black window present: {reply == QMessageBox.Yes}")
+                logger.info("Black window debugging checkpoints complete - continuing normal operation")
+
+        except Exception as e:
+            logger.error(f"Error updating camera display: {e}", exc_info=True)
+
+    # ========== PLACEHOLDER METHODS FOR FUTURE PHASES ==========
+
+    def set_roi_configuration(self, roi_data: Dict[str, Any]):
+        """Store ROI configuration for future phases"""
+        self.roi_config = roi_data
+        logger.info(f"ROI configuration stored for Phase 3.2: {roi_data}")
+
+    def set_arduino_status(self, is_connected: bool):
+        """Update Arduino status (placeholder for now)"""
+        status = "Connected" if is_connected else "Simulation Mode"
+        logger.info(f"Arduino status: {status}")
+
+    # ========== CONTROL METHODS ==========
 
     def toggle_pause(self):
         """Toggle pause state"""
         self.is_paused = not self.is_paused
 
         if self.is_paused:
-            self.pause_btn.setText("Resume")
-            self.status_label.setText("Sorting Paused")
+            self.pause_button.setText("▶️ Resume Sorting")
+            self.status_label.setText("Status: Paused")
+            self.status_label.setStyleSheet("""
+                QLabel {
+                    color: #E67E22;
+                    font-weight: bold;
+                    font-size: 11px;
+                    padding: 5px;
+                    background-color: #FDF2E9;
+                    border: 1px solid #FADBD8;
+                    border-radius: 3px;
+                }
+            """)
             self.pause_requested.emit()
-            self.add_log_message("Sorting paused", "INFO")
+            logger.info("Pause requested from GUI")
         else:
-            self.pause_btn.setText("Pause")
-            self.status_label.setText("Sorting Active")
+            self.pause_button.setText("⏸️ Pause Sorting")
+            self.status_label.setText("Status: Sorting Active")
+            self.status_label.setStyleSheet("""
+                QLabel {
+                    color: #27AE60;
+                    font-weight: bold;
+                    font-size: 11px;
+                    padding: 5px;
+                    background-color: #D5EDDA;
+                    border: 1px solid #C3E6CB;
+                    border-radius: 3px;
+                }
+            """)
             self.resume_requested.emit()
-            self.add_log_message("Sorting resumed", "INFO")
+            logger.info("Resume requested from GUI")
 
     def stop_sorting(self):
         """Stop sorting operation"""
-        reply = QMessageBox.question(self, "Stop Sorting",
-                                     "Are you sure you want to stop sorting?",
-                                     QMessageBox.Yes | QMessageBox.No,
-                                     QMessageBox.No)
+        reply = QMessageBox.question(
+            self,
+            "Stop Sorting",
+            "Are you sure you want to stop sorting and return to configuration?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
 
         if reply == QMessageBox.Yes:
-            self.add_log_message("Stopping sorting system...", "WARNING")
+            logger.info("Stop sorting requested from GUI")
             self.stop_requested.emit()
 
     def open_settings(self):
-        """Request to open settings"""
-        if self.is_paused or QMessageBox.question(self, "Open Settings",
-                                                  "This will pause sorting. Continue?",
-                                                  QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+        """Open settings/configuration"""
+        reply = QMessageBox.question(
+            self,
+            "Open Settings",
+            "This will pause sorting and return to configuration. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
 
-            if not self.is_paused:
-                self.toggle_pause()
+        if reply == QMessageBox.Yes:
+            logger.info("Settings requested from GUI")
             self.settings_requested.emit()
-
-    # ========== Public Interface ==========
-
-    def set_camera_status(self, is_connected: bool):
-        """Update camera status indicator"""
-        if is_connected:
-            self.camera_status.setText("Camera: OK")
-            self.camera_status.setStyleSheet("color: #4CAF50;")
-        else:
-            self.camera_status.setText("Camera: Error")
-            self.camera_status.setStyleSheet("color: #f44336;")
-
-    def set_arduino_status(self, is_connected: bool):
-        """Update Arduino status indicator"""
-        if is_connected:
-            self.arduino_status.setText("Arduino: OK")
-            self.arduino_status.setStyleSheet("color: #4CAF50;")
-        else:
-            self.arduino_status.setText("Arduino: N/A")
-            self.arduino_status.setStyleSheet("color: #FFA500;")
-
-    def set_queue_size(self, size: int):
-        """Update queue size display"""
-        self.queue_label.setText(str(size))
-
-        # Change color based on queue size
-        if size > 50:
-            self.queue_label.setStyleSheet("color: #FFA500;")  # Orange
-        elif size > 75:
-            self.queue_label.setStyleSheet("color: #f44336;")  # Red
-        else:
-            self.queue_label.setStyleSheet("color: #4CAF50;")  # Green
-
-    def set_processed_count(self, count: int):
-        """Update processed piece count"""
-        self.processed_label.setText(str(count))
 
     def closeEvent(self, event):
         """Handle window close event"""
-        reply = QMessageBox.question(self, "Exit",
-                                     "Stop sorting and exit?",
-                                     QMessageBox.Yes | QMessageBox.No,
-                                     QMessageBox.No)
+        reply = QMessageBox.question(
+            self,
+            "Exit Sorting",
+            "Stop sorting and exit?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
 
         if reply == QMessageBox.Yes:
+            logger.info("Window close requested")
+
+            # Phase 3.1: Clean up camera feed
+            self.stop_camera_feed()
+
             self.stop_requested.emit()
             event.accept()
         else:
             event.ignore()
+
+    # ========== PHASE 3.1 INFO METHOD ==========
+
+    def show_phase_info(self):
+        """Show information about current phase"""
+        QMessageBox.information(
+            self,
+            "Phase 3.1: Live Camera Feed Complete",
+            "Phase 3.1 Successfully Implemented!\n\n"
+            "Current Features:\n"
+            "• Live camera feed display\n"
+            "• Frame rate monitoring\n"
+            "• Camera consumer registration\n"
+            "• Thread-safe frame updates\n\n"
+            "Next: Phase 3.2 - ROI Overlay\n"
+            "Ready to add detection region visualization!"
+        )

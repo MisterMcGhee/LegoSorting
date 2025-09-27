@@ -947,16 +947,26 @@ class ConveyorDetector:
         Returns:
             Dictionary with ROI and zone boundaries in frame coordinates
         """
-        with self.lock:
+        # Try to acquire lock with timeout
+        lock_acquired = self.lock.acquire(timeout=1.0)  # 1 second timeout
+
+        if not lock_acquired:
+            logger.error("Failed to acquire lock for ROI configuration - possible deadlock")
+            return {"error": "Lock timeout - detector may be busy"}
+
+        try:
             if self.roi is None:
+                logger.warning("ROI not configured in detector")
                 return {"error": "ROI not configured"}
 
             return {
-                "roi": self.roi,  # (x, y, width, height) in frame coords
-                "entry_zone": self.entry_zone,  # (x_start, x_end) in frame coords
-                "valid_zone": self.valid_zone,  # (x_start, x_end) in frame coords
-                "exit_zone": self.exit_zone  # (x_start, x_end) in frame coords
+                "roi": self.roi,
+                "entry_zone": self.entry_zone,
+                "valid_zone": self.valid_zone,
+                "exit_zone": self.exit_zone
             }
+        finally:
+            self.lock.release()
 
     def get_tracked_pieces_data(self) -> Dict[str, Any]:
         """
