@@ -1,11 +1,15 @@
 """
 camera_module.py - Unified camera module with singleton pattern and frame distribution
 
-This module combines:
-1. Original camera functionality (initialization, warm-up, frame capture)
-2. Singleton resource management (prevents multiple instances)
-3. Frame distribution system (single stream, multiple consumers)
-4. Thread-safe operations for concurrent access
+This module provides a single-stream, multi-consumer camera system for applications
+that need to share camera frames between multiple components (GUI, processing, recording, etc.)
+without the overhead and complexity of multiple video streams.
+
+Architecture:
+    - CameraHardware: Manages physical camera operations
+    - FrameDistributor: Handles frame distribution to multiple consumers
+    - CameraStatistics: Tracks performance metrics and FPS
+    - CameraManager: Singleton orchestrator providing public interface
 """
 
 import cv2
@@ -23,13 +27,20 @@ from enhanced_config_manager import ModuleConfig
 logger = logging.getLogger(__name__)
 
 
+# ===== CONSUMER SYSTEM =====
+
 class FrameConsumer:
-    """Represents a consumer of camera frames"""
+    """
+    Represents a consumer that receives camera frames with configurable processing behavior.
+
+    Consumers can be synchronous (blocking) for critical processing or asynchronous
+    (non-blocking) for display and logging. Priority determines processing order.
+    """
 
     def __init__(self, name: str, callback: Callable[[np.ndarray], None],
                  processing_type: str = "async", priority: int = 0):
         """
-        Initialize a frame consumer
+        Initialize a frame consumer.
 
         Args:
             name: Unique identifier for this consumer
@@ -46,44 +57,22 @@ class FrameConsumer:
         self.is_active = True
 
 
-class CameraModule:
+# ===== HARDWARE LAYER =====
+
+class CameraHardware:
     """
-    Unified camera module with singleton pattern and frame distribution.
-
-    This module handles:
-    1. Camera hardware initialization and management
-    2. Single video stream capture
-    3. Distribution of frames to multiple consumers (GUI, sorting, recording, etc.)
-    4. Thread-safe resource management
-    5. Performance optimization through frame sharing
+    Manages physical camera operations including initialization, configuration,
+    and frame capture. Handles the low-level OpenCV camera interface.
     """
-
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls, config_manager=None):
-        """Implement singleton pattern to ensure only one camera instance"""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
 
     def __init__(self, config_manager=None):
         """
-        Initialize the camera module (only runs once due to singleton).
+        Initialize camera hardware configuration.
 
         Args:
             config_manager: Configuration manager for camera settings
         """
-        # Skip initialization if already done
-        if self._initialized:
-            return
-
-        self._initialized = True
-
-        # Get camera configuration
+        # Load configuration
         if config_manager:
             camera_config = config_manager.get_module_config(ModuleConfig.CAMERA.value)
             self.device_id = camera_config.get("device_id", 0)
@@ -93,7 +82,7 @@ class CameraModule:
             self.fps = camera_config.get("fps", 30)
             self.auto_exposure = camera_config.get("auto_exposure", True)
         else:
-            # Default settings
+            # Default configuration
             self.device_id = 0
             self.buffer_size = 1
             self.width = 1920
@@ -101,49 +90,22 @@ class CameraModule:
             self.fps = 30
             self.auto_exposure = True
 
-        # Camera handle
+        # Hardware state
         self.cap = None
         self.is_initialized = False
         self.is_warmed_up = False
-
-        # Thread management
-        self.capture_thread = None
-        self.is_capturing = False
-        self.capture_lock = threading.RLock()
-
-        # Frame consumers (GUI display, sorting algorithm, etc.)
-        self.consumers: Dict[str, FrameConsumer] = {}
-        self.consumer_lock = threading.RLock()
-
-        # Frame buffer for async consumers
-        self.frame_buffer = deque(maxlen=5)
-        self.buffer_lock = threading.Lock()
-
-        # Performance tracking
-        self.stats = {
-            "total_frames": 0,
-            "dropped_frames": 0,
-            "fps_actual": 0,
-            "last_frame_time": None,
-            "consumer_latencies": {}
-        }
-
-        # FPS calculation
-        self.fps_calc_frames = deque(maxlen=30)
-        self.fps_calc_times = deque(maxlen=30)
-
-        logger.info("Camera module singleton created")
+        self.hardware_lock = threading.RLock()
 
     def initialize(self) -> bool:
         """
-        Initialize the camera hardware.
+        Initialize the camera hardware with configured settings.
 
         Returns:
-            bool: True if successful, False otherwise
+            bool: True if initialization successful, False otherwise
         """
-        with self.capture_lock:
+        with self.hardware_lock:
             if self.is_initialized:
-                logger.info("Camera already initialized")
+                logger.info("Camera hardware already initialized")
                 return True
 
             try:
@@ -160,11 +122,10 @@ class CameraModule:
                 self.cap.set(cv2.CAP_PROP_FPS, self.fps)
 
                 if not self.auto_exposure:
-                    # Disable auto exposure for consistent lighting
                     self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # Manual mode
-                    self.cap.set(cv2.CAP_PROP_EXPOSURE, -6)  # Adjust as needed
+                    self.cap.set(cv2.CAP_PROP_EXPOSURE, -6)
 
-                # Get actual settings (camera might not support requested values)
+                # Store actual camera settings
                 self.actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 self.actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 self.actual_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
@@ -172,10 +133,7 @@ class CameraModule:
                 logger.info(f"Camera initialized: {self.actual_width}x{self.actual_height} @ {self.actual_fps}fps")
 
                 self.is_initialized = True
-
-                # Warm up camera
                 self._warm_up_camera()
-
                 return True
 
             except Exception as e:
@@ -188,6 +146,7 @@ class CameraModule:
     def _warm_up_camera(self, num_frames: int = 10, delay: float = 0.1):
         """
         Warm up the camera by capturing and discarding initial frames.
+        This ensures stable exposure and white balance.
 
         Args:
             num_frames: Number of frames to discard
@@ -207,137 +166,100 @@ class CameraModule:
         self.is_warmed_up = True
         logger.info("Camera warm-up complete")
 
-    def start_capture(self) -> bool:
+    def capture_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
         """
-        Start the capture thread that continuously reads frames.
+        Capture a single frame from the camera.
 
         Returns:
-            bool: True if started successfully
+            Tuple of (success, frame) where success is bool and frame is np.ndarray or None
         """
-        with self.capture_lock:
-            if not self.is_initialized:
-                if not self.initialize():
-                    return False
+        if not self.is_initialized:
+            return False, None
 
-            if self.is_capturing:
-                logger.info("Capture already running")
-                return True
+        try:
+            return self.cap.read()
+        except Exception as e:
+            logger.error(f"Error capturing frame: {e}")
+            return False, None
 
-            self.is_capturing = True
-            self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
-            self.capture_thread.start()
-
-            logger.info("Camera capture started")
-            return True
-
-    def stop_capture(self):
-        """Stop the capture thread."""
-        with self.capture_lock:
-            if not self.is_capturing:
-                return
-
-            self.is_capturing = False
-
-            if self.capture_thread:
-                self.capture_thread.join(timeout=2.0)
-                if self.capture_thread.is_alive():
-                    logger.warning("Capture thread did not stop gracefully")
-
-            logger.info("Camera capture stopped")
-
-    def _capture_loop(self):
+    def switch_device(self, new_device_id: int) -> bool:
         """
-        Main capture loop that runs in a separate thread.
-
-        This method continuously captures frames and distributes them to all
-        registered consumers, ensuring efficient single-stream processing.
-        """
-        logger.info("Capture loop started")
-
-        while self.is_capturing:
-            try:
-                # Capture frame once
-                ret, frame = self.cap.read()
-
-                if not ret:
-                    logger.warning("Failed to capture frame")
-                    self.stats["dropped_frames"] += 1
-                    continue
-
-                # Update statistics
-                current_time = time.time()
-                self.stats["total_frames"] += 1
-                self.stats["last_frame_time"] = current_time
-
-                # Calculate FPS
-                self.fps_calc_frames.append(self.stats["total_frames"])
-                self.fps_calc_times.append(current_time)
-                if len(self.fps_calc_times) > 1:
-                    time_diff = self.fps_calc_times[-1] - self.fps_calc_times[0]
-                    frame_diff = self.fps_calc_frames[-1] - self.fps_calc_frames[0]
-                    if time_diff > 0:
-                        self.stats["fps_actual"] = frame_diff / time_diff
-
-                # Distribute frame to all consumers
-                self._distribute_frame(frame)
-
-            except Exception as e:
-                logger.error(f"Error in capture loop: {e}")
-                self.stats["dropped_frames"] += 1
-
-        logger.info("Capture loop ended")
-
-    def _distribute_frame(self, frame: np.ndarray):
-        """
-        Distribute a captured frame to all registered consumers.
-
-        This is where the magic happens - a single captured frame is sent
-        to multiple consumers (GUI display, sorting algorithm, recorder, etc.)
-        without duplicating the capture process.
+        Switch to a different camera device.
 
         Args:
-            frame: The captured frame to distribute
+            new_device_id: The new camera device ID
+
+        Returns:
+            bool: True if switch successful
         """
-        with self.consumer_lock:
-            if not self.consumers:
-                return
+        logger.info(f"Switching camera from device {self.device_id} to {new_device_id}")
 
-            # Sort consumers by priority (higher priority first)
-            sorted_consumers = sorted(
-                self.consumers.values(),
-                key=lambda c: c.priority,
-                reverse=True
-            )
+        if self.device_id == new_device_id and self.is_initialized:
+            logger.info("Device ID unchanged, skipping switch")
+            return True
 
-            for consumer in sorted_consumers:
-                if not consumer.is_active:
-                    continue
+        # Release current camera
+        self.release()
 
-                try:
-                    start_time = time.time()
+        # Update device ID and reinitialize
+        self.device_id = new_device_id
+        return self.initialize()
 
-                    if consumer.processing_type == "sync":
-                        # Synchronous processing - blocks until complete
-                        # Good for critical processing like sorting decisions
-                        consumer.callback(frame.copy())
-                    else:
-                        # Asynchronous processing - non-blocking
-                        # Good for display, recording, statistics
-                        threading.Thread(
-                            target=consumer.callback,
-                            args=(frame.copy(),),
-                            daemon=True
-                        ).start()
+    def release(self):
+        """Release camera hardware resources."""
+        with self.hardware_lock:
+            if self.cap and self.is_initialized:
+                self.cap.release()
+                self.cap = None
+                self.is_initialized = False
+                self.is_warmed_up = False
+                logger.info("Camera hardware released")
 
-                    # Track performance
-                    latency = time.time() - start_time
-                    self.stats["consumer_latencies"][consumer.name] = latency
+    @staticmethod
+    def enumerate_cameras(max_check: int = 3) -> List[Tuple[int, str]]:
+        """
+        Detect available camera devices by testing each device index.
 
-                    consumer.frame_count += 1
-                    consumer.last_frame_time = time.time()
+        Args:
+            max_check: Maximum number of camera indices to check. Defaulted to 3 maximum cameras.
 
-                except Exception as e:
-                    logger.error(f"Error in consumer '{consumer.name}': {e}")
+        Returns:
+            List of tuples (device_id, description)
+        """
+        available_cameras = []
+
+        for i in range(max_check):
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    backend = cap.getBackendName()
+                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    description = f"Camera {i} ({backend}) - {width}x{height}"
+                    available_cameras.append((i, description))
+                    logger.info(f"Found camera: {description}")
+                cap.release()
+
+        if not available_cameras:
+            logger.warning("No cameras found, adding default option")
+            available_cameras.append((0, "Default Camera (0)"))
+
+        return available_cameras
+
+
+# ===== DISTRIBUTION LAYER =====
+
+class FrameDistributor:
+    """
+    Manages frame distribution to multiple consumers with priority-based ordering
+    and configurable processing modes (sync/async).
+    """
+
+    def __init__(self):
+        """Initialize the frame distributor."""
+        self.consumers: Dict[str, FrameConsumer] = {}
+        self.consumer_lock = threading.RLock()
 
     def register_consumer(self, name: str, callback: Callable[[np.ndarray], None],
                           processing_type: str = "async", priority: int = 0) -> bool:
@@ -366,7 +288,7 @@ class CameraModule:
 
     def unregister_consumer(self, name: str) -> bool:
         """
-        Unregister a consumer.
+        Remove a consumer from the distribution list.
 
         Args:
             name: Name of the consumer to unregister
@@ -397,82 +319,416 @@ class CameraModule:
                 self.consumers[name].is_active = True
                 logger.info(f"Resumed consumer '{name}'")
 
-    def get_frame(self) -> Optional[np.ndarray]:
+    def distribute_frame(self, frame: np.ndarray) -> Dict[str, float]:
         """
-        Get a single frame directly (legacy compatibility).
+        Distribute a captured frame to all registered consumers based on priority.
 
-        This method is kept for backward compatibility with code that
-        expects to poll for frames rather than receive callbacks.
+        Args:
+            frame: The captured frame to distribute
 
         Returns:
-            Captured frame or None if not available
+            Dict of consumer names to processing latencies
         """
-        if not self.is_initialized:
-            return None
+        latencies = {}
 
-        if not self.is_warmed_up:
-            self._warm_up_camera()
+        with self.consumer_lock:
+            if not self.consumers:
+                return latencies
 
-        try:
-            ret, frame = self.cap.read()
-            if ret:
-                self.stats["total_frames"] += 1
-                return frame
-            else:
-                self.stats["dropped_frames"] += 1
-                return None
-        except Exception as e:
-            logger.error(f"Error capturing frame: {e}")
-            return None
+            # Sort consumers by priority (higher priority first)
+            sorted_consumers = sorted(
+                self.consumers.values(),
+                key=lambda c: c.priority,
+                reverse=True
+            )
 
-    def get_statistics(self) -> Dict[str, Any]:
+            for consumer in sorted_consumers:
+                if not consumer.is_active:
+                    continue
+
+                try:
+                    start_time = time.time()
+
+                    if consumer.processing_type == "sync":
+                        # Synchronous processing - blocks until complete
+                        consumer.callback(frame.copy())
+                    else:
+                        # Asynchronous processing - non-blocking
+                        threading.Thread(
+                            target=consumer.callback,
+                            args=(frame.copy(),),
+                            daemon=True
+                        ).start()
+
+                    # Track performance
+                    latencies[consumer.name] = time.time() - start_time
+                    consumer.frame_count += 1
+                    consumer.last_frame_time = time.time()
+
+                except Exception as e:
+                    logger.error(f"Error in consumer '{consumer.name}': {e}")
+
+        return latencies
+
+    def get_consumer_info(self) -> Dict[str, Dict[str, Any]]:
         """
-        Get camera and consumer statistics.
+        Get information about all registered consumers.
 
         Returns:
-            Dictionary containing performance metrics
+            Dictionary of consumer information
         """
         with self.consumer_lock:
-            consumer_stats = {
+            return {
                 name: {
                     "frame_count": consumer.frame_count,
                     "last_frame_time": consumer.last_frame_time,
                     "is_active": consumer.is_active,
-                    "latency": self.stats["consumer_latencies"].get(name, 0)
+                    "processing_type": consumer.processing_type,
+                    "priority": consumer.priority
                 }
                 for name, consumer in self.consumers.items()
             }
 
-        return {
-            "camera": {
-                "device_id": self.device_id,
-                "resolution": f"{self.actual_width}x{self.actual_height}",
-                "fps_requested": self.fps,
+    def clear_consumers(self):
+        """Remove all registered consumers."""
+        with self.consumer_lock:
+            self.consumers.clear()
+            logger.info("All consumers cleared")
+
+
+# ===== STATISTICS LAYER =====
+
+class CameraStatistics:
+    """
+    Tracks camera performance metrics including FPS, frame counts, and consumer latencies.
+    """
+
+    def __init__(self):
+        """Initialize statistics tracking."""
+        self.stats = {
+            "total_frames": 0,
+            "dropped_frames": 0,
+            "fps_actual": 0,
+            "last_frame_time": None,
+            "consumer_latencies": {}
+        }
+
+        # FPS calculation using rolling window
+        self.fps_calc_frames = deque(maxlen=30)
+        self.fps_calc_times = deque(maxlen=30)
+        self.stats_lock = threading.Lock()
+
+    def update_frame_stats(self, frame_captured: bool, consumer_latencies: Dict[str, float]):
+        """
+        Update statistics for a frame processing cycle.
+
+        Args:
+            frame_captured: Whether frame capture was successful
+            consumer_latencies: Dictionary of consumer processing times
+        """
+        with self.stats_lock:
+            current_time = time.time()
+
+            if frame_captured:
+                self.stats["total_frames"] += 1
+                self.stats["last_frame_time"] = current_time
+
+                # Update FPS calculation
+                self.fps_calc_frames.append(self.stats["total_frames"])
+                self.fps_calc_times.append(current_time)
+
+                if len(self.fps_calc_times) > 1:
+                    time_diff = self.fps_calc_times[-1] - self.fps_calc_times[0]
+                    frame_diff = self.fps_calc_frames[-1] - self.fps_calc_frames[0]
+                    if time_diff > 0:
+                        self.stats["fps_actual"] = frame_diff / time_diff
+            else:
+                self.stats["dropped_frames"] += 1
+
+            # Update consumer latencies
+            self.stats["consumer_latencies"].update(consumer_latencies)
+
+    def get_statistics(self, hardware_info: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Get comprehensive statistics including camera and consumer metrics.
+
+        Args:
+            hardware_info: Optional hardware information to include
+
+        Returns:
+            Dictionary containing all performance metrics
+        """
+        with self.stats_lock:
+            camera_stats = {
                 "fps_actual": self.stats["fps_actual"],
                 "total_frames": self.stats["total_frames"],
                 "dropped_frames": self.stats["dropped_frames"],
-                "is_capturing": self.is_capturing
-            },
-            "consumers": consumer_stats
+                "last_frame_time": self.stats["last_frame_time"]
+            }
+
+            if hardware_info:
+                camera_stats.update(hardware_info)
+
+            return {
+                "camera": camera_stats,
+                "consumer_latencies": self.stats["consumer_latencies"].copy()
+            }
+
+    def reset_statistics(self):
+        """Reset all statistics to initial values."""
+        with self.stats_lock:
+            self.stats = {
+                "total_frames": 0,
+                "dropped_frames": 0,
+                "fps_actual": 0,
+                "last_frame_time": None,
+                "consumer_latencies": {}
+            }
+            self.fps_calc_frames.clear()
+            self.fps_calc_times.clear()
+            logger.info("Statistics reset")
+
+
+# ===== PUBLIC INTERFACE =====
+
+class CameraManager:
+    """
+    Singleton camera manager that orchestrates hardware, distribution, and statistics.
+    Provides the main public interface for camera operations.
+    """
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, config_manager=None):
+        """Implement singleton pattern to ensure only one camera instance."""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self, config_manager=None):
+        """
+        Initialize the camera manager (only runs once due to singleton).
+
+        Args:
+            config_manager: Configuration manager for camera settings
+        """
+        if self._initialized:
+            return
+
+        self._initialized = True
+
+        # Initialize components
+        self.hardware = CameraHardware(config_manager)
+        self.distributor = FrameDistributor()
+        self.statistics = CameraStatistics()
+
+        # Capture thread management
+        self.capture_thread = None
+        self.is_capturing = False
+        self.capture_lock = threading.RLock()
+
+        logger.info("Camera manager singleton created")
+
+    def initialize(self) -> bool:
+        """
+        Initialize camera hardware.
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        return self.hardware.initialize()
+
+    def start_capture(self) -> bool:
+        """
+        Start the continuous frame capture and distribution process.
+
+        Returns:
+            bool: True if started successfully
+        """
+        with self.capture_lock:
+            if not self.hardware.is_initialized:
+                if not self.initialize():
+                    return False
+
+            if self.is_capturing:
+                logger.info("Capture already running")
+                return True
+
+            self.is_capturing = True
+            self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
+            self.capture_thread.start()
+
+            logger.info("Camera capture started")
+            return True
+
+    def stop_capture(self):
+        """Stop the continuous capture process."""
+        with self.capture_lock:
+            if not self.is_capturing:
+                return
+
+            self.is_capturing = False
+
+            if self.capture_thread:
+                self.capture_thread.join(timeout=2.0)
+                if self.capture_thread.is_alive():
+                    logger.warning("Capture thread did not stop gracefully")
+
+            logger.info("Camera capture stopped")
+
+    def _capture_loop(self):
+        """
+        Main capture loop that continuously captures frames and distributes them.
+        Runs in a separate daemon thread.
+        """
+        logger.info("Capture loop started")
+
+        while self.is_capturing:
+            try:
+                # Capture frame from hardware
+                ret, frame = self.hardware.capture_frame()
+
+                if ret and frame is not None:
+                    # Distribute frame to all consumers
+                    consumer_latencies = self.distributor.distribute_frame(frame)
+                    # Update statistics
+                    self.statistics.update_frame_stats(True, consumer_latencies)
+                else:
+                    # Update statistics for dropped frame
+                    self.statistics.update_frame_stats(False, {})
+
+            except Exception as e:
+                logger.error(f"Error in capture loop: {e}")
+                self.statistics.update_frame_stats(False, {})
+
+        logger.info("Capture loop ended")
+
+    def register_consumer(self, name: str, callback: Callable[[np.ndarray], None],
+                          processing_type: str = "async", priority: int = 0) -> bool:
+        """
+        Register a consumer to receive camera frames.
+
+        Args:
+            name: Unique identifier for the consumer
+            callback: Function to call with each frame
+            processing_type: "sync" for blocking, "async" for non-blocking
+            priority: Higher priority consumers get frames first
+
+        Returns:
+            bool: True if registered successfully
+        """
+        return self.distributor.register_consumer(name, callback, processing_type, priority)
+
+    def unregister_consumer(self, name: str) -> bool:
+        """Remove a consumer from receiving frames."""
+        return self.distributor.unregister_consumer(name)
+
+    def pause_consumer(self, name: str):
+        """Temporarily pause a consumer."""
+        self.distributor.pause_consumer(name)
+
+    def resume_consumer(self, name: str):
+        """Resume a paused consumer."""
+        self.distributor.resume_consumer(name)
+
+    def get_frame(self) -> Optional[np.ndarray]:
+        """
+        Get a single frame directly (legacy compatibility method).
+
+        Note: This bypasses the distribution system and should only be used
+        for compatibility with existing code.
+
+        Returns:
+            Captured frame or None if not available
+        """
+        if not self.hardware.is_initialized:
+            return None
+
+        ret, frame = self.hardware.capture_frame()
+        if ret:
+            self.statistics.update_frame_stats(True, {})
+            return frame
+        else:
+            self.statistics.update_frame_stats(False, {})
+            return None
+
+    def get_statistics(self) -> Dict[str, Any]:
+        """
+        Get comprehensive camera and consumer statistics.
+
+        Returns:
+            Dictionary containing performance metrics
+        """
+        # Gather hardware info
+        hardware_info = {
+            "device_id": self.hardware.device_id,
+            "resolution": f"{getattr(self.hardware, 'actual_width', 'unknown')}x{getattr(self.hardware, 'actual_height', 'unknown')}",
+            "fps_requested": self.hardware.fps,
+            "is_capturing": self.is_capturing,
+            "is_initialized": self.hardware.is_initialized
         }
 
+        # Get statistics with hardware info
+        stats = self.statistics.get_statistics(hardware_info)
+
+        # Add consumer information
+        stats["consumers"] = self.distributor.get_consumer_info()
+
+        return stats
+
+    def switch_camera(self, new_device_id: int, config_manager=None) -> bool:
+        """
+        Switch to a different camera device.
+
+        Args:
+            new_device_id: The new camera device ID
+            config_manager: Optional config manager to update settings
+
+        Returns:
+            bool: True if switch was successful
+        """
+        # Store capture state
+        was_capturing = self.is_capturing
+
+        # Stop capture if running
+        if was_capturing:
+            self.stop_capture()
+
+        # Update config if manager provided
+        if config_manager:
+            camera_config = config_manager.get_module_config("camera")
+            camera_config["device_id"] = new_device_id
+            config_manager.update_module_config("camera", camera_config)
+
+        # Switch hardware device
+        success = self.hardware.switch_device(new_device_id)
+
+        # Restart capture if it was running
+        if success and was_capturing:
+            self.start_capture()
+
+        return success
+
     def release(self):
-        """Release camera resources."""
+        """Release all camera resources and cleanup."""
         with self.capture_lock:
             # Stop capture thread
             self.stop_capture()
 
-            # Release camera
-            if self.cap and self.is_initialized:
-                self.cap.release()
-                self.cap = None
-                self.is_initialized = False
-                self.is_warmed_up = False
-                logger.info("Camera resources released")
+            # Release hardware
+            self.hardware.release()
 
             # Clear consumers
-            with self.consumer_lock:
-                self.consumers.clear()
+            self.distributor.clear_consumers()
+
+            # Reset statistics
+            self.statistics.reset_statistics()
+
+            logger.info("Camera manager resources released")
 
     @classmethod
     def reset_instance(cls):
@@ -493,241 +749,51 @@ class CameraModule:
         Returns:
             List of tuples (device_id, description)
         """
-        available_cameras = []
-
-        for i in range(max_check):
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                # Try to read a frame to confirm camera is really available
-                ret, _ = cap.read()
-                if ret:
-                    # Get camera info if available
-                    backend = cap.getBackendName()
-                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-                    # Create description
-                    description = f"Camera {i} ({backend}) - {width}x{height}"
-                    available_cameras.append((i, description))
-                    logger.info(f"Found camera: {description}")
-
-                cap.release()
-
-        if not available_cameras:
-            logger.warning("No cameras found, adding default option")
-            available_cameras.append((0, "Default Camera (0)"))
-
-        return available_cameras
-
-    def reinitialize_with_device(self, new_device_id: int) -> bool:
-        """
-        Reinitialize camera with a new device ID.
-
-        This properly handles switching between cameras.
-
-        Args:
-            new_device_id: The new camera device ID to use
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        logger.info(f"Reinitializing camera from device {self.device_id} to {new_device_id}")
-
-        # Only reinitialize if device actually changed
-        if self.device_id == new_device_id and self.is_initialized:
-            logger.info("Device ID unchanged and camera initialized, skipping reinit")
-            return True
-
-        # Store capture state
-        was_capturing = self.is_capturing
-
-        # Stop capture if running
-        if was_capturing:
-            self.stop_capture()
-
-        # Release current camera
-        if self.cap and self.is_initialized:
-            self.cap.release()
-            self.cap = None
-            self.is_initialized = False
-            self.is_warmed_up = False
-            logger.info(f"Released camera device {self.device_id}")
-
-        # Update device ID
-        self.device_id = new_device_id
-
-        # Reinitialize with new device
-        success = self.initialize()
-
-        if success:
-            logger.info(f"Successfully initialized camera device {new_device_id}")
-
-            # Restart capture if it was running
-            if was_capturing:
-                self.start_capture()
-        else:
-            logger.error(f"Failed to initialize camera device {new_device_id}")
-
-        return success
-
-    def switch_camera(self, new_device_id: int, config_manager=None) -> bool:
-        """
-        Switch to a different camera device.
-
-        Args:
-            new_device_id: The new camera device ID
-            config_manager: Optional config manager to update settings
-
-        Returns:
-            bool: True if switch was successful
-        """
-        # Update config if manager provided
-        if config_manager:
-            camera_config = config_manager.get_module_config("camera")
-            camera_config["device_id"] = new_device_id
-            config_manager.update_module_config("camera", camera_config)
-
-        # Reinitialize with new device
-        return self.reinitialize_with_device(new_device_id)
-
-    @classmethod
-    def reset_and_switch(cls, new_device_id: int, config_manager=None):
-        """
-        Reset singleton and create new instance with different device.
-
-        Use this method when you need to completely reset the camera system.
-
-        Args:
-            new_device_id: The new camera device ID
-            config_manager: Configuration manager
-
-        Returns:
-            CameraModule: New camera instance with specified device
-        """
-        # Reset the singleton
-        cls.reset_instance()
-
-        # Update config if provided
-        if config_manager:
-            camera_config = config_manager.get_module_config("camera")
-            camera_config["device_id"] = new_device_id
-            config_manager.update_module_config("camera", camera_config)
-
-        # Create new instance with updated config
-        from camera_module import create_camera
-        return create_camera(config_manager=config_manager)
+        return CameraHardware.enumerate_cameras(max_check)
 
 
-# Factory function for backward compatibility
+# ===== FACTORY FUNCTION =====
+
 def create_camera(camera_type="webcam", config_manager=None):
     """
-    Factory function to create/get camera instance.
+    Factory function to create/get camera manager instance.
 
     Args:
         camera_type: Type of camera (currently only "webcam")
         config_manager: Configuration manager instance
 
     Returns:
-        CameraModule: The singleton camera instance
+        CameraManager: The singleton camera instance
     """
     if camera_type != "webcam":
         raise CameraError(f"Unsupported camera type: {camera_type}")
 
-    camera = CameraModule(config_manager)
-    if not camera.is_initialized:
+    camera = CameraManager(config_manager)
+    if not camera.hardware.is_initialized:
         if not camera.initialize():
             raise CameraError("Failed to initialize camera")
 
     return camera
 
 
-# Example usage showing how different parts of the application use the same stream
+# ===== EXAMPLE USAGE =====
+
 if __name__ == "__main__":
-    import logging
-
-    logging.basicConfig(level=logging.INFO)
-
-    # Create camera instance
+    # Create or get the singleton camera instance
+    # This initializes hardware and prepares for capture
     camera = create_camera()
 
+    # Register a consumer that will receive every captured frame
+    # The lambda function gets called with each frame (async, non-blocking)
+    camera.register_consumer("demo", lambda frame: print(f"Frame: {frame.shape}"))
 
-    # Example consumer callbacks
-    def gui_display_callback(frame):
-        """GUI display consumer - shows frame in window"""
-        # This would update your PyQt display
-        print(f"GUI received frame: {frame.shape}")
-        # cv2.imshow("GUI Display", frame)
-
-
-    def sorting_algorithm_callback(frame):
-        """Sorting algorithm consumer - processes frame for detection"""
-        # This would run your piece detection
-        print(f"Sorting algorithm processing frame: {frame.shape}")
-        # pieces = detect_pieces(frame)
-        # make_sorting_decision(pieces)
-
-
-    def recorder_callback(frame):
-        """Recording consumer - saves frames to video file"""
-        # This would write to video file
-        print(f"Recorder saving frame: {frame.shape}")
-        # video_writer.write(frame)
-
-
-    def statistics_callback(frame):
-        """Statistics consumer - calculates metrics"""
-        # This would compute statistics
-        mean_brightness = np.mean(frame)
-        print(f"Statistics: brightness = {mean_brightness:.2f}")
-
-
-    # Register consumers with different priorities
-    camera.register_consumer(
-        "gui_display",
-        gui_display_callback,
-        processing_type="async",
-        priority=10  # High priority for responsive display
-    )
-
-    camera.register_consumer(
-        "sorting",
-        sorting_algorithm_callback,
-        processing_type="sync",  # Synchronous for critical processing
-        priority=5
-    )
-
-    camera.register_consumer(
-        "recorder",
-        recorder_callback,
-        processing_type="async",
-        priority=3
-    )
-
-    camera.register_consumer(
-        "statistics",
-        statistics_callback,
-        processing_type="async",
-        priority=1  # Low priority
-    )
-
-    # Start capture (single stream feeding all consumers)
+    # Start the background capture thread
+    # This begins continuous frame capture and distribution
     camera.start_capture()
 
-    # Let it run for a bit
-    time.sleep(5)
+    # Let the system run for 2 seconds
+    # During this time, frames are captured and your lambda is called
+    time.sleep(2)
 
-    # Print statistics
-    stats = camera.get_statistics()
-    print("\nCamera Statistics:")
-    print(f"  FPS: {stats['camera']['fps_actual']:.2f}")
-    print(f"  Total frames: {stats['camera']['total_frames']}")
-    print(f"  Dropped frames: {stats['camera']['dropped_frames']}")
-
-    print("\nConsumer Statistics:")
-    for name, consumer_stats in stats['consumers'].items():
-        print(f"  {name}:")
-        print(f"    Frames processed: {consumer_stats['frame_count']}")
-        print(f"    Latency: {consumer_stats['latency'] * 1000:.2f}ms")
-
-    # Cleanup
+    # Stop capture and release all resources
     camera.release()
