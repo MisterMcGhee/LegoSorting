@@ -1,5 +1,5 @@
 """
-gui_common.py - Common utilities and base classes for GUI modules
+gui_common.py - Common utilities and base classes for GUI modules modules
 """
 
 from PyQt5.QtWidgets import *
@@ -88,9 +88,9 @@ class GUIStyles:
     """
 
 
-# ============= Base GUI Class =============
+# ============= Base GUI modules Class =============
 class BaseGUIWindow(QMainWindow):
-    """Base class for all GUI windows with common functionality"""
+    """Base class for all GUI modules windows with common functionality"""
 
     def __init__(self, config_manager=None, window_title="Lego Sorting System"):
         super().__init__()

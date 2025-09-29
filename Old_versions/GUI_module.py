@@ -1,5 +1,5 @@
 """
-GUI_module.py - Complete GUI module for LEGO Sorting System with all fixes applied
+GUI_module.py - Complete GUI modules module for LEGO Sorting System with all fixes applied
 This module provides both configuration and active sorting operation interfaces.
 Fixed issues:
 1. ROI constrained within camera frame
@@ -1234,7 +1234,7 @@ class ConfigurationScreen(QWidget):
             self.stop_camera()
 
 
-# ============= Sorting Operation GUI Components =============
+# ============= Sorting Operation GUI modules Components =============
 
 @dataclass
 class TrackedPieceDisplay:
@@ -1649,10 +1649,10 @@ class VideoDisplayWidget(QLabel):
             return f"ID:{piece_id} U:{update_count}"
 
 
-# ============= Main Sorting GUI =============
+# ============= Main Sorting GUI modules =============
 
 class LegoSortingGUI(QMainWindow):
-    """Main GUI window for sorting operation"""
+    """Main GUI modules window for sorting operation"""
 
     # Signals
     pause_requested = pyqtSignal()
@@ -1988,7 +1988,7 @@ class MainWindow(QMainWindow):
         # Current mode
         self.current_mode = "configuration"
 
-        # GUI screens
+        # GUI modules screens
         self.config_screen = None
         self.sorting_gui = None
 
@@ -2041,7 +2041,7 @@ class MainWindow(QMainWindow):
             # Initialize system modules
             self.initialize_system_modules()
 
-            # Create sorting GUI
+            # Create sorting GUI modules
             self.sorting_gui = LegoSortingGUI(self.config_manager)
 
             # Connect signals
@@ -2079,7 +2079,7 @@ class MainWindow(QMainWindow):
         try:
             # Import necessary modules
             from camera_module import create_camera
-            from detector_module import create_detector
+            from Old_versions.detector_module import create_detector
             from sorting_module import create_sorting_manager
             from thread_management_module import create_thread_manager
             from piece_history_module import create_piece_history
@@ -2127,11 +2127,11 @@ class MainWindow(QMainWindow):
             raise RuntimeError(f"Failed to initialize modules: {str(e)}")
 
     def on_pause_requested(self):
-        """Handle pause request from sorting GUI"""
+        """Handle pause request from sorting GUI modules"""
         logger.info("Sorting paused")
 
     def on_resume_requested(self):
-        """Handle resume request from sorting GUI"""
+        """Handle resume request from sorting GUI modules"""
         logger.info("Sorting resumed")
 
     def on_stop_requested(self):
@@ -2156,7 +2156,7 @@ class MainWindow(QMainWindow):
             except:
                 pass
 
-        # Clean up sorting GUI
+        # Clean up sorting GUI modules
         if self.sorting_gui:
             self.sorting_gui.cleanup()
 

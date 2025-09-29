@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Lego_Sorting_006.py - Integrated Modular GUI Version
+Lego_Sorting_006.py - Integrated Modular GUI modules Version
 
-This version integrates the refactored modular GUI components while maintaining
-all existing functionality. The GUI is now split into three modules:
-- GUI/gui_common.py: Shared utilities and base classes
-- GUI/config_gui_module.py: Configuration interface
-- GUI/sorting_gui_module.py: Active sorting visualization
+This version integrates the refactored modular GUI modules components while maintaining
+all existing functionality. The GUI modules is now split into three modules:
+- GUI modules/gui_common.py: Shared utilities and base classes
+- GUI modules/config_gui_module.py: Configuration interface
+- GUI modules/sorting_gui_module.py: Active sorting visualization
 
 Main improvements:
 - Better separation of concerns
@@ -24,24 +24,20 @@ import time
 from typing import Optional, Dict, Any
 from enum import Enum
 from dataclasses import dataclass
-import cv2
-import numpy as np
 
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
-from PyQt5.QtGui import *
 
-# NEW MODULAR GUI IMPORTS
+# NEW MODULAR GUI modules IMPORTS
 from GUI.config_GUI_module import ConfigurationGUI
 from GUI.sorting_GUI_module import SortingGUI
 from GUI.gui_common import validate_config
 
 # Existing module imports
-from enhanced_config_manager import create_config_manager, ModuleConfig
+from enhanced_config_manager import create_config_manager
 from camera_module import create_camera
-from processing_module import create_processing_worker, processing_worker_thread
-from thread_management_module import create_thread_manager, PieceMessage
-from detector_module import create_detector
+from processing_module import processing_worker_thread
+from Old_versions.detector_module import create_detector
 from sorting_module import create_sorting_manager
 from piece_history_module import create_piece_history
 from thread_management_module import create_thread_manager
@@ -178,7 +174,7 @@ class MetricsTracker(QObject):
             # Get camera statistics
             camera_stats = self.camera.get_statistics()
 
-            # Update GUI
+            # Update GUI modules
             if self.sorting_gui:
                 # Update FPS
                 fps = camera_stats['camera']['fps_actual']
@@ -199,7 +195,7 @@ class MetricsTracker(QObject):
 # ============= Main Application =============
 
 class LegoSorting006(QObject):
-    """Main application controller with modular GUI"""
+    """Main application controller with modular GUI modules"""
 
     def __init__(self, config_path: Optional[str] = None):
         super().__init__()
@@ -217,7 +213,7 @@ class LegoSorting006(QObject):
         # Initialize metrics tracker
         self.metrics_tracker = MetricsTracker()
 
-        # GUI components
+        # GUI modules components
         self.config_window = None
         self.sorting_gui = None
 
@@ -266,13 +262,13 @@ class LegoSorting006(QObject):
         logger.info("Entering configuration state")
 
         try:
-            # Clean up sorting GUI if it exists
+            # Clean up sorting GUI modules if it exists
             if hasattr(self, 'sorting_gui') and self.sorting_gui:
                 self.sorting_gui.hide()
                 self.sorting_gui.deleteLater()
                 self.sorting_gui = None
 
-            # Create configuration GUI
+            # Create configuration GUI modules
             self.config_window = ConfigurationGUI(self.config_manager)
 
             # Connect configuration signals
@@ -309,7 +305,7 @@ class LegoSorting006(QObject):
         """Handle configuration completion
 
         Args:
-            config: Configuration dictionary from GUI
+            config: Configuration dictionary from GUI modules
         """
         logger.info("Configuration completed")
 
@@ -326,7 +322,7 @@ class LegoSorting006(QObject):
             self.preview_timer.stop()
             self.preview_timer = None
 
-        # Update configuration manager with GUI settings
+        # Update configuration manager with GUI modules settings
         for module, settings in config.items():
             self.config_manager.update_module_config(module, settings)
 
@@ -398,10 +394,10 @@ class LegoSorting006(QObject):
             finally:
                 loading.close()
 
-            # Create sorting GUI
+            # Create sorting GUI modules
             self.sorting_gui = SortingGUI(self.config_manager)
 
-            # Connect sorting GUI signals
+            # Connect sorting GUI modules signals
             self.sorting_gui.pause_requested.connect(self.pause_sorting)
             self.sorting_gui.resume_requested.connect(self.resume_sorting)
             self.sorting_gui.stop_requested.connect(self.stop_sorting)
@@ -410,13 +406,13 @@ class LegoSorting006(QObject):
             # Connect metrics signals
             self.metrics_tracker.metrics_updated.connect(self.update_sorting_metrics)
 
-            # Update Arduino status in GUI
+            # Update Arduino status in GUI modules
             if self.modules.get('arduino'):
                 self.sorting_gui.set_arduino_status(True)
             else:
                 self.sorting_gui.set_arduino_status(False)
 
-            # Show sorting GUI
+            # Show sorting GUI modules
             self.sorting_gui.center_window()
             self.sorting_gui.show()
 
@@ -477,7 +473,7 @@ class LegoSorting006(QObject):
 
                         logger.debug(f"Queued piece {piece.id} for processing")
 
-                # Update GUI with detections
+                # Update GUI modules with detections
                 if hasattr(self, 'sorting_gui') and self.sorting_gui:
                     detection_data = {
                         'roi': self.modules['detector'].roi,
@@ -516,7 +512,7 @@ class LegoSorting006(QObject):
 
     @pyqtSlot(object, object)
     def _update_gui_frame(self, frame, detection_data):
-        """Thread-safe GUI update method"""
+        """Thread-safe GUI modules update method"""
         if hasattr(self, 'sorting_gui') and self.sorting_gui:
             self.sorting_gui.update_frame(frame, detection_data)
 
@@ -579,7 +575,7 @@ class LegoSorting006(QObject):
             self.metrics_timer.timeout.connect(self._update_metrics)
             self.metrics_timer.start(1000)  # Update every second
 
-            # Update GUI status
+            # Update GUI modules status
             if self.sorting_gui:
                 self.sorting_gui.status_label.setText("Sorting Active")
                 self.sorting_gui.add_log_message("Sorting started", "INFO")
@@ -627,7 +623,7 @@ class LegoSorting006(QObject):
             self.processed_pieces += 1
             self.metrics_tracker.record_piece_processed()
 
-            # Update sorting GUI
+            # Update sorting GUI modules
             if hasattr(self, 'sorting_gui') and self.sorting_gui:
                 # Update piece display
                 piece_data = {
@@ -656,7 +652,7 @@ class LegoSorting006(QObject):
             logger.error(f"Error handling processed piece: {e}")
 
     def update_sorting_metrics(self, metrics: Dict[str, Any]):
-        """Update sorting GUI with latest metrics
+        """Update sorting GUI modules with latest metrics
 
         Args:
             metrics: Dictionary containing system metrics
@@ -691,7 +687,7 @@ class LegoSorting006(QObject):
             self.processed_pieces += 1
             self.metrics_tracker.record_piece_processed()
 
-            # Emit signal for GUI update (thread-safe)
+            # Emit signal for GUI modules update (thread-safe)
             if hasattr(self, 'sorting_gui'):
                 QMetaObject.invokeMethod(
                     self,
@@ -719,7 +715,7 @@ class LegoSorting006(QObject):
         if hasattr(self, 'metrics_tracker'):
             self.metrics_tracker.record_error()
 
-        # Update GUI with error
+        # Update GUI modules with error
         if hasattr(self, 'sorting_gui'):
             self.sorting_gui.add_log_message(
                 f"Error processing piece {piece_id}: {error}",
@@ -826,7 +822,7 @@ class LegoSorting006(QObject):
             # Define preview callback
             def preview_callback(frame):
                 if self.config_window:
-                    # Use thread-safe GUI update
+                    # Use thread-safe GUI modules update
                     QMetaObject.invokeMethod(
                         self.config_window,
                         "update_preview_frame",
@@ -904,7 +900,7 @@ class LegoSorting006(QObject):
         logger.info(f"  Avg FPS: {stats['average_fps']:.1f}")
         logger.info("=" * 60)
 
-        # Also show in GUI if available
+        # Also show in GUI modules if available
         if hasattr(self, 'sorting_gui') and self.sorting_gui:
             self.sorting_gui.add_log_message(
                 f"Session ended: {stats['pieces_processed']} pieces in {stats['duration']:.1f}s",
@@ -972,7 +968,7 @@ class LegoSorting006(QObject):
 def main():
     """Main entry point"""
     # Parse arguments
-    parser = argparse.ArgumentParser(description="Lego Sorting System v6 - Modular GUI")
+    parser = argparse.ArgumentParser(description="Lego Sorting System v6 - Modular GUI modules")
     parser.add_argument('--config', type=str, help='Path to configuration file')
     parser.add_argument('--calibrate-servo', action='store_true',
                         help='Enable servo calibration mode')
@@ -990,14 +986,14 @@ def main():
     setup_logging(console_level=log_level)
 
     logger.info("=" * 60)
-    logger.info("  Lego Sorting System v6 - Modular GUI Edition")
+    logger.info("  Lego Sorting System v6 - Modular GUI modules Edition")
     logger.info("  Starting application...")
     logger.info("=" * 60)
 
     # Create Qt application
     app = QApplication(sys.argv)
     app.setApplicationName("Lego Sorting System")
-    app.setApplicationDisplayName("Lego Sorting System v6 - Modular GUI")
+    app.setApplicationDisplayName("Lego Sorting System v6 - Modular GUI modules")
 
     # Register custom types for thread-safe signals
     from PyQt5.QtCore import qRegisterMetaType
@@ -1034,7 +1030,7 @@ def main():
         timer.start(500)
 
         logger.info("Application initialized successfully")
-        logger.info("Starting GUI...")
+        logger.info("Starting GUI modules...")
 
         # Run application
         sys.exit(app.exec_())

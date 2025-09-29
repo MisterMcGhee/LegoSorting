@@ -7,7 +7,7 @@ This module is responsible for:
 3. Tracking pieces as they move through different zones
 4. Determining when pieces should be captured or trigger sorting
 
-The module does NOT handle visualization - that's the GUI's job.
+The module does NOT handle visualization - that's the GUI modules's job.
 It only provides data about what it detects.
 """
 
@@ -938,10 +938,10 @@ class ConveyorDetector:
     # ========================================================================
     # DATA OUTPUT SECTION
     # ========================================================================
-    # These methods provide data to other modules (mainly GUI)
+    # These methods provide data to other modules (mainly GUI modules)
     def get_roi_configuration(self) -> Dict[str, Any]:
         """
-        Get static ROI configuration for initial GUI setup.
+        Get static ROI configuration for initial GUI modules setup.
         This should be called once when ROI is set.
 
         Returns:
@@ -1002,7 +1002,7 @@ class ConveyorDetector:
                 pieces_data.append({
                     "id": piece.id,
                     "bbox": (frame_x, frame_y, w, h),  # Now in frame coordinates!
-                    "status": status,  # For GUI color coding
+                    "status": status,  # For GUI modules color coding
                     "fully_in_frame": piece.fully_in_frame,
                     "in_exit_zone": piece.in_exit_zone,
                     "is_priority": piece == self.current_priority_piece,
@@ -1028,7 +1028,7 @@ class ConveyorDetector:
     def get_visualization_data(self) -> Dict[str, Any]:
         """
         Get all detection data for visualization.
-        This is what the GUI uses to draw the detection overlay.
+        This is what the GUI modules uses to draw the detection overlay.
 
         NOTE: This method assumes the caller already holds the lock!
         """

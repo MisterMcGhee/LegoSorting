@@ -1,7 +1,7 @@
 """
 sorting_GUI_module.py - Phase 3.1: Live Camera Feed
 
-This module implements the LEGO Sorting System GUI with live camera feed.
+This module implements the LEGO Sorting System GUI modules with live camera feed.
 Phase 3.1 adds actual camera frame consumption and display.
 
 Phase 3.1 Goals:
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 class SortingGUI(BaseGUIWindow):
     """
-    Main GUI window for active sorting operation
+    Main GUI modules window for active sorting operation
 
     Phase 3.1: Live camera feed implementation
     """
@@ -413,7 +413,7 @@ class SortingGUI(BaseGUIWindow):
     def set_camera(self, camera):
         """Set camera instance for live feed"""
         self.camera = camera
-        logger.info("Camera instance set for sorting GUI")
+        logger.info("Camera instance set for sorting GUI modules")
 
     def register_camera_consumer(self, camera):
         """Register as camera consumer during initialization (before capture starts)"""
@@ -422,7 +422,7 @@ class SortingGUI(BaseGUIWindow):
             return False
 
         try:
-            logger.info("Registering sorting GUI as camera consumer...")
+            logger.info("Registering sorting GUI modules as camera consumer...")
 
             # Debug: Check for any OpenCV windows before registration
             import cv2
@@ -432,24 +432,24 @@ class SortingGUI(BaseGUIWindow):
                 name="sorting_gui",
                 callback=self._camera_frame_callback,
                 processing_type="async",
-                priority=20  # High priority for GUI display
+                priority=20  # High priority for GUI modules display
             )
 
             if success:
                 self.camera = camera
                 self.camera_active = True
-                logger.info("Sorting GUI registered as camera consumer successfully")
+                logger.info("Sorting GUI modules registered as camera consumer successfully")
 
                 # Debug: Check for OpenCV windows after registration
                 logger.info(f"OpenCV windows after consumer registration: {cv2.getWindowImageRect('any_window') if hasattr(cv2, 'getWindowImageRect') else 'Cannot check'}")
 
                 return True
             else:
-                logger.error("Failed to register sorting GUI as camera consumer")
+                logger.error("Failed to register sorting GUI modules as camera consumer")
                 return False
 
         except Exception as e:
-            logger.error(f"Error registering sorting GUI as camera consumer: {e}", exc_info=True)
+            logger.error(f"Error registering sorting GUI modules as camera consumer: {e}", exc_info=True)
             return False
 
     def activate_camera_display(self):
@@ -483,7 +483,7 @@ class SortingGUI(BaseGUIWindow):
                 self.camera_status_label.setText("Camera: Stopped")
                 self.camera_status_label.setStyleSheet("color: #95A5A6; font-weight: bold;")
                 self.video_widget.setText("Camera Feed Stopped")
-                logger.info("Camera feed stopped for sorting GUI")
+                logger.info("Camera feed stopped for sorting GUI modules")
             except Exception as e:
                 logger.error(f"Error stopping camera feed: {e}")
 
@@ -491,7 +491,7 @@ class SortingGUI(BaseGUIWindow):
         """
         Callback function for camera frames.
 
-        This runs in a camera thread, so we emit a signal to update GUI in main thread.
+        This runs in a camera thread, so we emit a signal to update GUI modules in main thread.
         """
         try:
             # Debug: Log first frame callback
@@ -515,7 +515,7 @@ class SortingGUI(BaseGUIWindow):
 
                 # Log FPS periodically
                 if self.frame_count % 30 == 0:
-                    logger.info(f"GUI camera feed FPS: {fps:.1f}")
+                    logger.info(f"GUI modules camera feed FPS: {fps:.1f}")
 
                 # Emit signal to update FPS in main thread
                 QMetaObject.invokeMethod(
@@ -534,7 +534,7 @@ class SortingGUI(BaseGUIWindow):
     @pyqtSlot(np.ndarray)
     def update_camera_display(self, frame):
         """
-        Update camera display in main GUI thread.
+        Update camera display in main GUI modules thread.
 
         This slot receives frames via signal and updates the VideoWidget.
         """
@@ -606,7 +606,7 @@ class SortingGUI(BaseGUIWindow):
                 }
             """)
             self.pause_requested.emit()
-            logger.info("Pause requested from GUI")
+            logger.info("Pause requested from GUI modules")
         else:
             self.pause_button.setText("⏸️ Pause Sorting")
             self.status_label.setText("Status: Sorting Active")
@@ -622,7 +622,7 @@ class SortingGUI(BaseGUIWindow):
                 }
             """)
             self.resume_requested.emit()
-            logger.info("Resume requested from GUI")
+            logger.info("Resume requested from GUI modules")
 
     def stop_sorting(self):
         """Stop sorting operation"""
@@ -635,7 +635,7 @@ class SortingGUI(BaseGUIWindow):
         )
 
         if reply == QMessageBox.Yes:
-            logger.info("Stop sorting requested from GUI")
+            logger.info("Stop sorting requested from GUI modules")
             self.stop_requested.emit()
 
     def open_settings(self):
@@ -649,7 +649,7 @@ class SortingGUI(BaseGUIWindow):
         )
 
         if reply == QMessageBox.Yes:
-            logger.info("Settings requested from GUI")
+            logger.info("Settings requested from GUI modules")
             self.settings_requested.emit()
 
     def closeEvent(self, event):

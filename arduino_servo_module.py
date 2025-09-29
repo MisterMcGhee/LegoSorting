@@ -1,6 +1,6 @@
 """
 arduino_servo_module.py - SIMPLIFIED VERSION
-Arduino-based servo control that loads saved bin positions from config GUI
+Arduino-based servo control that loads saved bin positions from config GUI modules
 """
 
 import time
@@ -41,7 +41,7 @@ class ArduinoServoModule:
         if config_manager:
             self.config_manager = config_manager
 
-            # Get configurations - read from arduino_servo config where GUI saves everything
+            # Get configurations - read from arduino_servo config where GUI modules saves everything
             arduino_config = config_manager.get_module_config(ModuleConfig.ARDUINO_SERVO.value)
             sorting_config = config_manager.get_module_config(ModuleConfig.SORTING.value)
 
@@ -63,15 +63,15 @@ class ArduinoServoModule:
             self.max_bins = sorting_config["max_bins"]
             self.overflow_bin = sorting_config["overflow_bin"]
 
-            # Load saved bin positions from config GUI
+            # Load saved bin positions from config GUI modules
             saved_positions = arduino_config.get("bin_positions", {})
             if saved_positions:
                 self.bin_positions = {str(k): float(v) for k, v in saved_positions.items()}
                 logger.info(f"Loaded saved bin positions: {self.bin_positions}")
                 print(f"Using saved bin positions: {self.bin_positions}")
             else:
-                logger.warning("No bin positions found in config - positions must be set via config GUI")
-                print("WARNING: No bin positions configured. Please set positions in config GUI.")
+                logger.warning("No bin positions found in config - positions must be set via config GUI modules")
+                print("WARNING: No bin positions configured. Please set positions in config GUI modules.")
         else:
             self.config_manager = None
             self.max_bins = 9
@@ -92,7 +92,7 @@ class ArduinoServoModule:
             self._connect_to_arduino()
 
     def set_bin_positions(self, positions_dict):
-        """Set specific bin positions (used by GUI)
+        """Set specific bin positions (used by GUI modules)
 
         Args:
             positions_dict: Dictionary of {bin_number: angle} pairs

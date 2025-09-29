@@ -2,7 +2,7 @@
 camera_module.py - Unified camera module with singleton pattern and frame distribution
 
 This module provides a single-stream, multi-consumer camera system for applications
-that need to share camera frames between multiple components (GUI, processing, recording, etc.)
+that need to share camera frames between multiple components (GUI modules, processing, recording, etc.)
 without the overhead and complexity of multiple video streams.
 
 Architecture:
@@ -611,6 +611,7 @@ class CameraManager:
                           processing_type: str = "async", priority: int = 0) -> bool:
         """
         Register a consumer to receive camera frames.
+        A facade layer so the program as a while only needed to interact with the cameraManager.
 
         Args:
             name: Unique identifier for the consumer
@@ -624,15 +625,18 @@ class CameraManager:
         return self.distributor.register_consumer(name, callback, processing_type, priority)
 
     def unregister_consumer(self, name: str) -> bool:
-        """Remove a consumer from receiving frames."""
+        """Remove a consumer from receiving frames.
+        A facade layer so the program as a while only needed to interact with the cameraManager."""
         return self.distributor.unregister_consumer(name)
 
     def pause_consumer(self, name: str):
-        """Temporarily pause a consumer."""
+        """Temporarily pause a consumer.
+        A facade layer so the program as a while only needed to interact with the cameraManager."""
         self.distributor.pause_consumer(name)
 
     def resume_consumer(self, name: str):
-        """Resume a paused consumer."""
+        """Resume a paused consumer.
+        A facade layer so the program as a while only needed to interact with the cameraManager."""
         self.distributor.resume_consumer(name)
 
     def get_frame(self) -> Optional[np.ndarray]:

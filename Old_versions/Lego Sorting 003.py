@@ -16,7 +16,7 @@ import threading
 
 # Import modules
 from camera_module import create_camera
-from detector_module import create_detector
+from Old_versions.detector_module import create_detector
 from sorting_module import create_sorting_manager
 from config_management_module import create_config_manager
 from api_module import create_api_client

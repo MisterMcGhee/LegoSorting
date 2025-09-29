@@ -8,7 +8,7 @@ MAIN PURPOSE: Replace the simple config manager with a robust system that:
 - Validates all configuration values
 - Provides guaranteed defaults for every setting
 - Handles version migrations automatically
-- Supports category hierarchy parsing for the GUI
+- Supports category hierarchy parsing for the GUI modules
 """
 
 import json
@@ -68,7 +68,45 @@ class ConfigSchema:
                 "min_aspect_ratio": 0.3,
                 "max_aspect_ratio": 3.0,
                 "edge_margin": 10,
-                "debug_mode": False
+                "debug_mode": False,
+
+                # Background subtraction parameters
+                "bg_history": 500,
+                "bg_threshold": 800.0,
+                "learn_rate": 0.005,
+
+                # Noise reduction parameters
+                "gaussian_blur_size": 7,
+                "morph_kernel_size": 5,
+
+                # Quality filtering parameters
+                "min_contour_points": 5,
+
+                # piece_tracker module values
+                "match_distance_threshold": 100.0,
+                "match_x_weight": 2.0,
+                "match_y_weight": 1.0,
+                "min_updates_for_stability": 3,
+                "piece_timeout_seconds": 2.0,
+                "fully_in_frame_margin": 20,
+                "min_velocity_samples": 2,
+                "max_velocity_change": 50.0,
+
+                # ROI zone percentages
+                "entry_zone_percent": 0.15,
+                "exit_zone_percent": 0.15,
+                "zone_transition_debounce": 0.1,
+
+                # Capture coordinator defaults
+                "min_stability_updates": 5,
+                "capture_cooldown_seconds": 0.5,
+                "max_concurrent_processing": 3,
+                "crop_padding": 20,
+                "id_label_height": 40,
+                "id_font_scale": 1.5,
+                "id_font_thickness": 2,
+                "save_captured_images": True,
+                "capture_directory": "LegoPictures"
             },
 
             ModuleConfig.DETECTOR_ROI.value: {
@@ -87,7 +125,7 @@ class ConfigSchema:
                 "max_bins": 9,
                 "overflow_bin": 0,
                 "confidence_threshold": 0.7,
-                "pre_assignments": {},  # For GUI pre-assignment feature
+                "pre_assignments": {},  # For GUI modules pre-assignment feature
                 "max_pieces_per_bin": 50,  # Maximum pieces before bin is full
                 "bin_warning_threshold": 0.8  # Warn at 80% capacity
             },
@@ -324,7 +362,7 @@ class EnhancedConfigManager:
     - Guaranteed defaults for every parameter
     - Thread-safe operations
     - Automatic version migration
-    - Category hierarchy parsing for GUI
+    - Category hierarchy parsing for GUI modules
     """
 
     def __init__(self, config_path: str = "config.json", auto_migrate: bool = True):
@@ -383,7 +421,7 @@ class EnhancedConfigManager:
         """
         Parse the Lego categories CSV file into a hierarchical structure
 
-        Used by GUI to populate category dropdowns and by sorting to understand relationships.
+        Used by GUI modules to populate category dropdowns and by sorting to understand relationships.
         """
         with self._category_hierarchy_lock:
             # Return cached version if available
@@ -442,7 +480,7 @@ class EnhancedConfigManager:
                             if tertiary:
                                 categories["secondary_to_tertiary"][key].add(tertiary)
 
-                # Convert sets to sorted lists for GUI use
+                # Convert sets to sorted lists for GUI modules use
                 categories["primary"] = sorted(list(categories["primary"]))
                 for primary in categories["primary_to_secondary"]:
                     categories["primary_to_secondary"][primary] = sorted(
@@ -473,7 +511,7 @@ class EnhancedConfigManager:
                                     secondary_category: Optional[str] = None) -> List[str]:
         """
         Get categories available for a specific sorting strategy
-        Used by GUI to populate category selection dropdowns.
+        Used by GUI modules to populate category selection dropdowns.
         """
         hierarchy = self.get_category_hierarchy()
 
