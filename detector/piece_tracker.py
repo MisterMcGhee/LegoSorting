@@ -27,7 +27,7 @@ import time
 import logging
 import numpy as np
 from typing import List, Optional, Tuple, Dict, Any
-from data_models import Detection, TrackedPiece, RegionOfInterest, create_tracked_piece_from_detection
+from detector.data_models import Detection, TrackedPiece, RegionOfInterest, create_tracked_piece_from_detection
 from enhanced_config_manager import ModuleConfig
 
 # Set up module logger
@@ -161,6 +161,12 @@ class PieceTracker:
         self._remove_inactive_pieces(current_time)
 
         logger.debug(f"Tracking update complete: {len(self.tracked_pieces)} active pieces")
+
+        # 🔍 DIAGNOSTIC: Check internal state before returning
+        if self.tracked_pieces:
+            logger.warning(
+                f"🔍 TRACKER INTERNAL - Piece {self.tracked_pieces[0].id} center: {self.tracked_pieces[0].center}")
+
         return self.tracked_pieces.copy()
 
     # ========================================================================

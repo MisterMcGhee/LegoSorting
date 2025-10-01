@@ -37,8 +37,8 @@ import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
-from data_models import TrackedPiece
-from zone_manager import ZoneManager
+from detector.data_models import TrackedPiece
+from detector.zone_manager import ZoneManager
 from enhanced_config_manager import ModuleConfig
 
 # Set up module logger

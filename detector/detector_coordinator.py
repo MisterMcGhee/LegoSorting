@@ -1,33 +1,38 @@
 """
-detector_coordinator.py - Orchestrates vision processing and piece tracking modules
+detector_coordinator.py - Orchestrates the complete computer vision pipeline
 
-This module serves as the orchestration layer that coordinates the modular detection pipeline.
-It replaces the original monolithic detector_module.py with a clean separation of concerns:
+This module coordinates all detection subsystems and manages the critical
+coordinate system conversions between ROI space and frame space.
 
-- Vision Processor: Stateless computer vision (detections in ROI coordinates)
-- Piece Tracker: Stateful object tracking (pieces in ROI coordinates)
-- Detector Coordinator: Interface layer and coordinate system management
+Key responsibilities:
+- Initialize and coordinate vision_processor, piece_tracker, and zone_manager
+- Manage ROI configuration
+- Convert coordinates from ROI to frame reference
+- Provide unified interface to consumer modules
+- Aggregate performance statistics
 
-KEY COORDINATE SYSTEM RESPONSIBILITY:
-The coordinator handles the critical transition from ROI coordinates (used internally
-by vision and tracking modules) to frame coordinates (required by GUI and consumers).
-This design keeps the underlying modules simple while providing the interface that
-downstream modules expect.
+CRITICAL ARCHITECTURAL NOTES:
+- Internal modules (vision_processor, piece_tracker, zone_manager) work in ROI coordinates
+- Consumer modules (GUI, capture_controller) need frame coordinates
+- This coordinator performs all coordinate conversions
 
-Architecture Benefits:
-- Clean separation: Each module has a single, focused responsibility
-- Maintainable: Vision and tracking algorithms can evolve independently
-- Testable: Each component can be tested in isolation
-- Flexible: Easy to swap different vision or tracking algorithms
+The pipeline flow:
+1. vision_processor: frame → detections (ROI coords)
+2. piece_tracker: detections → tracked_pieces (ROI coords)
+3. zone_manager: tracked_pieces → tracked_pieces with zone flags (ROI coords)
+4. coordinator: tracked_pieces (ROI coords) → formatted results (frame coords)
 """
 
 import time
 import logging
-import cv2
-from typing import List, Dict, Any, Optional, Tuple
-from data_models import RegionOfInterest
-from vision_processor import create_vision_processor
-from piece_tracker import create_piece_tracker
+import numpy as np
+from typing import Dict, Any, List, Tuple, Optional
+from dataclasses import asdict
+
+from detector.vision_processor import VisionProcessor
+from detector.piece_tracker import PieceTracker
+from detector.zone_manager import ZoneManager
+from detector.data_models import RegionOfInterest, TrackedPiece
 from enhanced_config_manager import ModuleConfig
 
 # Set up module logger
@@ -40,99 +45,61 @@ logger = logging.getLogger(__name__)
 
 class DetectorCoordinator:
     """
-    Orchestrates the modular detection pipeline and manages coordinate systems.
+    Coordinates the complete detection pipeline and manages coordinate systems.
 
-    This coordinator replaces the monolithic detector with a clean architecture
-    that separates computer vision, object tracking, and interface management.
-
-    CRITICAL COORDINATE SYSTEM MANAGEMENT:
-    - Vision processor works in ROI coordinates (0,0 = top-left of ROI)
-    - Piece tracker works in ROI coordinates (same as its input detections)
-    - GUI and consumers need frame coordinates (0,0 = top-left of camera frame)
-    - Coordinator converts ROI coordinates → frame coordinates for all output
-
-    This separation allows each module to work in its most natural coordinate
-    space while providing the interface that consumers expect.
+    This class is the single entry point for frame processing. It orchestrates
+    all subsystems and ensures proper data flow and coordinate conversion.
     """
 
-    def __init__(self, config_manager):
+    def __init__(self, config_manager, zone_manager: Optional[ZoneManager] = None):
         """
-        Initialize the detector coordinator with modular components.
+        Initialize the detector coordinator with all subsystems.
 
         Args:
             config_manager: Enhanced config manager instance (required)
-
-        Raises:
-            ValueError: If config_manager is None or invalid
+            zone_manager: ZoneManager instance (optional, will be created if None)
         """
-        if not config_manager:
-            raise ValueError("DetectorCoordinator requires a valid config_manager")
-
         logger.info("Initializing DetectorCoordinator")
 
+        # Store configuration manager
         self.config_manager = config_manager
-        self._roi = None  # Will be loaded from configuration
-        self._roi_offset_x = 0  # For coordinate conversion
-        self._roi_offset_y = 0  # For coordinate conversion
 
-        # Initialize sub-modules
-        self.vision_processor = create_vision_processor(config_manager)
-        self.piece_tracker = create_piece_tracker(config_manager)
+        # Initialize subsystems
+        self.vision_processor = VisionProcessor(config_manager)
+        self.piece_tracker = PieceTracker(config_manager)
+
+        # Zone manager can be injected or created
+        if zone_manager is None:
+            from detector.zone_manager import create_zone_manager
+            self.zone_manager = create_zone_manager(config_manager)
+            logger.info("Created new ZoneManager instance")
+        else:
+            self.zone_manager = zone_manager
+            logger.info("Using provided ZoneManager instance")
+
+        # ROI configuration
+        self._roi: Optional[RegionOfInterest] = None
+        self._roi_offset_x = 0
+        self._roi_offset_y = 0
 
         # Performance tracking
         self.frame_count = 0
         self.start_time = time.time()
-        self.last_fps_update = time.time()
         self.fps = 0.0
-
-        # Load ROI configuration and set up modules
-        self._load_roi_configuration()
 
         logger.info("DetectorCoordinator initialized successfully")
 
     # ========================================================================
-    # CONFIGURATION AND SETUP
+    # ROI CONFIGURATION
     # ========================================================================
 
-    def _load_roi_configuration(self):
+    def set_roi_from_sample_frame(self, frame: np.ndarray,
+                                  roi_coordinates: Tuple[int, int, int, int]):
         """
-        Load ROI configuration and initialize submodules.
+        Configure ROI and initialize all subsystems with a sample frame.
 
-        The ROI defines the detection area and is used by both vision processing
-        and piece tracking. It also provides the coordinate system offset needed
-        for converting internal coordinates to frame coordinates.
-
-        Raises:
-            Exception: If ROI configuration cannot be loaded
-        """
-        # Get ROI configuration from unified system
-        roi_config = self.config_manager.get_module_config(ModuleConfig.DETECTOR_ROI.value)
-
-        # Extract ROI parameters
-        x = roi_config.get("x", 0)
-        y = roi_config.get("y", 0)
-        width = roi_config.get("w", 100)
-        height = roi_config.get("h", 100)
-
-        # Create ROI object
-        self._roi = RegionOfInterest(x=x, y=y, width=width, height=height)
-
-        # Store offset for coordinate conversions
-        self._roi_offset_x = x
-        self._roi_offset_y = y
-
-        # Configure submodules with ROI
-        self.piece_tracker.set_roi(self._roi)
-
-        logger.info(f"ROI configured: {self._roi.to_tuple()}")
-        logger.info(f"Coordinate conversion offset: ({self._roi_offset_x}, {self._roi_offset_y})")
-
-    def set_roi_from_sample_frame(self, frame, roi_coordinates: Tuple[int, int, int, int]):
-        """
-        Set ROI configuration using a sample frame for background model training.
-
-        This method allows dynamic ROI setup (e.g., from calibration GUI) and
-        ensures the vision processor gets a proper background model.
+        This method allows dynamic ROI setup and ensures all subsystems
+        are properly configured with the ROI boundaries.
 
         Args:
             frame: Sample frame for training background subtraction
@@ -154,29 +121,32 @@ class DetectorCoordinator:
         self._roi_offset_x = x
         self._roi_offset_y = y
 
-        # Configure submodules with new ROI
+        # Configure all subsystems with new ROI
         self.vision_processor.set_roi(self._roi, frame)
         self.piece_tracker.set_roi(self._roi)
+        self.zone_manager.set_roi(self._roi)
 
-        logger.info(f"ROI updated to {roi_coordinates} with sample frame training")
+        logger.info(f"ROI configured: {roi_coordinates}")
+        logger.info(f"All subsystems initialized with ROI")
 
     # ========================================================================
     # MAIN PROCESSING PIPELINE
     # ========================================================================
 
-    def process_frame_for_consumer(self, frame) -> Dict[str, Any]:
+    def process_frame_for_consumer(self, frame: np.ndarray) -> Dict[str, Any]:
         """
         Process a camera frame through the complete detection pipeline.
 
         This is the main entry point for frame processing. It coordinates
-        vision processing and piece tracking, then formats results for
-        consumer modules (GUI, capture controller, etc.).
+        vision processing, piece tracking, zone management, and coordinate conversion.
 
-        COORDINATE SYSTEM FLOW:
+        PIPELINE FLOW:
         1. Frame comes in camera/frame coordinates
-        2. Vision processor extracts ROI and works in ROI coordinates
-        3. Piece tracker receives detections in ROI coordinates
-        4. Coordinator converts tracked pieces to frame coordinates for output
+        2. vision_processor: extracts ROI, returns detections in ROI coordinates
+        3. piece_tracker: matches and tracks pieces in ROI coordinates
+        4. zone_manager: updates zone flags on pieces (still ROI coordinates)
+        5. coordinator: converts pieces to frame coordinates
+        6. Returns formatted results ready for consumers
 
         Args:
             frame: Camera frame as numpy array
@@ -184,7 +154,7 @@ class DetectorCoordinator:
         Returns:
             Dictionary with tracking results in frame coordinates:
             {
-                "tracked_pieces": [list of piece dictionaries],
+                "tracked_pieces": [list of complete piece dictionaries],
                 "statistics": {performance and count metrics},
                 "roi_info": {ROI configuration for visualization},
                 "error": None or error message
@@ -203,7 +173,10 @@ class DetectorCoordinator:
             # Step 2: Object tracking (maintains pieces in ROI coordinates)
             tracked_pieces = self.piece_tracker.update_tracking(detections)
 
-            # Step 3: Convert to frame coordinates and format for consumers
+            # Step 3: Zone status management (updates zone flags, still ROI coordinates)
+            tracked_pieces = self.zone_manager.update_piece_zones(tracked_pieces)
+
+            # Step 4: Convert to frame coordinates and format for consumers
             formatted_results = self._format_results_for_consumers(tracked_pieces, detections)
 
             logger.debug(f"Processed frame: {len(detections)} detections, "
@@ -212,7 +185,7 @@ class DetectorCoordinator:
             return formatted_results
 
         except Exception as e:
-            logger.error(f"Error in detection pipeline: {e}")
+            logger.error(f"Error in detection pipeline: {e}", exc_info=True)
             return {
                 "error": f"Detection pipeline error: {str(e)}",
                 "tracked_pieces": [],
@@ -228,27 +201,14 @@ class DetectorCoordinator:
         """
         Convert bounding box from ROI coordinates to frame coordinates.
 
-        CRITICAL CONVERSION FUNCTION:
-        This handles the coordinate system transition that allows internal modules
-        to work in ROI space while providing frame coordinates to consumers.
-
-        ROI coordinates: (0,0) = top-left corner of ROI
-        Frame coordinates: (0,0) = top-left corner of camera frame
-
         Args:
-            roi_bbox: Bounding box in ROI coordinates (x, y, width, height)
+            roi_bbox: Bounding box in ROI coordinates (x, y, w, h)
 
         Returns:
-            Bounding box in frame coordinates (x, y, width, height)
+            Bounding box in frame coordinates (x, y, w, h)
         """
         x, y, w, h = roi_bbox
-
-        # Add ROI offset to position coordinates
-        # Width and height remain unchanged
-        frame_x = x + self._roi_offset_x
-        frame_y = y + self._roi_offset_y
-
-        return (frame_x, frame_y, w, h)
+        return (x + self._roi_offset_x, y + self._roi_offset_y, w, h)
 
     def _convert_roi_center_to_frame(self, roi_center: Tuple[float, float]) -> Tuple[float, float]:
         """
@@ -261,30 +221,62 @@ class DetectorCoordinator:
             Center point in frame coordinates (x, y)
         """
         x, y = roi_center
+        return (x + self._roi_offset_x, y + self._roi_offset_y)
 
-        # Add ROI offset to center coordinates
-        frame_x = x + self._roi_offset_x
-        frame_y = y + self._roi_offset_y
-
-        return (frame_x, frame_y)
-
-    # ========================================================================
-    # DATA FORMATTING FOR CONSUMERS
-    # ========================================================================
-
-    def _format_results_for_consumers(self, tracked_pieces, detections) -> Dict[str, Any]:
+    def _convert_tracked_piece_to_frame_coords(self, piece: TrackedPiece) -> TrackedPiece:
         """
-        Format tracking results for consumption by GUI and other modules.
+        Convert a TrackedPiece from ROI coordinates to frame coordinates.
 
-        This method performs the critical coordinate conversion and creates
-        the data structures that consumer modules expect.
+        This creates a new TrackedPiece with updated coordinate fields.
+        The TrackedPiece.__post_init__() will automatically calculate
+        center, left_edge, right_edge, and area from the frame_bbox.
 
-        OUTPUT FORMAT FOR GUI:
-        Each piece becomes a dictionary with:
-        - id: Unique piece identifier
-        - bbox: Bounding box in FRAME coordinates for drawing
-        - status: String for color-coding visualization
-        - center: Center point in FRAME coordinates
+        Args:
+            piece: TrackedPiece in ROI coordinates
+
+        Returns:
+            New TrackedPiece with frame coordinates
+        """
+        # Convert bbox to frame coordinates
+        frame_bbox = self._convert_roi_to_frame_coordinates(piece.bbox)
+
+        # Create a new TrackedPiece with frame coordinates
+        # Note: contour is preserved as-is (doesn't need coordinate conversion)
+        # The __post_init__() will calculate center, edges, and area automatically
+        frame_piece = TrackedPiece(
+            id=piece.id,
+            bbox=frame_bbox,
+            contour=piece.contour,  # Required field - preserve original contour
+            first_detected=piece.first_detected,
+            last_updated=piece.last_updated,
+            captured=piece.captured,
+            being_processed=piece.being_processed,
+            processing_start_time=piece.processing_start_time,
+            fully_in_frame=piece.fully_in_frame,
+            in_entry_zone=piece.in_entry_zone,
+            in_valid_zone=piece.in_valid_zone,
+            in_exit_zone=piece.in_exit_zone,
+            exit_zone_entry_time=piece.exit_zone_entry_time,
+            update_count=piece.update_count,
+            last_matched_confidence=piece.last_matched_confidence,
+            velocity=piece.velocity,
+            trajectory=piece.trajectory,
+            predicted_exit_time=piece.predicted_exit_time
+        )
+
+        return frame_piece
+
+    # ========================================================================
+    # RESULT FORMATTING
+    # ========================================================================
+
+    def _format_results_for_consumers(self, tracked_pieces: List[TrackedPiece],
+                                      detections: List) -> Dict[str, Any]:
+        """
+        Format tracking results for consumer modules.
+
+        This converts TrackedPiece objects (in ROI coordinates) to complete
+        dictionaries (in frame coordinates) that include ALL piece information.
 
         Args:
             tracked_pieces: List of TrackedPiece objects (ROI coordinates)
@@ -293,30 +285,22 @@ class DetectorCoordinator:
         Returns:
             Formatted dictionary with frame coordinate data
         """
-        # Convert tracked pieces to consumer format
+        # Convert tracked pieces to frame coordinates and then to dictionaries
         formatted_pieces = []
+
         for piece in tracked_pieces:
-            # Convert coordinates from ROI to frame space
-            frame_bbox = self._convert_roi_to_frame_coordinates(piece.bbox)
-            frame_center = self._convert_roi_center_to_frame(piece.center)
+            # Convert to frame coordinates
+            frame_piece = self._convert_tracked_piece_to_frame_coords(piece)
 
-            # Determine piece status for GUI color coding
-            status = self._determine_piece_status(piece)
+            # Convert to dictionary with all fields
+            piece_dict = asdict(frame_piece)
 
-            # Create formatted piece data
-            piece_data = {
-                "id": piece.id,
-                "bbox": frame_bbox,  # FRAME coordinates for GUI drawing
-                "center": frame_center,  # FRAME coordinates for GUI drawing
-                "status": status,  # For color-coding visualization
-                "fully_in_frame": piece.fully_in_frame,
-                "update_count": piece.update_count,
-                "velocity": piece.velocity  # For debugging/monitoring
-            }
+            # Add computed status for visualization
+            piece_dict["status"] = self._determine_piece_status(frame_piece)
 
-            formatted_pieces.append(piece_data)
+            formatted_pieces.append(piece_dict)
 
-        # Aggregate statistics from both modules
+        # Aggregate statistics from all modules
         statistics = self._aggregate_performance_statistics(tracked_pieces, detections)
 
         # Include ROI information for visualization overlay
@@ -329,57 +313,44 @@ class DetectorCoordinator:
             "error": None
         }
 
-    def _determine_piece_status(self, piece) -> str:
+    def _determine_piece_status(self, piece: TrackedPiece) -> str:
         """
         Determine the status string for GUI color coding.
 
-        Status affects how the GUI draws bounding boxes:
-        - "detected": Basic detection (neutral color)
-        - "processing": Image captured, being analyzed (yellow/orange)
-        - "identified": Analysis complete (green)
-        - "stable": Tracked reliably but not yet captured (blue)
-
         Args:
-            piece: TrackedPiece object
+            piece: TrackedPiece to evaluate
 
         Returns:
-            Status string for GUI consumption
+            Status string: "detected", "stable", "processing", or "identified"
         """
         if piece.being_processed:
             return "processing"
         elif piece.captured:
             return "identified"
-        elif piece.fully_in_frame and piece.update_count >= 3:
+        elif piece.update_count >= 5:  # Stable threshold
             return "stable"
         else:
             return "detected"
 
     # ========================================================================
-    # PERFORMANCE MONITORING
+    # PERFORMANCE METRICS
     # ========================================================================
 
     def _update_performance_metrics(self):
-        """
-        Update FPS and performance tracking for monitoring.
-
-        This provides unified performance metrics across the entire
-        detection pipeline for debugging and optimization.
-        """
+        """Update FPS and frame count metrics."""
         self.frame_count += 1
-        current_time = time.time()
 
-        # Update FPS every second
-        if current_time - self.last_fps_update >= 1.0:
+        # Calculate FPS every 30 frames
+        if self.frame_count % 30 == 0:
+            current_time = time.time()
             elapsed = current_time - self.start_time
-            self.fps = self.frame_count / elapsed if elapsed > 0 else 0
-            self.last_fps_update = current_time
+            if elapsed > 0:
+                self.fps = self.frame_count / elapsed
 
-    def _aggregate_performance_statistics(self, tracked_pieces, detections) -> Dict[str, Any]:
+    def _aggregate_performance_statistics(self, tracked_pieces: List[TrackedPiece],
+                                          detections: List) -> Dict[str, Any]:
         """
-        Aggregate performance statistics from vision and tracking modules.
-
-        Combines metrics from both submodules into unified statistics
-        for monitoring system performance and debugging issues.
+        Combine metrics from all subsystems into unified statistics.
 
         Args:
             tracked_pieces: Current tracked pieces
@@ -445,73 +416,52 @@ class DetectorCoordinator:
         """
         Get ROI information for visualization overlay.
 
-        The GUI needs ROI boundaries to draw the detection area overlay.
-        ROI coordinates are already in frame coordinates.
-
         Returns:
-            Dictionary with ROI configuration data
+            Dictionary with ROI configuration
         """
-        if not self._roi:
+        if self._roi is None:
             return {"configured": False}
 
         return {
             "configured": True,
-            "roi": self._roi.to_tuple(),  # Already in frame coordinates
-            "offset": (self._roi_offset_x, self._roi_offset_y)
+            "roi": self._roi.to_tuple()
         }
 
     # ========================================================================
-    # DATA ACCESS METHODS
+    # DIRECT ACCESS METHODS
     # ========================================================================
 
-    def get_tracked_pieces(self) -> List:
+    def get_tracked_pieces(self) -> List[TrackedPiece]:
         """
-        Get current tracked pieces in frame coordinates.
+        Get currently tracked pieces in frame coordinates.
 
-        This provides direct access to tracked pieces for modules that
-        need to work with piece data outside the main processing loop.
+        This is used by modules that need direct access to TrackedPiece objects
+        (like capture_controller) rather than formatted dictionaries.
+
+        Note: Zone flags are already updated by process_frame_for_consumer(),
+        so we don't need to update them again here.
 
         Returns:
-            List of TrackedPiece objects with frame coordinate bboxes
+            List of TrackedPiece objects in frame coordinates
         """
+        # Get pieces from tracker (ROI coordinates)
+        # Zone flags are already up-to-date from the main pipeline
         roi_pieces = self.piece_tracker.get_active_pieces()
 
         # Convert to frame coordinates
         frame_pieces = []
         for piece in roi_pieces:
-            # Create copy with frame coordinates
-            frame_piece = piece
-            frame_piece.bbox = self._convert_roi_to_frame_coordinates(piece.bbox)
-            frame_piece.center = self._convert_roi_center_to_frame(piece.center)
+            frame_piece = self._convert_tracked_piece_to_frame_coords(piece)
             frame_pieces.append(frame_piece)
 
         return frame_pieces
 
-    def get_piece_by_id(self, piece_id: int):
+    def get_fully_visible_pieces(self) -> List[TrackedPiece]:
         """
-        Get a specific tracked piece by ID with frame coordinates.
+        Get only fully visible pieces in frame coordinates.
 
-        Args:
-            piece_id: Unique ID of piece to retrieve
-
-        Returns:
-            TrackedPiece with frame coordinates or None if not found
-        """
-        roi_piece = self.piece_tracker.get_piece_by_id(piece_id)
-
-        if roi_piece:
-            # Convert to frame coordinates
-            roi_piece.bbox = self._convert_roi_to_frame_coordinates(roi_piece.bbox)
-            roi_piece.center = self._convert_roi_center_to_frame(roi_piece.center)
-
-        return roi_piece
-
-    def get_fully_visible_pieces(self) -> List:
-        """
-        Get pieces that are fully visible, with frame coordinates.
-
-        This is used by capture controller and other modules that need
-        to work with complete, stable pieces.
+        Note: Zone flags are already updated by process_frame_for_consumer(),
+        so we don't need to update them again here.
 
         Returns:
             List of fully visible TrackedPiece objects in frame coordinates
@@ -521,9 +471,8 @@ class DetectorCoordinator:
         # Convert to frame coordinates
         frame_pieces = []
         for piece in roi_pieces:
-            piece.bbox = self._convert_roi_to_frame_coordinates(piece.bbox)
-            piece.center = self._convert_roi_center_to_frame(piece.center)
-            frame_pieces.append(piece)
+            frame_piece = self._convert_tracked_piece_to_frame_coords(piece)
+            frame_pieces.append(frame_piece)
 
         return frame_pieces
 
@@ -550,7 +499,7 @@ class DetectorCoordinator:
 
         logger.info("Detection system reset complete")
 
-    def update_background_model(self, empty_frame):
+    def update_background_model(self, empty_frame: np.ndarray):
         """
         Update the vision processor background model.
 
@@ -576,7 +525,8 @@ class DetectorCoordinator:
         return {
             "roi_configured": self._roi is not None,
             "vision_processor_ready": vision_stats.get("roi_set", False),
-            "piece_tracker_ready": True,  # Tracker is always ready once initialized
+            "piece_tracker_ready": True,
+            "zone_manager_ready": self.zone_manager.get_zone_configuration() is not None,
             "current_piece_count": tracking_stats.get("total_pieces", 0),
             "system_fps": self.fps,
             "frames_processed": self.frame_count,
@@ -607,7 +557,7 @@ class DetectorCoordinator:
 # FACTORY FUNCTION
 # ============================================================================
 
-def create_detector_coordinator(config_manager) -> DetectorCoordinator:
+def create_detector_coordinator(config_manager, zone_manager: Optional[ZoneManager] = None) -> DetectorCoordinator:
     """
     Create a DetectorCoordinator instance with unified configuration.
 
@@ -616,6 +566,7 @@ def create_detector_coordinator(config_manager) -> DetectorCoordinator:
 
     Args:
         config_manager: Enhanced config manager instance (required)
+        zone_manager: Optional ZoneManager instance (will be created if None)
 
     Returns:
         Configured DetectorCoordinator instance
@@ -627,100 +578,4 @@ def create_detector_coordinator(config_manager) -> DetectorCoordinator:
         raise ValueError("create_detector_coordinator requires a valid config_manager")
 
     logger.info("Creating DetectorCoordinator with enhanced_config_manager")
-    return DetectorCoordinator(config_manager)
-
-
-# ============================================================================
-# TESTING AND UTILITIES
-# ============================================================================
-
-if __name__ == "__main__":
-    """
-    Test the detector coordinator with synthetic data.
-
-    This demonstrates the complete pipeline: vision → tracking → coordinate conversion
-    """
-    import sys
-    import numpy as np
-
-    logging.basicConfig(level=logging.INFO)
-    logger.info("Testing DetectorCoordinator with synthetic data")
-
-
-    # Create a mock config manager for testing
-    class MockConfigManager:
-        """Mock config manager with test configuration"""
-
-        def get_module_config(self, module_name):
-            configs = {
-                "detector": {
-                    "min_area": 1000, "max_area": 50000,
-                    "min_aspect_ratio": 0.3, "max_aspect_ratio": 3.0,
-                    "bg_history": 500, "bg_threshold": 800.0, "learn_rate": 0.005,
-                    "gaussian_blur_size": 7, "morph_kernel_size": 5,
-                    "min_contour_points": 5,
-                    "match_distance_threshold": 100.0, "match_x_weight": 2.0,
-                    "match_y_weight": 1.0, "min_updates_for_stability": 3,
-                    "piece_timeout_seconds": 2.0, "fully_in_frame_margin": 20,
-                    "min_velocity_samples": 2, "max_velocity_change": 50.0
-                },
-                "detector_roi": {
-                    "x": 100, "y": 100, "w": 600, "h": 200
-                }
-            }
-            return configs.get(module_name, {})
-
-
-    try:
-        # Create coordinator with mock config
-        mock_config = MockConfigManager()
-        coordinator = create_detector_coordinator(mock_config)
-
-        # Create test frame with realistic size
-        test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-
-        # Initialize with properly sized ROI for test frame
-        coordinator.set_roi_from_sample_frame(test_frame, (50, 100, 400, 200))
-
-        print(f"\nDetectorCoordinator Test Results:")
-        print(f"=" * 50)
-
-        # Test frame processing
-        for frame_num in range(5):
-            # Add some white rectangles as "pieces" in the frame
-            test_frame.fill(0)  # Clear frame
-            cv2.rectangle(test_frame, (200, 150), (240, 180), (255, 255, 255), -1)
-
-            # Process frame
-            results = coordinator.process_frame_for_consumer(test_frame)
-
-            print(f"\nFrame {frame_num + 1}:")
-            print(f"  Error: {results.get('error', 'None')}")
-            print(f"  Tracked pieces: {len(results.get('tracked_pieces', []))}")
-            print(f"  FPS: {results.get('statistics', {}).get('fps', 0):.1f}")
-
-            # Show piece details
-            for piece in results.get('tracked_pieces', []):
-                print(f"    Piece {piece['id']}: bbox={piece['bbox']}, status={piece['status']}")
-
-        # Test system status
-        status = coordinator.get_system_status()
-        print(f"\nSystem Status:")
-        for key, value in status.items():
-            print(f"  {key}: {value}")
-
-        logger.info("DetectorCoordinator test completed successfully")
-
-    except Exception as e:
-        logger.error(f"DetectorCoordinator test failed: {e}")
-        print(f"\nTest failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-
-    finally:
-        # Cleanup
-        try:
-            coordinator.release()
-        except:
-            pass
+    return DetectorCoordinator(config_manager, zone_manager)

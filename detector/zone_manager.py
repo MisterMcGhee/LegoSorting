@@ -31,7 +31,7 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
-from data_models import TrackedPiece, RegionOfInterest
+from detector.data_models import TrackedPiece, RegionOfInterest
 from enhanced_config_manager import ModuleConfig
 
 # Set up module logger
@@ -351,7 +351,7 @@ class ZoneManager:
             # Set entry time if this is the first time in exit zone
             if piece.exit_zone_entry_time is None:
                 piece.exit_zone_entry_time = current_time
-                logger.info(f"Piece {piece.id} entered exit zone")
+                logger.debug(f"Piece {piece.id} entered exit zone")
 
         # If current_zone is None, all flags remain False (piece outside all zones)
 
