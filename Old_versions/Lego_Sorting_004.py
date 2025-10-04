@@ -17,7 +17,7 @@ from typing import Dict, Any
 # Import modules
 from camera_module import create_camera
 from Old_versions.detector_module import create_detector
-from sorting_module import create_sorting_manager
+from Old_versions.sorting_module import create_sorting_manager
 from config_management_module import create_config_manager
 from thread_management_module import create_thread_manager
 from processing_module import processing_worker_thread

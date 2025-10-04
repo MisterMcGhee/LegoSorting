@@ -41,7 +41,7 @@ from Old_versions.detector_module import create_detector
 from sorting_module import create_sorting_manager
 from piece_history_module import create_piece_history
 from thread_management_module import create_thread_manager
-from api_module import create_api_client
+from processing.identification_api_handler import create_api_client
 from arduino_servo_module import create_arduino_servo_module
 from error_module import setup_logging, get_logger
 

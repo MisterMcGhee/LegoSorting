@@ -29,7 +29,7 @@ from detector.detector_coordinator import create_detector_coordinator
 from detector.zone_manager import create_zone_manager
 from detector.capture_controller import create_capture_controller
 from enhanced_config_manager import create_config_manager, ModuleConfig
-from detector.data_models import RegionOfInterest
+from detector.detector_data_models import RegionOfInterest
 
 # Set up logging
 logging.basicConfig(

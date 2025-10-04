@@ -9,31 +9,26 @@ Fixed issues:
 """
 
 import sys
-import os
 import time
 import cv2
 import numpy as np
-import threading
 import logging
 import traceback
-from datetime import datetime
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
 from PyQt5.QtCore import (
-    Qt, QTimer, QThread, pyqtSignal, pyqtSlot, QRect, QPoint,
-    QMutex, QMutexLocker, QSize
+    Qt, QTimer, QThread, pyqtSignal, QMutex, QMutexLocker
 )
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QGroupBox, QGridLayout, QFrame,
     QSplitter, QStatusBar, QCheckBox, QSpinBox, QComboBox,
-    QTextEdit, QProgressBar, QTabWidget, QMessageBox,
-    QLineEdit, QListWidget, QListWidgetItem, QDialog, QScrollArea
+    QProgressBar, QTabWidget, QMessageBox,
+    QDialog, QScrollArea
 )
 from PyQt5.QtGui import (
-    QPixmap, QImage, QPainter, QColor, QPen, QBrush,
-    QFont, QPalette, QMouseEvent
+    QPixmap, QImage, QPainter, QColor, QPen, QFont
 )
 
 # Import configuration manager
@@ -2080,7 +2075,7 @@ class MainWindow(QMainWindow):
             # Import necessary modules
             from camera_module import create_camera
             from Old_versions.detector_module import create_detector
-            from sorting_module import create_sorting_manager
+            from Old_versions.sorting_module import create_sorting_manager
             from thread_management_module import create_thread_manager
             from piece_history_module import create_piece_history
 

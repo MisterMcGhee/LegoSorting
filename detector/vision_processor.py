@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 import logging
 from typing import List, Tuple, Optional, Dict, Any
-from detector.data_models import Detection, RegionOfInterest
+from detector.detector_data_models import Detection, RegionOfInterest
 from enhanced_config_manager import ModuleConfig
 
 # Set up module logger

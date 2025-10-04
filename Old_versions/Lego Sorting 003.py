@@ -12,19 +12,17 @@ import argparse
 import cv2
 import time
 import logging
-import threading
 
 # Import modules
 from camera_module import create_camera
 from Old_versions.detector_module import create_detector
-from sorting_module import create_sorting_manager
+from Old_versions.sorting_module import create_sorting_manager
 from config_management_module import create_config_manager
-from api_module import create_api_client
+from processing.identification_api_handler import create_api_client
 from arduino_servo_module import create_arduino_servo_module
 from thread_management_module import create_thread_manager
 from processing_module import processing_worker_thread
-from error_module import setup_logging, get_logger, CameraError, APIError, DetectorError, ThreadingError
-
+from error_module import setup_logging, get_logger
 
 # Initialize logger
 logger = get_logger(__name__)

@@ -32,7 +32,7 @@ from dataclasses import asdict
 from detector.vision_processor import VisionProcessor
 from detector.piece_tracker import PieceTracker
 from detector.zone_manager import ZoneManager
-from detector.data_models import RegionOfInterest, TrackedPiece
+from detector.detector_data_models import RegionOfInterest, TrackedPiece
 from enhanced_config_manager import ModuleConfig
 
 # Set up module logger

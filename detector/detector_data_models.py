@@ -1,5 +1,5 @@
 """
-data_models.py - Core data structures for the Lego piece detection and tracking system
+detector_data_models.py - Core data structures for the Lego piece detection and tracking system
 
 This module defines the fundamental data classes used throughout the detection pipeline:
 - TrackedPiece: Represents a physical object moving on the conveyor belt
@@ -12,10 +12,13 @@ the concerns of tracking (physical movement) from identification (what the piece
 
 import numpy as np
 import time
+import logging
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict, Any
 from enum import Enum
+import cv2
 
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # ENUMS AND CONSTANTS
@@ -306,90 +309,45 @@ class TrackedPiece:
 
 
 # ============================================================================
-# IDENTIFICATION RESULTS
+# CAPTURE PACKAGE DATA STRUCTURE
 # ============================================================================
-# This represents what we learned about a piece after processing its image
 
 @dataclass
-class IdentifiedPiece:
+class CapturePackage:
     """
-    Complete identification and categorization results for a Lego piece.
+    Complete package of captured and processed piece image ready for identification.
 
-    This contains all the information learned about a piece after its image
-    was processed by the identification API. This is separate from tracking
-    data because identification happens once, while tracking happens continuously.
+    This contains everything needed to identify a piece:
+    - The processed image with piece ID overlay
+    - Piece ID for tracking through the identification pipeline
+    - Capture metadata for logging and debugging
     """
+    piece_id: int  # Unique ID of the captured piece
+    processed_image: np.ndarray  # Cropped and labeled image ready for API
+    capture_timestamp: float  # When the capture occurred
+    capture_position: Tuple[int, int]  # Frame coordinates where piece was captured
+    original_bbox: Tuple[int, int, int, int]  # Original bounding box in frame coordinates
 
-    # ========================================================================
-    # REQUIRED FIELDS (No Default Values)
-    # ========================================================================
-    # These fields must be provided when creating an IdentifiedPiece
-
-    piece_id: int  # Links back to TrackedPiece.id
-    element_id: str  # Official Lego part number (e.g., "3001")
-    name: str  # Human-readable name (e.g., "Brick 2x4")
-    primary_category: str  # Main category (e.g., "Bricks")
-    bin_number: int  # Which physical bin to sort into
-    confidence: float  # Overall confidence score (0.0 to 1.0)
-    processing_time: float  # How long identification took (seconds)
-
-    # ========================================================================
-    # OPTIONAL FIELDS (With Default Values)
-    # ========================================================================
-    # These fields have sensible defaults and can be omitted
-
-    secondary_category: Optional[str] = None  # Sub-category (e.g., "Standard Bricks")
-    tertiary_category: Optional[str] = None  # Fine-grained category (e.g., "2x4 Bricks")
-    identification_confidence: float = 0.0  # Confidence in piece type identification
-    api_version: Optional[str] = None  # Which API version was used
-    processing_timestamp: float = field(default_factory=time.time)  # When processing completed
-
-    def is_high_confidence(self, threshold: float = 0.8) -> bool:
+    def save_image(self, file_path: str) -> bool:
         """
-        Check if this identification meets a confidence threshold.
+        Save the processed image to disk as JPG.
 
         Args:
-            threshold: Minimum confidence level (0.0 to 1.0)
+            file_path: Path where image should be saved
 
         Returns:
-            True if confidence is above threshold
+            True if save was successful, False otherwise
         """
-        return self.confidence >= threshold
-
-    def get_full_category_path(self) -> str:
-        """
-        Get the complete categorization as a single string.
-
-        Returns:
-            Category path like "Bricks > Standard Bricks > 2x4 Bricks"
-        """
-        parts = [self.primary_category]
-
-        if self.secondary_category:
-            parts.append(self.secondary_category)
-
-        if self.tertiary_category:
-            parts.append(self.tertiary_category)
-
-        return " > ".join(parts)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert identification to dictionary for API responses or logging.
-
-        Returns:
-            Dictionary representation of all identification data
-        """
-        return {
-            "piece_id": self.piece_id,
-            "element_id": self.element_id,
-            "name": self.name,
-            "category_path": self.get_full_category_path(),
-            "bin_number": self.bin_number,
-            "confidence": self.confidence,
-            "processing_time": self.processing_time,
-            "timestamp": self.processing_timestamp
-        }
+        try:
+            success = cv2.imwrite(file_path, self.processed_image)
+            if success:
+                logger.debug(f"Saved capture image for piece {self.piece_id} to {file_path}")
+            else:
+                logger.error(f"Failed to save image for piece {self.piece_id} to {file_path}")
+            return success
+        except Exception as e:
+            logger.error(f"Error saving image for piece {self.piece_id}: {e}")
+            return False
 
 
 # ============================================================================

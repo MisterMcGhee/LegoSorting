@@ -11,21 +11,20 @@ import argparse
 import cv2
 import time
 import logging
-import signal
 import sys
 from typing import Dict, Any
 
 # Import modules
 from camera_module import create_camera
 from Old_versions.detector_module import create_detector
-from sorting_module import create_sorting_manager
+from Old_versions.sorting_module import create_sorting_manager
 from config_management_module import create_config_manager
 from thread_management_module import create_thread_manager
 from processing_module import processing_worker_thread
 from error_module import setup_logging, get_logger
 from ui_module import create_ui_manager
 from piece_history_module import create_piece_history
-from enhanced_config_manager import create_config_manager, ModuleConfig
+from enhanced_config_manager import create_config_manager
 
 # Initialize logger
 logger = get_logger(__name__)

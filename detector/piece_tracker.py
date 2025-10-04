@@ -27,7 +27,7 @@ import time
 import logging
 import numpy as np
 from typing import List, Optional, Tuple, Dict, Any
-from detector.data_models import Detection, TrackedPiece, RegionOfInterest, create_tracked_piece_from_detection
+from detector.detector_data_models import Detection, TrackedPiece, RegionOfInterest, create_tracked_piece_from_detection
 from enhanced_config_manager import ModuleConfig
 
 # Set up module logger

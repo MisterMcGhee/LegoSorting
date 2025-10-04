@@ -31,8 +31,8 @@ from GUI.gui_common import validate_config
 from enhanced_config_manager import create_config_manager, ModuleConfig
 from camera_module import create_camera
 from Old_versions.detector_module import create_detector
-from sorting_module import create_sorting_manager
-from api_module import create_api_client
+from Old_versions.sorting_module import create_sorting_manager
+from processing.identification_api_handler import create_api_client
 from arduino_servo_module import create_arduino_servo_module
 from piece_history_module import create_piece_history
 

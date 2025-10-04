@@ -31,7 +31,7 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
-from detector.data_models import TrackedPiece, RegionOfInterest
+from detector.detector_data_models import TrackedPiece, RegionOfInterest
 from enhanced_config_manager import ModuleConfig
 
 # Set up module logger
@@ -656,7 +656,7 @@ def create_test_piece_in_zone(piece_id: int, zone_x: float, roi_width: int = 600
         TrackedPiece positioned at the specified location
     """
     import numpy as np
-    from data_models import create_tracked_piece_from_detection, Detection
+    from detector_data_models import create_tracked_piece_from_detection, Detection
 
     # Create a simple detection at the specified position
     bbox = (int(zone_x - 20), 150, 40, 30)  # Center at zone_x
@@ -681,7 +681,7 @@ if __name__ == "__main__":
     and filtering functionality.
     """
     import sys
-    from data_models import RegionOfInterest
+    from detector_data_models import RegionOfInterest
 
     logging.basicConfig(level=logging.INFO)
     logger.info("Testing ZoneManager with synthetic data")

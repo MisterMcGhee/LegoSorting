@@ -16,7 +16,7 @@ This module is used by:
 - piece_queue_manager.py for processing worker threads
 - camera_module.py for capture threads
 - arduino_servo_module.py for communication threads
-- api_module.py for async API calls
+- identification_api_handler.py for async API calls
 - processing_module.py for background processing
 - Any other module that needs managed threads
 

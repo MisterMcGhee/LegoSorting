@@ -35,56 +35,14 @@ import time
 import logging
 import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+from detector.detector_data_models import TrackedPiece, CapturePackage
 from pathlib import Path
-from detector.data_models import TrackedPiece
+from detector.detector_data_models import TrackedPiece
 from detector.zone_manager import ZoneManager
 from enhanced_config_manager import ModuleConfig
 
 # Set up module logger
 logger = logging.getLogger(__name__)
-
-
-# ============================================================================
-# CAPTURE PACKAGE DATA STRUCTURE
-# ============================================================================
-
-@dataclass
-class CapturePackage:
-    """
-    Complete package of captured and processed piece image ready for identification.
-
-    This contains everything needed to identify a piece:
-    - The processed image with piece ID overlay
-    - Piece ID for tracking through the identification pipeline
-    - Capture metadata for logging and debugging
-    """
-    piece_id: int  # Unique ID of the captured piece
-    processed_image: np.ndarray  # Cropped and labeled image ready for API
-    capture_timestamp: float  # When the capture occurred
-    capture_position: Tuple[int, int]  # Frame coordinates where piece was captured
-    original_bbox: Tuple[int, int, int, int]  # Original bounding box in frame coordinates
-
-    def save_image(self, file_path: str) -> bool:
-        """
-        Save the processed image to disk as JPG.
-
-        Args:
-            file_path: Path where image should be saved
-
-        Returns:
-            True if save was successful, False otherwise
-        """
-        try:
-            success = cv2.imwrite(file_path, self.processed_image)
-            if success:
-                logger.debug(f"Saved capture image for piece {self.piece_id} to {file_path}")
-            else:
-                logger.error(f"Failed to save image for piece {self.piece_id} to {file_path}")
-            return success
-        except Exception as e:
-            logger.error(f"Error saving image for piece {self.piece_id}: {e}")
-            return False
 
 
 # ============================================================================
@@ -648,7 +606,7 @@ if __name__ == "__main__":
     and capture package creation.
     """
     import sys
-    from data_models import TrackedPiece, Detection, create_tracked_piece_from_detection
+    from detector_data_models import TrackedPiece, Detection, create_tracked_piece_from_detection
     from zone_manager import create_zone_manager, ZoneManager
 
     logging.basicConfig(level=logging.INFO)
