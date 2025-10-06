@@ -170,7 +170,9 @@ class ConfigSchema:
                 "max_bins": 7,  # Total bins available (bin 0 is overflow)
                 "overflow_bin": 0,  # Bin number for unknown/overflow pieces
                 "confidence_threshold": 0.7,  # Minimum API confidence to accept (0.0-1.0)
-                "pre_assignments": {}  # Pre-assign categories to bins: {"Basic": 1, "Technic": 4}
+                "pre_assignments": {},  # Pre-assign categories to bins: {"Basic": 1, "Technic": 4}
+                "max_pieces_per_bin": 50,  # ADD THIS
+                "bin_warning_threshold": 0.8
             },
 
             # =================================================================

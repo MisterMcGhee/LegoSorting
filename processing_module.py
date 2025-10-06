@@ -35,7 +35,7 @@ from piece_history_module import PieceHistory
 from error_module import get_logger, retry_on_error, APIError, SortingError
 from processing.identification_api_handler import create_api_client
 from Old_versions.sorting_module import create_sorting_manager
-from arduino_servo_module import create_arduino_servo_module
+from hardware.arduino_servo_module import create_arduino_servo_module
 from enhanced_config_manager import ModuleConfig
 
 # Initialize module logger

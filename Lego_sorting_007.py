@@ -33,7 +33,7 @@ from camera_module import create_camera
 from Old_versions.detector_module import create_detector
 from Old_versions.sorting_module import create_sorting_manager
 from processing.identification_api_handler import create_api_client
-from arduino_servo_module import create_arduino_servo_module
+from hardware.arduino_servo_module import create_arduino_servo_module
 from piece_history_module import create_piece_history
 
 # Threading and queue management - CRITICAL IMPORTS

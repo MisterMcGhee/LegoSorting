@@ -291,6 +291,28 @@ class ZoneManager:
             self._update_piece_zone_status(piece, current_zone, current_time)
 
         logger.debug(f"Updated zone status for {len(tracked_pieces)} pieces")
+
+        # NEW: DETERMINE RIGHTMOST PIECE IN EXIT ZONE
+        # ========================================================================
+        # Clear the flag for all pieces first
+        for piece in tracked_pieces:
+            piece.is_rightmost_in_exit_zone = False
+
+        # Find all pieces currently in exit zone
+        exit_zone_pieces = [p for p in tracked_pieces if p.in_exit_zone]
+
+        if exit_zone_pieces:
+            # Find the piece with the highest right_edge (furthest right)
+            rightmost_piece = max(exit_zone_pieces, key=lambda p: p.right_edge)
+
+            # Set the flag for this piece only
+            rightmost_piece.is_rightmost_in_exit_zone = True
+
+            logger.debug(
+                f"Rightmost piece in exit zone: ID {rightmost_piece.id} "
+                f"at x={rightmost_piece.right_edge:.1f}"
+            )
+
         return tracked_pieces
 
     def _determine_piece_zone(self, piece: TrackedPiece) -> Optional[ZoneType]:
