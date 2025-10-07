@@ -1,10 +1,10 @@
 """
 Lego_Sorting_007.py - Main orchestration for the Lego Sorting System
 
-PHASE 1: Sorting GUI modules references removed for clean implementation foundation
+PHASE 1: Sorting GUI references removed for clean implementation foundation
 - Removed SortingGUI import and all references
 - Replaced show_sorting_gui() with placeholder message
-- Removed GUI modules signals and connections
+- Removed GUI signals and connections
 - System can initialize all modules and run in headless mode
 - Ready for Phase 2 implementation
 """
@@ -18,11 +18,11 @@ from typing import Dict, Any
 from enum import Enum
 import numpy as np
 
-# PyQt5 imports for GUI modules
+# PyQt5 imports for GUI
 from PyQt5.QtWidgets import QApplication, QMessageBox, QProgressDialog
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QTimer
 
-# GUI modules modules - PHASE 2: Re-add SortingGUI import
+# GUI modules - PHASE 2: Re-add SortingGUI import
 from GUI.config_GUI_module import ConfigurationGUI
 from GUI.sorting_GUI_module import SortingGUI
 from GUI.gui_common import validate_config
@@ -168,7 +168,7 @@ class LegoSortingApplication(QObject):
         self.api_client = None
         self.piece_history = None
 
-        # GUI modules components - PHASE 2: Re-add sorting_gui
+        # GUI components - PHASE 2: Re-add sorting_gui
         self.config_gui = None
         self.sorting_gui = None
 
@@ -329,7 +329,7 @@ class LegoSortingApplication(QObject):
     # ========================================================================
 
     def setup_camera_consumers(self):
-        """Register detector consumer only - GUI modules consumer registered separately when GUI modules exists"""
+        """Register detector consumer only - GUI consumer registered separately when GUI exists"""
         logger.info("Registering detector camera consumer...")
 
         if not self.camera:
@@ -383,18 +383,18 @@ class LegoSortingApplication(QObject):
         return detector_success
 
     def register_gui_consumer(self):
-        """Register GUI modules consumer after GUI modules is created"""
+        """Register GUI consumer after GUI is created"""
         logger.info("=== register_gui_consumer() method called ===")
 
         if not self.sorting_gui:
-            logger.error("Cannot register GUI modules consumer - sorting_gui is None")
+            logger.error("Cannot register GUI consumer - sorting_gui is None")
             return False
 
         if not self.camera:
-            logger.error("Cannot register GUI modules consumer - camera is None")
+            logger.error("Cannot register GUI consumer - camera is None")
             return False
 
-        logger.info(f"Both GUI modules and camera available - GUI modules type: {type(self.sorting_gui)}")
+        logger.info(f"Both GUI and camera available - GUI type: {type(self.sorting_gui)}")
         logger.info(f"Camera state: initialized={self.camera.is_initialized}, capturing={self.camera.is_capturing}")
 
         try:
@@ -403,12 +403,12 @@ class LegoSortingApplication(QObject):
             logger.info(f"sorting_gui.register_camera_consumer() returned: {success}")
 
             if success:
-                logger.info("GUI modules consumer registered successfully")
+                logger.info("GUI consumer registered successfully")
                 # Activate the display status
                 self.sorting_gui.activate_camera_display()
                 logger.info("Camera display activated")
             else:
-                logger.error("Failed to register GUI modules consumer")
+                logger.error("Failed to register GUI consumer")
 
             return success
 
@@ -528,7 +528,7 @@ class LegoSortingApplication(QObject):
             raise RuntimeError(f"Failed to create processing worker: {e}")
 
     # ========================================================================
-    # GUI modules INTEGRATION
+    # GUI INTEGRATION
     # ========================================================================
 
     def show_configuration_gui(self):
@@ -550,13 +550,13 @@ class LegoSortingApplication(QObject):
         self.config_gui.show()
         self.config_gui.center_window()
         self.current_state = ApplicationState.CONFIGURING
-        logger.info(f"Configuration GUI modules displayed with config_manager: {self.config_manager}")
+        logger.info(f"Configuration GUI displayed with config_manager: {self.config_manager}")
 
     def show_sorting_gui(self):
         """
-        Phase 3.1: Display sorting GUI modules
+        Phase 3.1: Display sorting GUI
         """
-        logger.info("=== PHASE 3.1: CREATING SORTING GUI modules ===")
+        logger.info("=== PHASE 3.1: CREATING SORTING GUI ===")
 
         try:
             # Create the Phase 3.1 SortingGUI
@@ -566,16 +566,16 @@ class LegoSortingApplication(QObject):
             # Set camera instance (consumer registration happens separately)
             if self.camera:
                 self.sorting_gui.set_camera(self.camera)
-                logger.info("Camera instance set in GUI modules")
+                logger.info("Camera instance set in GUI")
             else:
-                logger.warning("No camera available for GUI modules")
+                logger.warning("No camera available for GUI")
 
             # Set ROI configuration if available
             if self.detector:
                 try:
                     roi_config = self.detector.get_roi_configuration()
                     self.sorting_gui.set_roi_configuration(roi_config)
-                    logger.info("ROI configuration sent to GUI modules")
+                    logger.info("ROI configuration sent to GUI")
                 except Exception as e:
                     logger.warning(f"Could not get ROI configuration: {e}")
                     self.sorting_gui.set_roi_configuration({"roi": None})
@@ -596,7 +596,7 @@ class LegoSortingApplication(QObject):
             self.sorting_gui.set_arduino_status(arduino_connected)
             logger.info(f"Arduino status set: {arduino_connected}")
 
-            # Show the GUI modules window
+            # Show the GUI window
             self.sorting_gui.show()
             self.sorting_gui.raise_()
             self.sorting_gui.activateWindow()
@@ -605,14 +605,14 @@ class LegoSortingApplication(QObject):
             # Show Phase 3.1 completion message
             QTimer.singleShot(1000, self.sorting_gui.show_phase_info)
 
-            logger.info("Phase 3.1 GUI modules created successfully")
+            logger.info("Phase 3.1 GUI created successfully")
 
         except Exception as e:
-            logger.error(f"Error creating Phase 3.1 sorting GUI modules: {e}", exc_info=True)
-            QMessageBox.critical(None, "Phase 3.1 Error", f"Failed to create sorting GUI modules: {e}")
+            logger.error(f"Error creating Phase 3.1 sorting GUI: {e}", exc_info=True)
+            QMessageBox.critical(None, "Phase 3.1 Error", f"Failed to create sorting GUI: {e}")
 
     def start_sorting_pipeline(self):
-        """Start the sorting pipeline without GUI modules (headless mode)"""
+        """Start the sorting pipeline without GUI (headless mode)"""
         logger.info("Starting sorting pipeline in headless mode")
 
         try:
@@ -662,7 +662,7 @@ class LegoSortingApplication(QObject):
         Reinitialize the Arduino servo module with updated simulation mode setting.
 
         This method is called when the user manually changes between simulation and
-        hardware modes in the configuration GUI modules. It cleanly shuts down any existing
+        hardware modes in the configuration GUI. It cleanly shuts down any existing
         Arduino connection and creates a new module with the updated settings.
 
         Args:
@@ -707,7 +707,7 @@ class LegoSortingApplication(QObject):
                     mode_str = "simulation" if simulation_mode else "hardware"
                     logger.info(f"Arduino module reinitialized successfully in {mode_str} mode")
 
-                    # Show success message in config GUI modules if it's open
+                    # Show success message in config GUI if it's open
                     if self.config_gui:
                         QMessageBox.information(
                             self.config_gui,
@@ -824,11 +824,11 @@ class LegoSortingApplication(QObject):
             self.camera.start_capture()
             logger.info("Camera capture started")
 
-        # Hide config GUI modules and show sorting GUI modules placeholder
+        # Hide config GUI and show sorting GUI placeholder
         if self.config_gui:
             self.config_gui.hide()
 
-        logger.info("Showing sorting GUI modules placeholder...")
+        logger.info("Showing sorting GUI placeholder...")
         self.show_sorting_gui()
 
         # Start periodic updates
@@ -894,7 +894,7 @@ class LegoSortingApplication(QObject):
         # Cleanup current session
         self.cleanup_session()
 
-        # Show configuration GUI modules
+        # Show configuration GUI
         self.show_configuration_gui()
 
     def update_system_status(self):
@@ -1091,7 +1091,7 @@ def main():
             )
             logger.info("Arduino disabled - running in simulation mode")
 
-        # Start with configuration GUI modules
+        # Start with configuration GUI
         lego_app.show_configuration_gui()
 
         # Run Qt event loop

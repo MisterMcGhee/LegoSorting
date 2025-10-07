@@ -1,5 +1,5 @@
 """
-config_gui_module.py - Configuration GUI modules for Lego Sorting System
+config_gui_module.py - Configuration GUI for Lego Sorting System
 """
 
 from PyQt5.QtWidgets import *
@@ -1716,7 +1716,7 @@ class ConfigurationGUI(BaseGUIWindow):
         arduino_tab.setLayout(layout)
         self.tab_widget.addTab(arduino_tab, "Arduino")
 
-        # Check hardware on startup (delayed to allow GUI modules to initialize)
+        # Check hardware on startup (delayed to allow GUI to initialize)
         QTimer.singleShot(500, self.check_arduino_hardware)
 
     def create_system_tab(self):
@@ -1870,7 +1870,7 @@ class ConfigurationGUI(BaseGUIWindow):
             self.timeout_spin.setValue(api_config.get("timeout", 30))
             self.retry_count_spin.setValue(api_config.get("retry_count", 3))
 
-        # FIXED: Load Arduino settings from arduino_servo config (where GUI modules saves them)
+        # FIXED: Load Arduino settings from arduino_servo config (where GUI saves them)
         arduino_config = self.config_manager.get_module_config("arduino_servo")
         if arduino_config:
             # Arduino connection settings
@@ -2000,11 +2000,11 @@ class ConfigurationGUI(BaseGUIWindow):
                                             "Failed to initialize camera")
                         return
 
-            # Register this GUI modules as a frame consumer
+            # Register this GUI as a frame consumer
             success = self.camera.register_consumer(
                 name="config_preview",
                 callback=self._preview_frame_callback,
-                processing_type="async",  # Non-blocking for GUI modules
+                processing_type="async",  # Non-blocking for GUI
                 priority=50  # Medium priority for preview
             )
 
@@ -2032,7 +2032,7 @@ class ConfigurationGUI(BaseGUIWindow):
         """Stop camera preview and unregister consumer - IMPROVED"""
         try:
             if hasattr(self, 'camera') and self.camera:
-                # Unregister this GUI modules as a consumer
+                # Unregister this GUI as a consumer
                 try:
                     self.camera.unregister_consumer("config_preview")
                 except:
@@ -2064,7 +2064,7 @@ class ConfigurationGUI(BaseGUIWindow):
             return
 
         try:
-            # Use Qt's thread-safe mechanism to update GUI modules
+            # Use Qt's thread-safe mechanism to update GUI
             # Since this callback might be from a different thread
             QMetaObject.invokeMethod(
                 self,
@@ -2080,7 +2080,7 @@ class ConfigurationGUI(BaseGUIWindow):
 
             if elapsed > 1.0:  # Update FPS every second
                 fps = self.preview_frame_count / elapsed
-                # Update FPS label in GUI modules thread
+                # Update FPS label in GUI thread
                 QMetaObject.invokeMethod(
                     self.preview_fps_label,
                     "setText",
@@ -2097,7 +2097,7 @@ class ConfigurationGUI(BaseGUIWindow):
     def _update_preview_display(self, frame):
         """
         Thread-safe method to update the preview widget.
-        This runs in the GUI modules thread.
+        This runs in the GUI thread.
         """
         if self.preview_active and frame is not None:
             self.preview_widget.update_frame(frame)
@@ -2904,7 +2904,7 @@ class ConfigurationGUI(BaseGUIWindow):
             "retry_delay": self.retry_delay_spin.value(),
             "simulation_mode": self.simulation_check.isChecked(),
 
-            # FIXED: Servo hardware settings (kept in arduino_servo config where GUI modules saves them)
+            # FIXED: Servo hardware settings (kept in arduino_servo config where GUI saves them)
             "min_pulse": self.min_pulse_spin.value(),
             "max_pulse": self.max_pulse_spin.value(),
             "default_position": self.default_pos_spin.value(),

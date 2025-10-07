@@ -2,7 +2,7 @@
 camera_module.py - Unified camera module with singleton pattern and frame distribution
 
 This module provides a single-stream, multi-consumer camera system for applications
-that need to share camera frames between multiple components (GUI modules, processing, recording, etc.)
+that need to share camera frames between multiple components (GUI, processing, recording, etc.)
 without the overhead and complexity of multiple video streams.
 
 Architecture:
