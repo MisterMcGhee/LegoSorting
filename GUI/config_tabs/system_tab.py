@@ -3,36 +3,27 @@ system_tab.py - System configuration tab
 
 FILE LOCATION: GUI/config_tabs/system_tab.py
 
-This tab provides system-wide configuration including threading, queue management,
-logging, and performance settings. These settings affect the overall behavior of
-the Lego Sorting System.
+This tab provides system-wide configuration including threading and logging.
+These settings affect the overall behavior of the Lego Sorting System.
 
 Features:
 - Threading configuration (enable/disable)
-- Queue size management for processing pipeline
 - Logging level selection
-- Image saving preferences
-- Performance tuning options
 
 Configuration Mapping:
     {
         "system": {
             "threading_enabled": true,
-            "queue_size": 100,
-            "log_level": "INFO",
-            "save_images": true,
-            "image_save_path": "LegoPictures"
+            "log_level": "INFO"
         }
     }
 """
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QGroupBox, QComboBox, QPushButton, QSpinBox,
-                             QCheckBox, QLabel, QLineEdit, QFileDialog,
-                             QMessageBox)
+                             QCheckBox, QLabel, QMessageBox)
 from PyQt5.QtCore import pyqtSignal, Qt
 import logging
-import os
 from typing import Dict, Any, Optional
 
 # Import base class
@@ -49,10 +40,7 @@ class SystemConfigTab(BaseConfigTab):
 
     This tab allows users to:
     - Enable/disable multithreading
-    - Configure queue sizes for processing pipeline
     - Set logging level
-    - Configure image saving
-    - Adjust performance settings
 
     Signals:
         threading_changed(bool): Emitted when threading setting changes
@@ -95,11 +83,31 @@ class SystemConfigTab(BaseConfigTab):
         # Create sections
         self.create_threading_section(main_layout)
         self.create_logging_section(main_layout)
-        self.create_performance_section(main_layout)
-        self.create_storage_section(main_layout)
 
         # Add stretch at bottom
         main_layout.addStretch()
+
+        # Add reset button at bottom
+        reset_layout = QHBoxLayout()
+        reset_layout.addStretch()
+
+        self.reset_btn = QPushButton("Reset to Defaults")
+        self.reset_btn.clicked.connect(self.confirm_reset)
+        self.reset_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95A5A6;
+                color: white;
+                padding: 8px 16px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #7F8C8D;
+            }
+        """)
+        reset_layout.addWidget(self.reset_btn)
+
+        main_layout.addLayout(reset_layout)
 
         self.log_info("System tab UI initialized")
 
@@ -112,18 +120,11 @@ class SystemConfigTab(BaseConfigTab):
                 # Threading settings
                 self.threading_check.setChecked(config.get("threading_enabled", True))
 
-                # Queue settings
-                self.queue_size_spin.setValue(config.get("queue_size", 100))
-
                 # Logging settings
                 log_level = config.get("log_level", "INFO")
                 index = self.log_level_combo.findText(log_level)
                 if index >= 0:
                     self.log_level_combo.setCurrentIndex(index)
-
-                # Storage settings
-                self.save_images_check.setChecked(config.get("save_images", True))
-                self.image_path_edit.setText(config.get("image_save_path", "LegoPictures"))
 
                 self.log_info(f"Configuration loaded: Threading={config.get('threading_enabled')}, "
                               f"Log Level={log_level}")
@@ -162,27 +163,13 @@ class SystemConfigTab(BaseConfigTab):
         """Return current system configuration as dictionary."""
         return {
             "threading_enabled": self.threading_check.isChecked(),
-            "queue_size": self.queue_size_spin.value(),
-            "log_level": self.log_level_combo.currentText(),
-            "save_images": self.save_images_check.isChecked(),
-            "image_save_path": self.image_path_edit.text()
+            "log_level": self.log_level_combo.currentText()  # Fixed: return log_level instead of queue_size
         }
 
     def validate(self) -> bool:
         """Validate system configuration."""
-        # Validate queue size
-        queue_size = self.queue_size_spin.value()
-        if queue_size < 10:
-            self.show_validation_error("Queue size must be at least 10")
-            return False
-
-        # Validate image path if saving is enabled
-        if self.save_images_check.isChecked():
-            image_path = self.image_path_edit.text().strip()
-            if not image_path:
-                self.show_validation_error("Image save path cannot be empty when image saving is enabled")
-                return False
-
+        # No validation needed for simple boolean and string values
+        # Log level is constrained by combo box
         return True
 
     def reset_to_defaults(self):
@@ -192,15 +179,8 @@ class SystemConfigTab(BaseConfigTab):
         # Threading defaults
         self.threading_check.setChecked(True)
 
-        # Queue defaults
-        self.queue_size_spin.setValue(100)
-
         # Logging defaults
         self.log_level_combo.setCurrentText("INFO")
-
-        # Storage defaults
-        self.save_images_check.setChecked(True)
-        self.image_path_edit.setText("LegoPictures")
 
         self.mark_modified()
 
@@ -263,104 +243,6 @@ class SystemConfigTab(BaseConfigTab):
         logging_group.setLayout(logging_layout)
         parent_layout.addWidget(logging_group)
 
-    def create_performance_section(self, parent_layout):
-        """Create performance tuning section."""
-        performance_group = QGroupBox("Performance Settings")
-        performance_layout = QFormLayout()
-
-        # Queue size
-        self.queue_size_spin = QSpinBox()
-        self.queue_size_spin.setRange(10, 1000)
-        self.queue_size_spin.setValue(100)
-        self.queue_size_spin.setSuffix(" items")
-        self.queue_size_spin.setToolTip(
-            "Maximum number of pieces queued for processing.\n"
-            "Larger values use more memory but handle bursts better.\n"
-            "Recommended: 100-200 for normal operation"
-        )
-        self.queue_size_spin.valueChanged.connect(self.mark_modified)
-        performance_layout.addRow("Queue Size:", self.queue_size_spin)
-
-        # Queue size warning
-        self.queue_warning_label = QLabel("")
-        self.queue_warning_label.setWordWrap(True)
-        self.queue_warning_label.setStyleSheet("color: #E67E22; font-weight: bold;")
-        performance_layout.addRow("", self.queue_warning_label)
-        self.queue_size_spin.valueChanged.connect(self.update_queue_warning)
-
-        performance_group.setLayout(performance_layout)
-        parent_layout.addWidget(performance_group)
-
-    def create_storage_section(self, parent_layout):
-        """Create image storage configuration section."""
-        storage_group = QGroupBox("Image Storage")
-        storage_layout = QFormLayout()
-
-        # Save images checkbox
-        self.save_images_check = QCheckBox("Save detected piece images")
-        self.save_images_check.setChecked(True)
-        self.save_images_check.setToolTip(
-            "Save images of detected pieces for review and debugging.\n"
-            "Images are saved with sequential numbering."
-        )
-        self.save_images_check.stateChanged.connect(self.on_save_images_changed)
-        storage_layout.addRow("Save Images:", self.save_images_check)
-
-        # Image save path
-        path_layout = QHBoxLayout()
-
-        self.image_path_edit = QLineEdit()
-        self.image_path_edit.setText("LegoPictures")
-        self.image_path_edit.setToolTip("Directory where piece images will be saved")
-        self.image_path_edit.textChanged.connect(self.mark_modified)
-        path_layout.addWidget(self.image_path_edit)
-
-        self.browse_path_btn = QPushButton("Browse...")
-        self.browse_path_btn.clicked.connect(self.browse_image_path)
-        self.browse_path_btn.setToolTip("Select image save directory")
-        path_layout.addWidget(self.browse_path_btn)
-
-        self.create_path_btn = QPushButton("Create")
-        self.create_path_btn.clicked.connect(self.create_image_directory)
-        self.create_path_btn.setToolTip("Create the directory if it doesn't exist")
-        path_layout.addWidget(self.create_path_btn)
-
-        storage_layout.addRow("Save Path:", path_layout)
-
-        # Path status
-        self.path_status_label = QLabel("")
-        self.path_status_label.setWordWrap(True)
-        storage_layout.addRow("", self.path_status_label)
-        self.image_path_edit.textChanged.connect(self.update_path_status)
-
-        # Update initial status
-        self.update_path_status()
-
-        storage_group.setLayout(storage_layout)
-        parent_layout.addWidget(storage_group)
-
-        # Reset to defaults button
-        reset_layout = QHBoxLayout()
-        reset_layout.addStretch()
-
-        self.reset_btn = QPushButton("Reset to Defaults")
-        self.reset_btn.clicked.connect(self.confirm_reset)
-        self.reset_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95A5A6;
-                color: white;
-                padding: 8px 16px;
-                font-weight: bold;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #7F8C8D;
-            }
-        """)
-        reset_layout.addWidget(self.reset_btn)
-
-        parent_layout.addLayout(reset_layout)
-
     # ========================================================================
     # EVENT HANDLERS
     # ========================================================================
@@ -386,91 +268,15 @@ class SystemConfigTab(BaseConfigTab):
         # Update description
         self.log_level_desc_label.setText(self._get_log_level_description(level))
 
+        # Optionally apply immediately to root logger
+        try:
+            logging.getLogger().setLevel(getattr(logging, level))
+            self.log_info(f"Applied log level {level} to root logger")
+        except Exception as e:
+            self.log_warning(f"Could not apply log level immediately: {e}")
+
         self.mark_modified()
         self.log_level_changed.emit(level)
-
-    def on_save_images_changed(self, state):
-        """Handle save images checkbox state change."""
-        enabled = (state == Qt.Checked)
-        self.log_info(f"Image saving {'enabled' if enabled else 'disabled'}")
-
-        # Enable/disable path controls
-        self.image_path_edit.setEnabled(enabled)
-        self.browse_path_btn.setEnabled(enabled)
-        self.create_path_btn.setEnabled(enabled)
-
-        self.mark_modified()
-
-    def update_queue_warning(self, value):
-        """Update queue size warning label."""
-        if value < 50:
-            self.queue_warning_label.setText(
-                "⚠ Small queue size may cause dropped pieces during bursts"
-            )
-            self.queue_warning_label.setStyleSheet("color: #E67E22; font-weight: bold;")
-        elif value > 500:
-            self.queue_warning_label.setText(
-                "⚠ Large queue size will use more memory"
-            )
-            self.queue_warning_label.setStyleSheet("color: #E67E22; font-weight: bold;")
-        else:
-            self.queue_warning_label.setText("")
-
-    def update_path_status(self):
-        """Update image path status label."""
-        path = self.image_path_edit.text().strip()
-
-        if not path:
-            self.path_status_label.setText("Path is empty")
-            self.path_status_label.setStyleSheet("color: #E74C3C;")
-            return
-
-        if os.path.exists(path):
-            if os.path.isdir(path):
-                self.path_status_label.setText("✓ Directory exists")
-                self.path_status_label.setStyleSheet("color: #27AE60;")
-            else:
-                self.path_status_label.setText("✗ Path exists but is not a directory")
-                self.path_status_label.setStyleSheet("color: #E74C3C;")
-        else:
-            self.path_status_label.setText("Directory does not exist (will be created)")
-            self.path_status_label.setStyleSheet("color: #E67E22;")
-
-    def browse_image_path(self):
-        """Open directory browser dialog."""
-        current_path = self.image_path_edit.text()
-
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            "Select Image Save Directory",
-            current_path if current_path else os.getcwd()
-        )
-
-        if directory:
-            self.image_path_edit.setText(directory)
-            self.log_info(f"Image save path set to: {directory}")
-
-    def create_image_directory(self):
-        """Create the image save directory if it doesn't exist."""
-        path = self.image_path_edit.text().strip()
-
-        if not path:
-            self.show_validation_error("Please enter a directory path")
-            return
-
-        try:
-            os.makedirs(path, exist_ok=True)
-            self.log_info(f"Created directory: {path}")
-            self.update_path_status()
-
-            QMessageBox.information(
-                self,
-                "Success",
-                f"Directory created successfully:\n{path}"
-            )
-        except Exception as e:
-            self.log_error(f"Failed to create directory: {e}")
-            self.show_validation_error(f"Failed to create directory: {e}")
 
     def confirm_reset(self):
         """Confirm before resetting to defaults."""

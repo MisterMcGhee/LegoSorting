@@ -12,6 +12,7 @@ Features:
 - Dynamic category dropdowns that update based on strategy and selections
 - Pre-assignment table for mapping categories to specific bins
 - Bin capacity and overflow configuration
+- Queue size configuration for processing pipeline
 - Confidence threshold settings
 - Comprehensive validation of all settings
 
@@ -35,6 +36,9 @@ Configuration Mapping:
             },
             "max_pieces_per_bin": 50,
             "bin_warning_threshold": 0.8
+        },
+        "processing_queue": {
+            "queue_size": 100
         }
     }
 """
@@ -43,7 +47,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QGroupBox, QComboBox, QPushButton, QSpinBox,
                              QLabel, QTableWidget, QTableWidgetItem, QHeaderView,
                              QMessageBox, QRadioButton, QButtonGroup, QDoubleSpinBox,
-                             QAbstractItemView)
+                             QAbstractItemView, QDialog, QDialogButtonBox)
 from PyQt5.QtCore import pyqtSignal, Qt
 from typing import Dict, Any, Optional, List
 import logging
@@ -64,6 +68,7 @@ class ProcessingConfigTab(BaseConfigTab):
     - Select sorting strategy (Primary, Secondary, or Tertiary)
     - Configure target categories for secondary/tertiary strategies
     - Set maximum bins and overflow bin
+    - Configure queue size for processing pipeline
     - Configure confidence thresholds
     - Create pre-assignments mapping categories to specific bins
     - Set bin capacity and warning thresholds
@@ -255,8 +260,8 @@ class ProcessingConfigTab(BaseConfigTab):
         return group
 
     def create_bins_group(self) -> QGroupBox:
-        """Create bin configuration group."""
-        group = QGroupBox("Bin Configuration")
+        """Create bin and queue configuration group."""
+        group = QGroupBox("Bin & Queue Configuration")
         layout = QFormLayout()
 
         # Maximum bins (total bins including overflow)
@@ -280,6 +285,35 @@ class ProcessingConfigTab(BaseConfigTab):
         self.overflow_bin_label = QLabel("Bin 0 (reserved)")
         self.overflow_bin_label.setStyleSheet("font-weight: bold; color: #E67E22;")
         layout.addRow("Overflow:", self.overflow_bin_label)
+
+        # Separator for visual clarity
+        separator1 = QLabel("─" * 40)
+        separator1.setStyleSheet("color: #BDC3C7;")
+        layout.addRow("", separator1)
+
+        # Queue size configuration (processing pipeline)
+        self.queue_size_spin = QSpinBox()
+        self.queue_size_spin.setRange(10, 1000)
+        self.queue_size_spin.setValue(100)
+        self.queue_size_spin.setSuffix(" items")
+        self.queue_size_spin.setToolTip(
+            "Maximum number of pieces queued for processing.\n"
+            "Larger values use more memory but handle bursts better.\n"
+            "Recommended: 100-200 for normal operation"
+        )
+        self.queue_size_spin.valueChanged.connect(self.on_queue_size_changed)
+        layout.addRow("Queue Size:", self.queue_size_spin)
+
+        # Queue size warning
+        self.queue_warning_label = QLabel("")
+        self.queue_warning_label.setWordWrap(True)
+        self.queue_warning_label.setStyleSheet("color: #E67E22; font-weight: bold;")
+        layout.addRow("", self.queue_warning_label)
+
+        # Separator for visual clarity
+        separator2 = QLabel("─" * 40)
+        separator2.setStyleSheet("color: #BDC3C7;")
+        layout.addRow("", separator2)
 
         # Max pieces per bin
         self.max_pieces_spin = QSpinBox()
@@ -511,6 +545,23 @@ class ProcessingConfigTab(BaseConfigTab):
         self.bins_changed.emit(self.max_bins_spin.value())
         self.update_available_bins_label()
 
+    def on_queue_size_changed(self, value):
+        """Handle queue size change and update warning."""
+        if value < 50:
+            self.queue_warning_label.setText(
+                "⚠ Small queue size may cause dropped pieces during bursts"
+            )
+            self.queue_warning_label.setStyleSheet("color: #E67E22; font-weight: bold;")
+        elif value > 500:
+            self.queue_warning_label.setText(
+                "⚠ Large queue size will use more memory"
+            )
+            self.queue_warning_label.setStyleSheet("color: #E67E22; font-weight: bold;")
+        else:
+            self.queue_warning_label.setText("")
+
+        self.mark_modified()
+
     def update_available_bins_label(self):
         """Update the available bins label to show the range."""
         max_bins = self.max_bins_spin.value()
@@ -660,8 +711,6 @@ class ProcessingConfigTab(BaseConfigTab):
             return
 
         # Create simple dialog
-        from PyQt5.QtWidgets import QDialog, QDialogButtonBox
-
         dialog = QDialog(self)
         dialog.setWindowTitle("Add Pre-Assignment")
         layout = QVBoxLayout(dialog)
@@ -818,7 +867,11 @@ class ProcessingConfigTab(BaseConfigTab):
     def load_config(self) -> bool:
         """Load configuration from config_manager and populate UI."""
         try:
+            # Get sorting config
             config = self.get_module_config(self.get_module_name())
+
+            # Get processing_queue config for queue_size
+            queue_config = self.config_manager.get_module_config(ModuleConfig.PROCESSING_QUEUE.value)
 
             if not config:
                 self.logger.warning("No configuration found, using defaults")
@@ -833,6 +886,7 @@ class ProcessingConfigTab(BaseConfigTab):
             self.max_pieces_spin.blockSignals(True)
             self.warning_threshold_spin.blockSignals(True)
             self.confidence_spin.blockSignals(True)
+            self.queue_size_spin.blockSignals(True)
 
             # Load strategy
             strategy = config.get("strategy", "primary")
@@ -852,6 +906,12 @@ class ProcessingConfigTab(BaseConfigTab):
             self.max_pieces_spin.setValue(config.get("max_pieces_per_bin", 50))
             self.warning_threshold_spin.setValue(config.get("bin_warning_threshold", 0.8))
 
+            # Load queue size from processing_queue module
+            if queue_config:
+                self.queue_size_spin.setValue(queue_config.get("queue_size", 100))
+            else:
+                self.queue_size_spin.setValue(100)
+
             # Load thresholds
             self.confidence_spin.setValue(config.get("confidence_threshold", 0.7))
 
@@ -863,6 +923,7 @@ class ProcessingConfigTab(BaseConfigTab):
             self.max_pieces_spin.blockSignals(False)
             self.warning_threshold_spin.blockSignals(False)
             self.confidence_spin.blockSignals(False)
+            self.queue_size_spin.blockSignals(False)
 
             # Update UI based on strategy
             self.on_strategy_changed()
@@ -897,11 +958,19 @@ class ProcessingConfigTab(BaseConfigTab):
             return False
 
         try:
+            # Get sorting configuration
             config = self.get_config()
 
+            # Save sorting configuration
             self.config_manager.update_module_config(
                 self.get_module_name(),
                 config
+            )
+
+            # Save queue_size to processing_queue module
+            self.config_manager.update_module_config(
+                ModuleConfig.PROCESSING_QUEUE.value,
+                {"queue_size": self.queue_size_spin.value()}
             )
 
             self.clear_modified()
@@ -1003,6 +1072,9 @@ class ProcessingConfigTab(BaseConfigTab):
             self.max_bins_spin.setValue(9)
             self.max_pieces_spin.setValue(50)
             self.warning_threshold_spin.setValue(0.8)
+
+            # Reset queue size
+            self.queue_size_spin.setValue(100)
 
             # Reset thresholds
             self.confidence_spin.setValue(0.7)

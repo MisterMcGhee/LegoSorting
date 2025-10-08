@@ -41,6 +41,7 @@ class ModuleConfig(Enum):
     SERVO = "servo"
     ARDUINO_SERVO = "arduino_servo"
     API = "api"
+    SYSTEM = "system"
     UI = "ui"
     GUI = "gui_settings"
     PIECE_IDENTIFIER = "piece_identifier"
@@ -222,6 +223,15 @@ class ConfigSchema:
             },
 
             # =================================================================
+            # System MODULE
+            # Used by: system_tab.py in the configuration_gui
+            # Controls:
+            # =================================================================
+            ModuleConfig.SYSTEM.value: {
+                "threading_enabled": True,
+                "log_level": "INFO"
+            },
+            # =================================================================
             # UI MODULE
             # Used by: display modules (visualization)
             # Controls: On-screen display settings
@@ -266,7 +276,11 @@ class ConfigSchema:
             # Controls: Queue between detection and processing pipelines
             # =================================================================
             ModuleConfig.PROCESSING_QUEUE.value: {
-                "max_queue_size": 50  # Maximum pieces queued for processing
+                "queue_size": 100,  # <-- VERIFY THIS EXISTS
+                "priority_strategy": "exit_zone_first",
+                "enable_batching": False,
+                "batch_size": 5,
+                "batch_timeout": 2.0,
             },
 
             # =================================================================
