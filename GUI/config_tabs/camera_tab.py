@@ -65,17 +65,19 @@ class CameraConfigTab(BaseConfigTab):
     preview_started = pyqtSignal()
     preview_stopped = pyqtSignal()
 
-    def __init__(self, config_manager, parent=None):
+    def __init__(self, config_manager, camera=None, parent=None):
         """
         Initialize camera configuration tab.
 
-        Args:
-            config_manager: Configuration manager instance
-            parent: Parent widget
+    Args:
+        config_manager: Configuration manager instance
+        camera: Shared camera module reference
+        parent: Parent widget
+
         """
         # Initialize camera-related attributes before calling super().__init__
         self.detected_cameras = {}  # {device_id: camera_info}
-        self.camera = None  # Camera module instance
+        self.camera = camera  # Use shared camera reference
         self.preview_active = False
 
         # Call parent init
@@ -505,7 +507,7 @@ class CameraConfigTab(BaseConfigTab):
     # ========================================================================
 
     def start_preview(self):
-        """Start live camera preview."""
+        """Start live camera preview by registering widget as consumer."""
         device_id = self.device_combo.currentData()
 
         if device_id is None:
@@ -515,18 +517,19 @@ class CameraConfigTab(BaseConfigTab):
         self.log_info(f"Starting camera preview for device {device_id}...")
 
         try:
-            # Stop existing camera if any
-            if self.camera:
-                self.stop_preview()
+            # Verify we have shared camera reference
+            if not self.camera:
+                raise Exception("No shared camera reference available")
 
-            # Create camera instance
-            self.camera = create_camera("webcam", self.config_manager)
+            # Unregister first if already registered
+            try:
+                self.camera.unregister_consumer("camera_config_preview")
+            except:
+                pass  # Ignore if not registered
 
-            # Initialize with current device
-            if not self.camera.initialize():
-                raise Exception("Failed to initialize camera")
-
-            # Register preview widget as consumer
+            # Register camera tab's CameraViewRaw widget as a consumer
+            # This widget is SEPARATE from detector tab's CameraViewROI widget
+            # Both receive frames from the SAME camera_module
             success = self.camera.register_consumer(
                 name="camera_config_preview",
                 callback=self.preview_widget.receive_frame,
@@ -537,10 +540,6 @@ class CameraConfigTab(BaseConfigTab):
             if not success:
                 raise Exception("Failed to register preview consumer")
 
-            # Start capture
-            if not self.camera.start_capture():
-                raise Exception("Failed to start camera capture")
-
             # Update UI
             self.preview_active = True
             self.start_preview_btn.setEnabled(False)
@@ -548,32 +547,26 @@ class CameraConfigTab(BaseConfigTab):
             self.preview_status_label.setText("Preview active")
             self.preview_status_label.setStyleSheet("color: green; font-weight: bold;")
 
-            self.log_info("Camera preview started successfully")
+            self.log_info("✓ Camera preview started successfully")
             self.preview_started.emit()
 
         except Exception as e:
             self.log_error(f"Failed to start preview: {e}")
             self.show_validation_error(f"Preview failed: {e}")
             self.stop_preview()
-
     def stop_preview(self):
         """Stop live camera preview."""
         self.log_info("Stopping camera preview...")
 
         try:
-            if self.camera:
-                # Unregister consumer
+            if self.camera and self.preview_active:
+                # Only unregister THIS tab's consumer
+                # DON'T stop or release - other tabs may be using the camera!
                 self.camera.unregister_consumer("camera_config_preview")
 
-                # Stop capture
-                self.camera.stop_capture()
-
-                # Release camera
-                self.camera.release()
-                self.camera = None
-
-            # Clear preview widget
-            self.preview_widget.clear_display()
+            # Clear preview widget display
+            if self.preview_widget:
+                self.preview_widget.clear_display()
 
             # Update UI
             self.preview_active = False
@@ -582,8 +575,21 @@ class CameraConfigTab(BaseConfigTab):
             self.preview_status_label.setText("Preview stopped")
             self.preview_status_label.setStyleSheet("color: gray;")
 
-            self.log_info("Camera preview stopped")
+            self.log_info("✓ Camera preview stopped")
             self.preview_stopped.emit()
 
         except Exception as e:
             self.log_error(f"Error stopping preview: {e}")
+
+    def cleanup(self):
+        """Clean up resources when tab is closed."""
+        self.log_info("Cleaning up camera tab...")
+
+        # Stop preview (only unregisters consumer)
+        if self.preview_active:
+            self.stop_preview()
+
+        # Note: We do NOT release self.camera because it's shared!
+        # configuration_gui.py owns the camera lifecycle
+
+        self.log_info("✓ Camera tab cleanup complete")

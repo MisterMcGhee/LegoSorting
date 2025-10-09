@@ -387,8 +387,8 @@ class ConfigurationGUI(QMainWindow):
         self.add_tab("API", APIConfigTab, self.config_manager)
 
         # Phase 2: Camera-dependent tabs
-        self.add_tab("Camera", CameraConfigTab, self.config_manager)
-
+        self.add_tab("Camera", CameraConfigTab, self.config_manager,
+                     camera=self.camera)
         # Phase 3: Complex tabs with dependencies
         self.add_tab("Detector", DetectorConfigTab, self.config_manager,
                      camera=self.camera)
