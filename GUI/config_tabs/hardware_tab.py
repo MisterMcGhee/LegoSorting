@@ -881,7 +881,7 @@ class HardwareConfigTab(BaseConfigTab):
             count = self.positions_table.rowCount()
             self.positions_status.setText(f"{count} bin position(s) configured")
             self.positions_status.setStyleSheet("color: #7F8C8D; font-style: italic; font-size: 11px;")
-            
+
     def on_position_edited(self, item):
         """Handle manual editing of position angle."""
         if item.column() != 1:  # Only angle column

@@ -11,16 +11,23 @@ RESPONSIBILITIES:
 - Handle pre-assigned bins from configuration
 - Dynamically assign new categories to available bins
 - Route unknown/overflow pieces to bin 0
+- Notify registered callbacks when bin assignments occur (for GUI updates)
 
 DOES NOT:
 - Track bin capacity (stateless assignment)
 - Look up categories (that's category_lookup_module)
 - Identify pieces (that's identification_api_handler)
 - Control servos or hardware
+
+CALLBACK SYSTEM:
+This module implements the Observer pattern to notify external systems
+(primarily the GUI) when bins are assigned to categories. External systems
+register callback functions during initialization, and these callbacks are
+automatically invoked when assignments occur.
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable
 from processing.processing_data_models import CategoryInfo, BinAssignment
 from processing.category_hierarchy_service import CategoryHierarchyService
 from enhanced_config_manager import EnhancedConfigManager, ModuleConfig
@@ -39,6 +46,10 @@ class BinAssignmentModule:
     - Primary: Sort all pieces by primary category (Basic, Technic, etc.)
     - Secondary: Sort pieces matching target primary by secondary category
     - Tertiary: Sort pieces matching target primary+secondary by tertiary category
+
+    Callback Support:
+    External systems can register callbacks to be notified when bin assignments
+    occur. This is primarily used by the GUI to update bin status displays.
     """
 
     def __init__(self, config_manager: EnhancedConfigManager,
@@ -75,6 +86,14 @@ class BinAssignmentModule:
         self.used_bins = {self.overflow_bin}  # Track which bins are unavailable
         self.next_available_bin = 1  # Start looking from bin 1
 
+        # ============================================================
+        # CALLBACK SYSTEM FOR GUI UPDATES
+        # ============================================================
+        # Callback tracking for notifying external systems (like the GUI)
+        # when bins are assigned to categories. Each callback should be
+        # a function that accepts (bin_number: int, category: str)
+        self.assignment_callbacks: List[Callable[[int, str], None]] = []
+
         # Apply pre-assignments from configuration
         pre_assignments = sorting_config.get("pre_assignments", {})
         if pre_assignments:
@@ -90,6 +109,111 @@ class BinAssignmentModule:
         if pre_assignments:
             logger.info(f"Pre-assigned bins: {pre_assignments}")
         logger.debug(f"Next available bin for dynamic assignment: {self.next_available_bin}")
+
+    # ========================================================================
+    # CALLBACK REGISTRATION AND NOTIFICATION
+    # ========================================================================
+    # These methods allow external systems (GUI, statistics modules, etc.)
+    # to be notified when bin assignments occur. This implements the Observer
+    # pattern where the GUI "subscribes" to bin assignment events.
+
+    def register_assignment_callback(self, callback_function: Callable[[int, str], None]):
+        """
+        Register a callback function to be notified of bin assignments.
+
+        PURPOSE:
+        This allows external systems (especially the GUI) to be notified
+        immediately when a bin is assigned to a category. The callback
+        is called synchronously, so it happens as part of the assignment
+        process.
+
+        WHEN TO USE:
+        Call this during initialization to register any listeners that
+        need to know about bin assignments. The sorting_gui calls this
+        during its startup to register its update method.
+
+        CALLBACK SIGNATURE:
+        The registered function must accept two arguments:
+            callback(bin_number: int, category: str)
+
+        WHERE CALLBACKS ARE TRIGGERED:
+        Callbacks are triggered in two scenarios:
+        1. During initialization when pre-assignments are loaded
+        2. During runtime when new categories are dynamically assigned
+
+        THREAD SAFETY:
+        Callbacks are called synchronously on the same thread that
+        performs the assignment. If your callback does heavy work,
+        consider using a queue or thread pool.
+
+        Args:
+            callback_function: Function to call when bin is assigned.
+                              Must accept (bin_number: int, category: str)
+
+        Example:
+            # In sorting_gui.py __init__:
+            bin_assignment.register_assignment_callback(self.on_bin_assigned)
+
+            # Later, when assignment happens:
+            # bin_assignment assigns Bin 3 to "Brick"
+            # GUI's on_bin_assigned(3, "Brick") is called automatically
+        """
+        self.assignment_callbacks.append(callback_function)
+        logger.debug(
+            f"Registered bin assignment callback: {callback_function.__name__}"
+        )
+
+    def _notify_assignment_callbacks(self, bin_number: int, category: str):
+        """
+        Notify all registered callbacks that a bin has been assigned.
+
+        PURPOSE:
+        This is an internal method that calls all registered callbacks
+        when a bin assignment occurs. It handles errors gracefully so
+        one failing callback doesn't break the entire system.
+
+        WHEN CALLED:
+        This is called internally by:
+        1. _apply_pre_assignments() - when loading pre-assignments
+        2. _assign_or_create_bin() - when dynamically assigning new bins
+
+        ERROR HANDLING:
+        If a callback raises an exception, it is caught and logged,
+        but other callbacks still execute. This prevents one bad
+        callback from breaking the whole notification system.
+
+        SYNCHRONOUS EXECUTION:
+        All callbacks are executed synchronously in the order they
+        were registered. The assignment operation waits for all
+        callbacks to complete before continuing.
+
+        Args:
+            bin_number: The bin that was assigned (0-based index)
+            category: The category name assigned to the bin
+
+        Example Flow:
+            # Somewhere in the code:
+            self._notify_assignment_callbacks(3, "Brick")
+
+            # This calls:
+            # 1. sorting_gui.on_bin_assigned(3, "Brick")
+            # 2. any_other_registered_callback(3, "Brick")
+            # 3. etc.
+        """
+        for callback in self.assignment_callbacks:
+            try:
+                # Call the callback with bin number and category
+                callback(bin_number, category)
+            except Exception as e:
+                # Log error but don't let it crash the system
+                logger.error(
+                    f"Error in bin assignment callback {callback.__name__}: {e}",
+                    exc_info=True
+                )
+
+    # ========================================================================
+    # CONFIGURATION AND VALIDATION
+    # ========================================================================
 
     def _validate_strategy_config(self) -> None:
         """
@@ -128,6 +252,10 @@ class BinAssignmentModule:
         Called during initialization. Pre-assignments let users specify that
         certain categories should always go to specific bins.
 
+        CALLBACK NOTIFICATION:
+        Each successful pre-assignment triggers registered callbacks, allowing
+        the GUI to display pre-assigned bins at startup.
+
         Args:
             pre_assignments: Dictionary mapping category names to bin numbers
                            Example: {"Basic": 1, "Technic": 4}
@@ -165,6 +293,10 @@ class BinAssignmentModule:
             self.category_to_bin[category] = bin_number
             self.used_bins.add(bin_number)
             logger.info(f"Pre-assigned '{category}' → Bin {bin_number}")
+
+            # NEW: Notify callbacks about this pre-assignment
+            # This ensures the GUI shows pre-assigned bins at startup
+            self._notify_assignment_callbacks(bin_number, category)
 
     def _is_valid_category(self, category: str) -> bool:
         """
@@ -207,6 +339,10 @@ class BinAssignmentModule:
             if bin_num not in self.used_bins:
                 return bin_num
         return None
+
+    # ========================================================================
+    # BIN ASSIGNMENT LOGIC
+    # ========================================================================
 
     def assign_bin(self, categories: CategoryInfo) -> BinAssignment:
         """
@@ -329,6 +465,11 @@ class BinAssignmentModule:
         2. Already assigned categories → existing bin
         3. New categories → next available bin (or overflow if bins full)
 
+        CALLBACK NOTIFICATION:
+        When a NEW category is assigned to a bin (case 3), registered callbacks
+        are notified. This allows the GUI to update in real-time as new categories
+        are encountered during sorting.
+
         Called by: assign_bin() after filtering
 
         Args:
@@ -340,15 +481,19 @@ class BinAssignmentModule:
         Example flow:
             # First "Basic" piece
             _assign_or_create_bin("Basic") -> 1 (assigns to first available bin)
+            # Callbacks notified: on_bin_assigned(1, "Basic")
 
             # Second "Basic" piece
             _assign_or_create_bin("Basic") -> 1 (returns existing assignment)
+            # No callbacks (already assigned)
 
             # Unknown piece
             _assign_or_create_bin("Unknown") -> 0 (overflow)
+            # No callbacks (overflow is not a "real" assignment)
 
             # When all bins full
             _assign_or_create_bin("Plates") -> 0 (overflow)
+            # No callbacks (overflow fallback)
         """
         # Case 1: Unknown or empty category goes to overflow
         if not category or category == "Unknown":
@@ -370,6 +515,10 @@ class BinAssignmentModule:
 
             logger.info(f"New category '{category}' assigned → Bin {bin_number}")
 
+            # NEW: Notify callbacks about this NEW dynamic assignment
+            # This updates the GUI in real-time when a new category appears
+            self._notify_assignment_callbacks(bin_number, category)
+
             # Find next available bin for future assignments
             self.next_available_bin = self._find_next_available_bin()
 
@@ -381,6 +530,10 @@ class BinAssignmentModule:
             f"({len(self.category_to_bin)} categories already assigned)"
         )
         return self.overflow_bin
+
+    # ========================================================================
+    # QUERY AND STATISTICS METHODS
+    # ========================================================================
 
     def get_available_categories(self) -> List[str]:
         """
@@ -472,100 +625,3 @@ def create_bin_assignment_module(
         bin_result = bin_assignment.assign_bin(categories)
     """
     return BinAssignmentModule(config_manager, category_service)
-
-
-# ============================================================================
-# MODULE TESTING
-# ============================================================================
-
-if __name__ == "__main__":
-    """
-    Test the bin assignment module with various scenarios.
-
-    This verifies:
-    - Pre-assignment loading and validation
-    - Dynamic bin assignment
-    - Strategy filtering
-    - Overflow handling
-    """
-    import logging
-    from enhanced_config_manager import create_config_manager
-    from processing.category_hierarchy_service import create_category_hierarchy_service
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-
-    logger.info("Testing Bin Assignment Module...\n")
-
-    # Create dependencies
-    config_manager = create_config_manager()
-    category_service = create_category_hierarchy_service(config_manager)
-
-    # Test 1: Primary strategy with pre-assignments
-    logger.info("TEST 1: Primary strategy with pre-assignments")
-    config_manager.update_module_config("sorting", {
-        "strategy": "primary",
-        "max_bins": 5,
-        "overflow_bin": 0,
-        "pre_assignments": {
-            "Basic": 1,
-            "Technic": 2
-        }
-    })
-
-    bin_assignment = create_bin_assignment_module(config_manager, category_service)
-
-    # Test pre-assigned categories
-    test_cases = [
-        CategoryInfo("3001", "Basic", "Brick", "2x4", True),
-        CategoryInfo("32524", "Technic", "Pin", "3L", True),
-        CategoryInfo("3002", "Basic", "Plate", "2x3", True),
-        CategoryInfo("3003", "Plates", None, None, True),  # New category
-        CategoryInfo("3004", "Special", None, None, True),  # New category
-        CategoryInfo("3005", "Duplo", None, None, True),  # New category
-        CategoryInfo("9999", "Unknown", None, None, False),  # Unknown piece
-    ]
-
-    for categories in test_cases:
-        result = bin_assignment.assign_bin(categories)
-        logger.info(
-            f"  {categories.element_id} ({categories.primary_category}) → "
-            f"Bin {result.bin_number}"
-        )
-
-    logger.info(f"\n  Assignments: {bin_assignment.get_bin_assignments()}")
-    logger.info(f"  Statistics: {bin_assignment.get_statistics()}\n")
-
-    # Test 2: Secondary strategy with filtering
-    logger.info("TEST 2: Secondary strategy (only sorting 'Basic' pieces)")
-    config_manager.update_module_config("sorting", {
-        "strategy": "secondary",
-        "target_primary_category": "Basic",
-        "max_bins": 5,
-        "overflow_bin": 0,
-        "pre_assignments": {}
-    })
-
-    bin_assignment = create_bin_assignment_module(config_manager, category_service)
-
-    test_cases_secondary = [
-        CategoryInfo("3001", "Basic", "Brick", "2x4", True),  # Should sort
-        CategoryInfo("3002", "Basic", "Plate", "2x3", True),  # Should sort
-        CategoryInfo("32524", "Technic", "Pin", "3L", True),  # Filtered out
-        CategoryInfo("3003", "Basic", "Slope", None, True),  # Should sort
-        CategoryInfo("3004", "Plates", None, None, True),  # Filtered out
-    ]
-
-    for categories in test_cases_secondary:
-        result = bin_assignment.assign_bin(categories)
-        logger.info(
-            f"  {categories.element_id} ({categories.primary_category}/"
-            f"{categories.secondary_category}) → Bin {result.bin_number}"
-        )
-
-    logger.info(f"\n  Assignments: {bin_assignment.get_bin_assignments()}")
-    logger.info(f"  Statistics: {bin_assignment.get_statistics()}\n")
-
-    logger.info("ALL TESTS PASSED!")

@@ -17,6 +17,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/unknown_pieces.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="\Lego_Categories.csv">
           <value>
             <Attribute>
