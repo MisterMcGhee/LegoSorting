@@ -122,10 +122,12 @@ class ArduinoServoController:
             except ValueError as e:
                 logger.error(f"Invalid positions in config: {e}")
                 logger.info("Auto-calculating valid defaults")
+                # Pass max_bins directly - it means TOTAL bins
                 self.bin_positions = self.auto_calculate_bin_positions(self.max_bins)
                 self._save_default_positions_to_config()
         else:
             logger.info("No bin positions found - creating defaults (first run)")
+            # Pass max_bins directly - it means TOTAL bins
             self.bin_positions = self.auto_calculate_bin_positions(self.max_bins)
             self._save_default_positions_to_config()
 
@@ -156,38 +158,28 @@ class ArduinoServoController:
     # SECTION 1: BIN POSITION MANAGEMENT
     # ========================================================================
 
-    def auto_calculate_bin_positions(self, num_bins: int) -> Dict[int, float]:
+    def auto_calculate_bin_positions(self, total_bins: int) -> Dict[int, float]:
         """
-        Calculate evenly-spaced positions for bins across servo range.
+        Calculate evenly-spaced positions for ALL bins across servo range.
 
-        This function ONLY calculates and returns positions. It does NOT
-        save them to config. The caller (config GUI) decides whether to
-        apply these positions by updating the config directly.
-
-        The only exception is during __init__ if no positions exist, where
-        the internal _save_default_positions_to_config() is called as a
-        bootstrap operation.
+        This function distributes ALL bins (including overflow bin 0) evenly
+        across the usable servo range. No bin gets special positioning.
 
         Args:
-            num_bins: Number of sorting bins (1-9, excludes overflow bin 0)
+            total_bins: TOTAL number of bins INCLUDING overflow bin 0.
+                       For example, if total_bins=6, creates bins 0,1,2,3,4,5.
+                       Bin 0 is the overflow bin, bins 1-(total_bins-1) are sorting bins.
 
         Returns:
-            Dictionary mapping bin numbers to angles: {0: 90, 1: 10, 2: 30, ...}
+            Dictionary mapping bin numbers to angles.
 
         Example:
-            # In config GUI:
-            positions = servo.auto_calculate_bin_positions(5)
-            # GUI then calls:
-            config_manager.update_module_config('arduino_servo',
-                                                {'bin_positions': positions})
-
-        Algorithm:
-            With 5 bins and range 10-170°:
-            - Usable range: 10-170° (160° total)
-            - Spacing: 160° / 4 = 40°
-            - Result: {0: 90, 1: 10, 2: 50, 3: 90, 4: 130, 5: 170}
+            # Want 6 total bins (0-5)?
+            positions = auto_calculate_bin_positions(6)
+            # Returns: {0: 10, 1: 42, 2: 74, 3: 106, 4: 138, 5: 170}
+            # All 6 bins evenly distributed with 32° spacing
         """
-        logger.info(f"Auto-calculating positions for {num_bins} bins")
+        logger.info(f"Auto-calculating positions for {total_bins} TOTAL bins")
 
         # Define usable range (leave margins at edges to avoid mechanical limits)
         edge_margin = 10  # degrees
@@ -197,23 +189,27 @@ class ArduinoServoController:
 
         positions = {}
 
-        # Overflow bin (0) always at default position
-        positions[0] = float(self.default_position)
-
-        # Calculate regular bin positions (1 through num_bins)
-        if num_bins == 1:
-            # Single bin: center of range
-            positions[1] = usable_min + (usable_range / 2.0)
+        if total_bins == 0:
+            logger.error("Cannot calculate positions for 0 bins!")
+            raise ValueError("total_bins must be at least 1")
+        elif total_bins == 1:
+            # Only overflow bin - place at center
+            positions[0] = usable_min + (usable_range / 2.0)
         else:
-            # Multiple bins: evenly distribute across range
-            spacing = usable_range / (num_bins - 1)
+            # Distribute ALL bins evenly across the range
+            # This includes the overflow bin (0) as part of the distribution
+            spacing = usable_range / (total_bins - 1)
 
-            for i in range(num_bins):
-                bin_number = i + 1  # Bins numbered 1 through num_bins
+            for i in range(total_bins):
+                bin_number = i  # Bins 0, 1, 2, 3, ... total_bins-1
                 angle = usable_min + (i * spacing)
-                positions[bin_number] = round(angle, 1)  # Round to 1 decimal place
+                positions[bin_number] = round(angle, 1)
 
-        logger.info(f"Auto-calculated positions: {positions}")
+        logger.info(f"Auto-calculated {len(positions)} total positions: {positions}")
+        logger.info(f"  Overflow bin (0): {positions[0]}°")
+        if total_bins > 1:
+            logger.info(f"  Sorting bins (1-{total_bins - 1}): distributed evenly")
+
         return positions
 
     def reload_positions_from_config(self) -> bool:

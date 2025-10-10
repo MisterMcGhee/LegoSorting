@@ -317,7 +317,7 @@ class HardwareConfigTab(BaseConfigTab):
         # Control buttons row
         button_layout = QHBoxLayout()
 
-        self.auto_calc_btn = QPushButton("⚙️ Auto-Calculate")
+        self.auto_calc_btn = QPushButton("Auto-Calculate")
         self.auto_calc_btn.setToolTip("Calculate evenly-spaced positions for all bins")
         self.auto_calc_btn.clicked.connect(self.auto_calculate_positions)
         self.auto_calc_btn.setStyleSheet("""
@@ -540,7 +540,7 @@ class HardwareConfigTab(BaseConfigTab):
             row = self.positions_table.rowCount()
             self.positions_table.insertRow(row)
 
-            # Bin number
+            # Bin number (never editable)
             bin_item = QTableWidgetItem(str(bin_num))
             bin_item.setTextAlignment(Qt.AlignCenter)
             bin_item.setFlags(bin_item.flags() & ~Qt.ItemIsEditable)
@@ -551,20 +551,23 @@ class HardwareConfigTab(BaseConfigTab):
 
             self.positions_table.setItem(row, 0, bin_item)
 
-            # Angle
+            # Angle (editable in calibration mode)
             angle_item = QTableWidgetItem(f"{angle:.1f}")
             angle_item.setTextAlignment(Qt.AlignCenter)
-            angle_item.setData(Qt.UserRole, bin_num)  # Store bin number for editing
+            angle_item.setData(Qt.UserRole, bin_num)  # Store bin number for editing!
 
-            # Only editable in calibration mode
-            if not self.calibration_mode_check.isChecked():
+            # Set editability based on current calibration mode
+            if self.calibration_mode_check.isChecked():
+                angle_item.setFlags(angle_item.flags() | Qt.ItemIsEditable)
+                angle_item.setBackground(QColor(255, 255, 200))  # Light yellow for editing
+            else:
                 angle_item.setFlags(angle_item.flags() & ~Qt.ItemIsEditable)
 
             self.positions_table.setItem(row, 1, angle_item)
 
             # Test button
             test_btn = QPushButton("▶ Test")
-            test_btn.setToolTip(f"Test bin {bin_num}")
+            test_btn.setToolTip(f"Test bin {bin_num} at current angle")
             test_btn.clicked.connect(lambda checked, b=bin_num: self.test_single_position(b))
             test_btn.setStyleSheet("""
                 QPushButton {
@@ -584,7 +587,10 @@ class HardwareConfigTab(BaseConfigTab):
 
         # Update status
         count = len(positions)
-        self.positions_status.setText(f"{count} bin position(s) configured")
+        if self.calibration_mode_check.isChecked():
+            self.positions_status.setText(f"⚠️ CALIBRATION MODE: {count} bins • Double-click to edit")
+        else:
+            self.positions_status.setText(f"{count} bin position(s) configured")
 
     def auto_calculate_positions(self):
         """Auto-calculate evenly-spaced bin positions."""
@@ -600,7 +606,7 @@ class HardwareConfigTab(BaseConfigTab):
             return
 
         try:
-            # Calculate positions using arduino module
+            # Pass current_bin_count directly - it means TOTAL bins
             positions = self.arduino_module.auto_calculate_bin_positions(self.current_bin_count)
 
             self.logger.info(f"Calculated positions: {positions}")
@@ -614,10 +620,13 @@ class HardwareConfigTab(BaseConfigTab):
             # Emit signal
             self.positions_changed.emit(positions)
 
+            sorting_bins = self.current_bin_count - 1
             QMessageBox.information(
                 self,
                 "Positions Calculated",
                 f"✓ Auto-calculated positions for {self.current_bin_count} bins.\n\n"
+                f"• Bin 0: Overflow\n"
+                f"• Bins 1-{sorting_bins}: Sorting bins\n\n"
                 "Positions are evenly spaced across the servo range.\n"
                 "Click 'Save Configuration' to apply these positions."
             )
@@ -632,7 +641,7 @@ class HardwareConfigTab(BaseConfigTab):
 
     def test_single_position(self, bin_num: int):
         """
-        Test a single bin position.
+        Test a single bin position using the current angle in the table.
 
         Args:
             bin_num: Bin number to test
@@ -656,21 +665,48 @@ class HardwareConfigTab(BaseConfigTab):
             )
             return
 
+        # Get the current angle from the table (not from arduino_module!)
+        target_angle = None
+        for row in range(self.positions_table.rowCount()):
+            bin_item = self.positions_table.item(row, 0)
+            angle_item = self.positions_table.item(row, 1)
+
+            if bin_item and angle_item:
+                if int(bin_item.text()) == bin_num:
+                    try:
+                        target_angle = float(angle_item.text())
+                        break
+                    except ValueError:
+                        self.logger.error(f"Invalid angle in table for bin {bin_num}")
+
+        if target_angle is None:
+            QMessageBox.warning(
+                self,
+                "Bin Not Found",
+                f"Could not find bin {bin_num} in position table."
+            )
+            return
+
         try:
-            # Test the position
-            success = self.arduino_module.test_single_bin(bin_num, dwell_time=2.0)
+            # Move to the angle specified in the table
+            success = self.arduino_module.move_to_angle(target_angle, wait=True)
 
             if success:
                 QMessageBox.information(
                     self,
                     "Test Successful",
-                    f"✓ Bin {bin_num} tested successfully!"
+                    f"✓ Bin {bin_num} moved to {target_angle}°\n\n"
+                    f"Holding position for 2 seconds..."
                 )
+                # Hold briefly then return home
+                import time
+                time.sleep(2.0)
+                self.arduino_module.home()
             else:
                 QMessageBox.warning(
                     self,
                     "Test Failed",
-                    f"Failed to test bin {bin_num}.\n\n"
+                    f"Failed to move to {target_angle}° for bin {bin_num}.\n\n"
                     "Check logs for details."
                 )
 
@@ -812,27 +848,40 @@ class HardwareConfigTab(BaseConfigTab):
         if is_calibration:
             self.logger.info("Calibration mode enabled")
 
-            # Enable editing in table
+            # Enable editing in table with single-click on selected item
+            self.positions_table.setEditTriggers(
+                QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed
+            )
+
+            # Enable editing for angle items and highlight them
             for row in range(self.positions_table.rowCount()):
                 angle_item = self.positions_table.item(row, 1)
                 if angle_item:
                     angle_item.setFlags(angle_item.flags() | Qt.ItemIsEditable)
+                    # Light yellow background to show it's editable
+                    angle_item.setBackground(QColor(255, 255, 200))
 
-            self.positions_status.setText("CALIBRATION MODE: Manually edit angles and test")
-            self.positions_status.setStyleSheet("color: red; font-weight: bold;")
+            self.positions_status.setText(
+                "⚠️ CALIBRATION MODE: Click angle to edit • Test after changes • Save when done")
+            self.positions_status.setStyleSheet("color: #E67E22; font-weight: bold; font-size: 11px;")
+
         else:
             self.logger.info("Calibration mode disabled")
 
             # Disable editing in table
+            self.positions_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+            # Disable editing for angle items and remove highlight
             for row in range(self.positions_table.rowCount()):
                 angle_item = self.positions_table.item(row, 1)
                 if angle_item:
                     angle_item.setFlags(angle_item.flags() & ~Qt.ItemIsEditable)
+                    angle_item.setBackground(QColor(255, 255, 255))  # White
 
             count = self.positions_table.rowCount()
             self.positions_status.setText(f"{count} bin position(s) configured")
-            self.positions_status.setStyleSheet("color: #7F8C8D; font-style: italic;")
-
+            self.positions_status.setStyleSheet("color: #7F8C8D; font-style: italic; font-size: 11px;")
+            
     def on_position_edited(self, item):
         """Handle manual editing of position angle."""
         if item.column() != 1:  # Only angle column
@@ -841,43 +890,63 @@ class HardwareConfigTab(BaseConfigTab):
         if not self.calibration_mode_check.isChecked():
             return
 
+        # Block signals temporarily to prevent recursion
+        self.positions_table.blockSignals(True)
+
         try:
             # Get edited angle
-            angle = float(item.text())
+            new_angle_text = item.text().strip()
+            new_angle = float(new_angle_text)
+
+            # Get bin number
+            bin_num = item.data(Qt.UserRole)
+            if bin_num is None:
+                # Try to get from row
+                row = item.row()
+                bin_item = self.positions_table.item(row, 0)
+                if bin_item:
+                    bin_num = int(bin_item.text())
 
             # Validate range
-            if angle < 0 or angle > 180:
+            if new_angle < 0 or new_angle > 180:
+                self.positions_table.blockSignals(False)
                 QMessageBox.warning(
                     self,
                     "Invalid Angle",
                     f"Angle must be between 0° and 180°.\n\n"
-                    f"You entered: {angle}°"
+                    f"You entered: {new_angle}°"
                 )
-                # Revert to original value
-                bin_num = item.data(Qt.UserRole)
-                if self.arduino_module:
-                    positions = self.arduino_module.get_bin_positions()
-                    if bin_num in positions:
-                        item.setText(f"{positions[bin_num]:.1f}")
+                # Revert - but we need to know what it was before
+                # For now, just highlight the cell red
+                item.setBackground(QColor(255, 200, 200))  # Light red
                 return
 
-            # Mark as modified
-            self.mark_modified()
+            # Valid angle - format it nicely and mark as modified
+            item.setText(f"{new_angle:.1f}")
+            item.setBackground(QColor(200, 255, 200))  # Light green to show it's changed
 
-            self.logger.info(f"Position edited: Bin {item.data(Qt.UserRole)} -> {angle}°")
+            self.mark_modified()
+            self.logger.info(f"Position edited: Bin {bin_num} -> {new_angle}°")
+
+            # Update status to remind user to test and save
+            self.positions_status.setText(
+                f"⚠️ Bin {bin_num} changed to {new_angle}° • Click 'Test' to verify • Save when done"
+            )
 
         except ValueError:
+            self.positions_table.blockSignals(False)
             QMessageBox.warning(
                 self,
                 "Invalid Input",
-                "Please enter a valid number for the angle."
+                f"Please enter a valid number for the angle.\n\n"
+                f"You entered: '{item.text()}'"
             )
-            # Revert to original value
-            bin_num = item.data(Qt.UserRole)
-            if self.arduino_module:
-                positions = self.arduino_module.get_bin_positions()
-                if bin_num in positions:
-                    item.setText(f"{positions[bin_num]:.1f}")
+            # Highlight red
+            item.setBackground(QColor(255, 200, 200))
+            return
+
+        finally:
+            self.positions_table.blockSignals(False)
 
     # ========================================================================
     # INTER-TAB COMMUNICATION
@@ -887,11 +956,8 @@ class HardwareConfigTab(BaseConfigTab):
         """
         Update bin count from processing tab.
 
-        This should be connected to processing tab's bins_changed signal.
-        When bin count changes, positions are auto-recalculated.
-
         Args:
-            bin_count: New bin count
+            bin_count: New TOTAL bin count (including overflow bin 0)
         """
         if bin_count == self.current_bin_count:
             return
@@ -902,11 +968,12 @@ class HardwareConfigTab(BaseConfigTab):
         # Auto-calculate new positions
         if self.arduino_module:
             try:
+                # Pass bin_count directly - it means TOTAL bins
                 positions = self.arduino_module.auto_calculate_bin_positions(bin_count)
                 self.populate_positions_table(positions)
                 self.mark_modified()
 
-                self.logger.info(f"Auto-calculated positions for {bin_count} bins")
+                self.logger.info(f"Auto-calculated positions for {bin_count} total bins")
             except Exception as e:
                 self.logger.error(f"Failed to auto-calculate positions: {e}")
 
@@ -918,6 +985,12 @@ class HardwareConfigTab(BaseConfigTab):
         """Load configuration from config_manager and populate UI."""
         try:
             config = self.get_module_config(self.get_module_name())
+
+            # Also get sorting config for bin count
+            sorting_config = self.get_module_config(ModuleConfig.SORTING.value)
+            self.current_bin_count = sorting_config.get('max_bins', 9)
+
+            self.logger.info(f"Loaded bin count: {self.current_bin_count}")
 
             if not config:
                 self.logger.warning("No configuration found, using defaults")
@@ -1020,16 +1093,20 @@ class HardwareConfigTab(BaseConfigTab):
 
     def get_config(self) -> Dict[str, Any]:
         """Return current configuration as a dictionary."""
-        # Get bin positions from table
+        # Get bin positions from table (this is the source of truth!)
         bin_positions = {}
         for row in range(self.positions_table.rowCount()):
             bin_item = self.positions_table.item(row, 0)
             angle_item = self.positions_table.item(row, 1)
 
             if bin_item and angle_item:
-                bin_num = int(bin_item.text())
-                angle = float(angle_item.text())
-                bin_positions[str(bin_num)] = angle  # JSON requires string keys
+                try:
+                    bin_num = int(bin_item.text())
+                    angle = float(angle_item.text())
+                    bin_positions[str(bin_num)] = angle  # JSON requires string keys
+                except ValueError as e:
+                    self.logger.error(f"Invalid bin position in table row {row}: {e}")
+                    # Skip invalid rows
 
         # Extract port (may have description attached)
         port_text = self.port_combo.currentText()
