@@ -908,23 +908,25 @@ class SortingGUI(QMainWindow):
         and identified pieces, then updates camera view.
         """
         try:
+            # Check if detector exists (won't exist in test mode)
+            if self.detector is None:
+                return  # Skip update if no detector
+
             # Get tracked pieces from detector
             tracked_pieces = self.detector.get_tracked_pieces()
 
             # Convert list to dict for lookup
             tracked_dict = {p.id: p for p in tracked_pieces}
 
-            # Get identified pieces from processing
-            # NOTE: This assumes processing_coordinator has a method to get
-            #       the current identified pieces dict. Adjust as needed.
+            # Get identified pieces from ORCHESTRATOR instead of processing
             identified_dict = {}
-            if hasattr(self.processing, 'get_identified_pieces'):
-                identified_dict = self.processing.get_identified_pieces()
+            if self.orchestrator and hasattr(self.orchestrator, 'get_identified_pieces'):
+                identified_dict = self.orchestrator.get_identified_pieces()
 
             # Update camera view with both dicts
             self.camera_view.update_piece_tracking(tracked_dict, identified_dict)
 
-            # Set tracked pieces for drawing (convert TrackedPiece objects to dicts)
+            # Set tracked pieces for drawing
             tracked_pieces_dicts = []
             for piece in tracked_pieces:
                 tracked_pieces_dicts.append({

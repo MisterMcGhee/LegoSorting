@@ -237,36 +237,28 @@ class ProcessingCoordinator:
         """
         Get dictionary of currently identified pieces.
 
+        NOTE: This method is not implemented in ProcessingCoordinator.
+        The main orchestrator (LegoSorting008) maintains the authoritative
+        dictionary of identified pieces.
+
         PURPOSE:
-        This method allows external systems (especially the GUI) to
-        access the current state of identified pieces for display
-        purposes like color-coding piece tracking by processing stage.
+        This placeholder method exists for interface compatibility but
+        returns an empty dict. The GUI and other systems should get the
+        identified pieces dictionary from the orchestrator instead:
 
-        IMPLEMENTATION NOTE:
-        The processing_coordinator doesn't naturally maintain a dict
-        of identified pieces - it processes them and passes them along.
-        This method is provided for GUI integration but needs to be
-        implemented based on your architecture decisions.
+            identified_dict = orchestrator.get_identified_pieces()
 
-        OPTIONS FOR IMPLEMENTATION:
-        1. Add a dict that stores recent identified pieces:
-           - Add self.identified_pieces_cache = {} in __init__
-           - Store pieces in _notify_identification_callbacks()
-           - Return that cache here
-
-        2. Have the orchestrator maintain this dict and pass it to GUI
-           - The main orchestrator (LegoSorting008) tracks everything
-           - GUI gets the dict from orchestrator instead
-
-        3. Return empty dict for now and implement later if needed
-           - Current approach - allows code to run without full implementation
-
-        This is a placeholder that should be implemented based on your
-        architecture decisions.
+        WHY ORCHESTRATOR HANDLES THIS:
+        - ProcessingCoordinator processes one piece at a time
+        - It doesn't maintain state across multiple pieces
+        - LegoSorting008 coordinates the entire system and tracks all pieces
+        - This avoids duplication and keeps state management centralized
 
         Returns:
-            Dictionary mapping piece_id to IdentifiedPiece objects
-            Currently returns empty dict as placeholder
+            Empty dictionary (actual data maintained by orchestrator)
+
+        See Also:
+            LegoSorting008.get_identified_pieces() - The actual implementation
         """
         # TODO: Implement based on architecture decision
         # For now, return empty dict to allow GUI to function
