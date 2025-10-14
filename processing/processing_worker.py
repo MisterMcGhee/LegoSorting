@@ -30,7 +30,8 @@ import logging
 import threading
 import time
 from typing import Optional
-from processing_queue_manager import ProcessingQueueManager
+
+from processing.processing_queue_manager import ProcessingQueueManager
 from processing.processing_coordinator import ProcessingCoordinator
 from enhanced_config_manager import EnhancedConfigManager, ModuleConfig
 
