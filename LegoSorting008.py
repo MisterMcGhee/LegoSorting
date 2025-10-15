@@ -89,8 +89,6 @@ from hardware.hardware_coordinator import HardwareCoordinator, create_hardware_c
 from hardware.arduino_servo_module import create_arduino_servo_controller
 from hardware.bin_capacity_module import create_bin_capacity_manager
 
-# Thread management
-from thread_manager import create_thread_manager
 
 # ============================================================================
 # LOGGING CONFIGURATION
@@ -191,7 +189,6 @@ class LegoSorting008(QObject):
         self.processing_queue_manager: Optional[ProcessingQueueManager] = None
         self.processing_coordinator: Optional[ProcessingCoordinator] = None
         self.processing_workers: list = []
-        self.thread_manager = None
 
         # Hardware pipeline
         self.hardware_coordinator: Optional[HardwareCoordinator] = None
@@ -307,20 +304,15 @@ class LegoSorting008(QObject):
         try:
             # ================================================================
             # STEP 1: Thread Manager
+            # No longer needed. Processing_queue_manager owns threading control.
             # ================================================================
-            logger.info("Step 1: Creating thread manager...")
-            self.thread_manager = create_thread_manager(self.config_manager)
-            logger.info("✓ Thread manager created")
 
-            # ================================================================
             # STEP 2: Camera Module
             # ================================================================
             logger.info("Step 2: Creating camera module...")
 
+            # Factory handles initialization and raises CameraError if it fails
             self.camera = create_camera("webcam", self.config_manager)
-
-            if not self.camera.is_initialized:
-                raise RuntimeError("Camera initialization failed")
 
             logger.info("✓ Camera module created and initialized")
 
@@ -349,6 +341,28 @@ class LegoSorting008(QObject):
 
             logger.info("✓ Detection pipeline ready")
 
+            logger.info("Configuring ROI for detection pipeline...")
+
+            # Get a sample frame
+            sample_frame = self.camera.get_frame()
+            if sample_frame is None:
+                raise RuntimeError("Could not get sample frame for ROI configuration")
+
+            # Get ROI from config
+            roi_config = self.config_manager.get_module_config("detector_roi")
+            roi_coords = (
+                roi_config["x"],
+                roi_config["y"],
+                roi_config["w"],
+                roi_config["h"]
+            )
+
+            logger.info(f"Setting ROI: {roi_coords}")
+
+            # Configure detector coordinator with ROI
+            self.detector_coordinator.set_roi_from_sample_frame(sample_frame, roi_coords)
+
+            logger.info("✓ ROI configured for detection pipeline")
             # ================================================================
             # PHASE 3: DETECTION PIPELINE TEST
             # ================================================================
@@ -500,20 +514,22 @@ class LegoSorting008(QObject):
 
             test_frame_count += 1
 
-            # Process frame through detector
-            detection_result = self.detector_coordinator.process_frame(frame)
-            tracked_pieces = detection_result.get('tracked_pieces', [])
+            # Process frame through detector (this updates internal tracking state)
+            detection_result = self.detector_coordinator.process_frame_for_consumer(frame)
+
+            # Get TrackedPiece OBJECTS directly (not from the dict result)
+            tracked_pieces = self.detector_coordinator.get_tracked_pieces()
 
             # Log every 30 frames (once per second at 30 FPS)
             if test_frame_count % 30 == 0:
                 logger.info(f"Frame {test_frame_count}: {len(tracked_pieces)} pieces tracked")
 
                 for piece in tracked_pieces:
-                    test_pieces_seen.add(piece.id)
+                    test_pieces_seen.add(piece.id)  # ✓ TrackedPiece object attribute
 
                     # Build zone status string
                     zones = []
-                    if piece.in_entry_zone:
+                    if piece.in_entry_zone:  # ✓ TrackedPiece object attribute
                         zones.append("ENTRY")
                     if piece.in_valid_zone:
                         zones.append("VALID")
@@ -521,16 +537,16 @@ class LegoSorting008(QObject):
                         zones.append("EXIT")
                     zone_str = "+".join(zones) if zones else "NONE"
 
-                    logger.info(f"  Piece {piece.id}: "
+                    logger.info(f"  Piece {piece.id}: "  # ✓ Object attributes
                                 f"center={piece.center}, "
                                 f"zones=[{zone_str}], "
                                 f"captured={piece.captured}, "
                                 f"updates={piece.update_count}")
 
-            # Test capture controller
+            # Test capture controller with TrackedPiece objects
             capture_packages = self.capture_controller.check_and_process_captures(
                 frame,
-                tracked_pieces
+                tracked_pieces  # ✓ Pass TrackedPiece objects
             )
 
             # Log captures
@@ -732,7 +748,7 @@ class LegoSorting008(QObject):
             return
 
         # Run detection
-        detection_result = self.detector_coordinator.process_frame(frame)
+        detection_result = self.detector_coordinator.process_frame_for_consumer(frame)
         tracked_pieces = detection_result.get('tracked_pieces', [])
 
         # Check for captures
