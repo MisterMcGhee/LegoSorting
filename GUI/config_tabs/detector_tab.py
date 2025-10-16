@@ -750,8 +750,8 @@ class DetectorConfigTab(BaseConfigTab):
             if detector_roi_config:
                 self.roi_x_spin.setValue(detector_roi_config.get('x', 100))
                 self.roi_y_spin.setValue(detector_roi_config.get('y', 50))
-                self.roi_width_spin.setValue(detector_roi_config.get('width', 1720))
-                self.roi_height_spin.setValue(detector_roi_config.get('height', 980))
+                self.roi_width_spin.setValue(detector_roi_config.get('w', 1720))
+                self.roi_height_spin.setValue(detector_roi_config.get('h', 980))
 
             # Restore signals
             self.roi_x_spin.blockSignals(False)
@@ -825,8 +825,8 @@ class DetectorConfigTab(BaseConfigTab):
             'detector_roi': {
                 'x': self.roi_x_spin.value(),
                 'y': self.roi_y_spin.value(),
-                'width': self.roi_width_spin.value(),
-                'height': self.roi_height_spin.value()
+                'w': self.roi_width_spin.value(),
+                'h': self.roi_height_spin.value()
             }
         }
 

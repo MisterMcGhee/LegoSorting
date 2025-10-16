@@ -341,12 +341,14 @@ class CaptureController:
                 processed_image=labeled_image,
                 capture_timestamp=timestamp,
                 capture_position=(int(piece_center[0]), int(piece_center[1])),
-                original_bbox=piece_bbox
+                original_bbox=piece_bbox,
+                image_path=None  # Saves the image path to the capture package
             )
 
             # Save image if enabled
             if self.save_captured_images:
-                self._save_capture_image(capture_package)
+                image_path = self._save_capture_image(capture_package)  # ← GET PATH
+                capture_package.image_path = image_path  # ← SET PATH
 
             return capture_package
 
@@ -466,31 +468,30 @@ class CaptureController:
             logger.error(f"Error adding piece ID label: {e}")
             return image  # Return original image if labeling fails
 
-    def _save_capture_image(self, capture_package: CapturePackage):
+    def _save_capture_image(self, capture_package: CapturePackage) -> Optional[str]:
         """
         Save a capture package image to disk.
 
-        Creates filename with timestamp and piece ID for easy identification.
-
-        Args:
-            capture_package: CapturePackage to save
+        Returns:
+            Path to saved image, or None if save failed
         """
         try:
-            # Create filename with timestamp and piece ID
             timestamp_str = str(int(capture_package.capture_timestamp))
             filename = f"piece_{capture_package.piece_id}_{timestamp_str}.jpg"
             file_path = Path(self.capture_directory) / filename
 
-            # Save the image
             success = capture_package.save_image(str(file_path))
 
             if success:
                 logger.debug(f"Saved capture to {file_path}")
+                return str(file_path)  # ← RETURN PATH
             else:
-                logger.error(f"Failed to save capture to {file_path}")
+                logger.error(f"Failed to save image for piece {capture_package.piece_id}")
+                return None
 
         except Exception as e:
             logger.error(f"Error saving capture image: {e}")
+            return None
 
     # ========================================================================
     # STATUS AND MONITORING

@@ -101,10 +101,10 @@ class ProcessingQueueManager:
         )
 
         # Load configuration values
-        self.max_queue_size = module_config["max_queue_size"]
+        self.queue_size = module_config["queue_size"]
 
         # Priority queue (thread-safe, blocks when full/empty)
-        self.queue = queue.PriorityQueue(maxsize=self.max_queue_size)
+        self.queue = queue.PriorityQueue(maxsize=self.queue_size)
 
         # Track all pieces by piece_id
         self.pieces: Dict[int, QueuedPiece] = {}
@@ -123,7 +123,7 @@ class ProcessingQueueManager:
 
         logger.info(
             f"Processing queue manager initialized "
-            f"(max size: {self.max_queue_size})"
+            f"(max size: {self.queue_size})"
         )
 
     # ========================================================================
@@ -175,7 +175,7 @@ class ProcessingQueueManager:
 
         except queue.Full:
             logger.error(
-                f"Queue full ({self.max_queue_size}), "
+                f"Queue full ({self.queue_size}), "
                 f"cannot add piece {capture_package.piece_id}"
             )
             return False

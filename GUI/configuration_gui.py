@@ -700,18 +700,25 @@ class ConfigurationGUI(QMainWindow):
 
         # Check if any modifications exist
         if not self.modified_tabs:
-            reply = QMessageBox.question(
-                self,
-                "No Changes",
-                "No changes detected.\n\n"
-                "Close configuration GUI?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
-            )
+            logger.info("No changes detected, but proceeding to close")
 
-            if reply == QMessageBox.Yes:
-                logger.info("Closing without changes")
-                self.close()
+            # Get current configuration even if no changes
+            final_config = {}
+            for name, tab in self.tabs.items():
+                try:
+                    final_config[tab.get_module_name()] = tab.get_config()
+                except Exception as e:
+                    logger.error(f"Failed to get config from {name}: {e}")
+
+            # Emit signal even with no changes
+            logger.info("Emitting configuration_complete signal")
+            self.configuration_complete.emit(final_config)
+
+            logger.info("✓ Configuration applied (no changes)")
+            logger.info("=" * 60)
+
+            # Close the window
+            self.close()
             return
 
         # Validate all configurations
@@ -764,6 +771,7 @@ class ConfigurationGUI(QMainWindow):
                 logger.error(f"Failed to get config from {name}: {e}")
 
         # Emit completion signal
+        logger.info("Emitting configuration_complete signal")
         self.configuration_complete.emit(final_config)
 
         logger.info("✓ Configuration applied successfully")

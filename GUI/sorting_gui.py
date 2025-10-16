@@ -508,13 +508,13 @@ class RecentlyProcessedPanel(QGroupBox):
                 self.image_label.setPixmap(scaled_pixmap)
 
             # Update text labels
-            part_name = identified_piece.part_name if identified_piece.part_name else "Unknown"
-            self.name_label.setText(f"Part Name: {part_name}")
+            piece_name = identified_piece.name if identified_piece.name else "Unknown"
+            self.name_label.setText(f"Part Name: {piece_name}")
 
             element_id = identified_piece.element_id if identified_piece.element_id else "?"
             self.element_id_label.setText(f"Element ID: {element_id}")
 
-            bin_num = identified_piece.assigned_bin
+            bin_num = identified_piece.bin_number
             if bin_num == 0:
                 self.bin_label.setText("→ Bin: 0 (Overflow)")
                 self.bin_label.setStyleSheet(SortingGUIStyles.get_label_style(
@@ -531,7 +531,7 @@ class RecentlyProcessedPanel(QGroupBox):
             timestamp_str = time.strftime("%H:%M:%S", time.localtime())
             self.timestamp_label.setText(f"Time: {timestamp_str}")
 
-            logger.debug(f"Displayed piece: {part_name} (ID: {element_id}) → Bin {bin_num}")
+            logger.debug(f"Displayed piece: {piece_name} (ID: {element_id}) → Bin {bin_num}")
 
         except Exception as e:
             logger.error(f"Error displaying piece: {e}", exc_info=True)
@@ -594,12 +594,14 @@ class TrackingCameraView(CameraViewUnited):
         """
         # Check if piece is tracked
         if piece_id not in self.tracked_pieces_dict:
+            logger.debug(f"Piece {piece_id}: Not in tracked_pieces_dict → GRAY")
             return SortingGUIStyles.COLOR_DETECTED
 
         tracked_piece = self.tracked_pieces_dict[piece_id]
 
         # Check if captured
         if not tracked_piece.captured:
+            logger.debug(f"Piece {piece_id}: Not captured → GRAY")
             return SortingGUIStyles.COLOR_DETECTED
 
         # Check if identified
@@ -607,13 +609,15 @@ class TrackingCameraView(CameraViewUnited):
             identified_piece = self.identified_pieces_dict[piece_id]
 
             # Check if unknown/overflow
-            if (hasattr(identified_piece, 'is_unknown') and identified_piece.is_unknown) or \
-                    (hasattr(identified_piece, 'assigned_bin') and identified_piece.assigned_bin == 0):
+            if hasattr(identified_piece, 'bin_number') and identified_piece.bin_number == 0:
+                logger.info(f"Piece {piece_id}: Unknown/Overflow → MAGENTA")
                 return SortingGUIStyles.COLOR_UNKNOWN
             else:
+                logger.info(f"Piece {piece_id}: Identified → GREEN")
                 return SortingGUIStyles.COLOR_IDENTIFIED
 
         # Captured but not yet identified
+        logger.info(f"Piece {piece_id}: Captured, waiting for identification → ORANGE")
         return SortingGUIStyles.COLOR_CAPTURED
 
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
@@ -701,9 +705,9 @@ class SortingGUI(QMainWindow):
         self.camera = orchestrator.camera
         self.detector = orchestrator.detector_coordinator
         self.processing = orchestrator.processing_coordinator
-        self.hardware = orchestrator.hardware_controller
+        self.hardware = orchestrator.hardware_coordinator
         self.bin_assignment = orchestrator.bin_assignment_module
-        self.bin_capacity = orchestrator.bin_capacity_module
+        self.bin_capacity = orchestrator.bin_capacity_manager
 
         # UI Components (created in _setup_ui)
         self.camera_view = None
@@ -847,7 +851,7 @@ class SortingGUI(QMainWindow):
         Args:
             identified_piece: IdentifiedPiece object with all data
         """
-        logger.info(f"GUI callback: Piece identified - {identified_piece.part_name}")
+        logger.info(f"GUI callback: Piece identified - {identified_piece.name}")
 
         # Update recently processed panel
         self.recent_piece_panel.display_piece(identified_piece)
@@ -918,10 +922,18 @@ class SortingGUI(QMainWindow):
             # Convert list to dict for lookup
             tracked_dict = {p.id: p for p in tracked_pieces}
 
-            # Get identified pieces from ORCHESTRATOR instead of processing
+            # Get identified pieces from ORCHESTRATOR
             identified_dict = {}
             if self.orchestrator and hasattr(self.orchestrator, 'get_identified_pieces'):
                 identified_dict = self.orchestrator.get_identified_pieces()
+
+            # DEBUG: Log summary of what we have
+            if len(tracked_dict) > 0:  # Only log when there are pieces
+                logger.info(f"🔍 GUI Update: {len(tracked_dict)} tracked, {len(identified_dict)} identified")
+                for piece_id in tracked_dict:
+                    piece = tracked_dict[piece_id]
+                    is_identified = piece_id in identified_dict
+                    logger.info(f"  Piece {piece_id}: captured={piece.captured}, identified={is_identified}")
 
             # Update camera view with both dicts
             self.camera_view.update_piece_tracking(tracked_dict, identified_dict)
@@ -932,14 +944,13 @@ class SortingGUI(QMainWindow):
                 tracked_pieces_dicts.append({
                     'id': piece.id,
                     'bbox': piece.bbox,
-                    'center': piece.center,
-                    'status': piece.status
+                    'center': piece.center
                 })
 
             self.camera_view.set_tracked_pieces(tracked_pieces_dicts)
 
         except Exception as e:
-            logger.error(f"Error updating piece colors: {e}")
+            logger.error(f"Error updating piece colors: {e}", exc_info=True)
 
     # ========================================================================
     # LIFECYCLE MANAGEMENT

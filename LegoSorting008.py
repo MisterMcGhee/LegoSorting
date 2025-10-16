@@ -24,7 +24,7 @@ ARCHITECTURE:
         - Test capture controller captures pieces
         - Validate images saved correctly
 
-    Phase 4-7: Full System (TODO)
+    Phase 4-7: Full System
         - Processing pipeline
         - Hardware pipeline
         - Complete sorting operation
@@ -88,7 +88,6 @@ from processing.processing_data_models import IdentifiedPiece
 from hardware.hardware_coordinator import HardwareCoordinator, create_hardware_coordinator
 from hardware.arduino_servo_module import create_arduino_servo_controller
 from hardware.bin_capacity_module import create_bin_capacity_manager
-
 
 # ============================================================================
 # LOGGING CONFIGURATION
@@ -289,7 +288,7 @@ class LegoSorting008(QObject):
         self.shutdown_system()
 
     # ========================================================================
-    # PHASE 2 & 3: MODULE INITIALIZATION + DETECTION TESTING
+    # PHASE 2 & 3: MODULE INITIALIZATION + DETECTION
     # ========================================================================
 
     def initialize_modules(self):
@@ -339,16 +338,12 @@ class LegoSorting008(QObject):
             )
             logger.info("  ✓ Capture controller created")
 
-            logger.info("✓ Detection pipeline ready")
-
-            logger.info("Configuring ROI for detection pipeline...")
-
-            # Get a sample frame
+            # Configure ROI
+            logger.info("  Configuring ROI for detection pipeline...")
             sample_frame = self.camera.get_frame()
             if sample_frame is None:
                 raise RuntimeError("Could not get sample frame for ROI configuration")
 
-            # Get ROI from config
             roi_config = self.config_manager.get_module_config("detector_roi")
             roi_coords = (
                 roi_config["x"],
@@ -356,26 +351,10 @@ class LegoSorting008(QObject):
                 roi_config["w"],
                 roi_config["h"]
             )
-
-            logger.info(f"Setting ROI: {roi_coords}")
-
-            # Configure detector coordinator with ROI
             self.detector_coordinator.set_roi_from_sample_frame(sample_frame, roi_coords)
+            logger.info(f"  ✓ ROI configured: {roi_coords}")
 
-            logger.info("✓ ROI configured for detection pipeline")
-            # ================================================================
-            # PHASE 3: DETECTION PIPELINE TEST
-            # ================================================================
-            logger.info("")
-            logger.info("=" * 70)
-            logger.info("PHASE 3: DETECTION PIPELINE TEST")
-            logger.info("=" * 70)
-
-            # Run detection test
-            self.test_detection_pipeline()
-
-            # If we reach here, test passed and user wants to continue
-            logger.info("Continuing to Phase 4...")
+            logger.info("✓ Detection pipeline ready")
 
             # ================================================================
             # STEP 4: Processing Pipeline (TODO - Phase 4)
@@ -386,7 +365,7 @@ class LegoSorting008(QObject):
             category_service = create_category_hierarchy_service(self.config_manager)
             logger.info("  ✓ Category hierarchy service created")
 
-            # Create processing sub-modules
+            # Create processing submodules
             api_handler = create_identification_api_handler(self.config_manager)
             logger.info("  ✓ API handler created")
 
@@ -481,177 +460,6 @@ class LegoSorting008(QObject):
             self.shutdown_system()
 
     # ========================================================================
-    # PHASE 3: DETECTION PIPELINE TEST METHOD
-    # ========================================================================
-
-    def test_detection_pipeline(self):
-        """
-        Test the detection pipeline with real camera and pieces.
-
-        This test:
-        1. Starts camera capture
-        2. Processes frames through detector
-        3. Tests capture controller
-        4. Logs results for verification
-        5. Runs for configurable duration
-        """
-
-        # Test configuration
-        test_duration = 30  # seconds
-        test_frame_count = 0
-        test_captures_count = 0
-        test_pieces_seen = set()
-
-        logger.info("Starting camera capture for detection test...")
-        if not self.camera.start_capture():
-            raise RuntimeError("Failed to start camera capture")
-        logger.info("✓ Camera capturing at 30 FPS")
-
-        # Frame processing callback
-        def detection_test_callback(frame):
-            """Process frames through detection pipeline."""
-            nonlocal test_frame_count, test_captures_count
-
-            test_frame_count += 1
-
-            # Process frame through detector (this updates internal tracking state)
-            detection_result = self.detector_coordinator.process_frame_for_consumer(frame)
-
-            # Get TrackedPiece OBJECTS directly (not from the dict result)
-            tracked_pieces = self.detector_coordinator.get_tracked_pieces()
-
-            # Log every 30 frames (once per second at 30 FPS)
-            if test_frame_count % 30 == 0:
-                logger.info(f"Frame {test_frame_count}: {len(tracked_pieces)} pieces tracked")
-
-                for piece in tracked_pieces:
-                    test_pieces_seen.add(piece.id)  # ✓ TrackedPiece object attribute
-
-                    # Build zone status string
-                    zones = []
-                    if piece.in_entry_zone:  # ✓ TrackedPiece object attribute
-                        zones.append("ENTRY")
-                    if piece.in_valid_zone:
-                        zones.append("VALID")
-                    if piece.in_exit_zone:
-                        zones.append("EXIT")
-                    zone_str = "+".join(zones) if zones else "NONE"
-
-                    logger.info(f"  Piece {piece.id}: "  # ✓ Object attributes
-                                f"center={piece.center}, "
-                                f"zones=[{zone_str}], "
-                                f"captured={piece.captured}, "
-                                f"updates={piece.update_count}")
-
-            # Test capture controller with TrackedPiece objects
-            capture_packages = self.capture_controller.check_and_process_captures(
-                frame,
-                tracked_pieces  # ✓ Pass TrackedPiece objects
-            )
-
-            # Log captures
-            for package in capture_packages:
-                test_captures_count += 1
-                logger.info(f"🎯 CAPTURED: Piece {package.piece_id} at position {package.capture_position}")
-                logger.info(f"   Image saved to captured_pieces/ directory")
-
-        # Register test callback
-        logger.info("Registering detection test callback...")
-        self.camera.register_consumer(
-            name="phase3_test",
-            callback=detection_test_callback,
-            processing_type="sync",
-            priority=100
-        )
-        logger.info("✓ Test callback registered")
-
-        # Display instructions
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info("PHASE 3 TEST RUNNING")
-        logger.info("=" * 70)
-        logger.info(f"Testing detection for {test_duration} seconds...")
-        logger.info("")
-        logger.info("🔍 PLACE LEGO PIECES ON CONVEYOR NOW")
-        logger.info("")
-        logger.info("What to observe:")
-        logger.info("  1. Pieces should be detected (logged every second)")
-        logger.info("  2. Each piece gets a unique ID")
-        logger.info("  3. Zone flags update as pieces move")
-        logger.info("  4. Pieces captured in valid zone")
-        logger.info("  5. Images saved to captured_pieces/")
-        logger.info("")
-        logger.info(f"Monitoring for {test_duration} seconds...")
-        logger.info("=" * 70)
-        logger.info("")
-
-        # Run test
-        start_time = time.time()
-        while (time.time() - start_time) < test_duration:
-            QApplication.processEvents()
-            time.sleep(0.01)
-
-        # Test complete - show summary
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info("PHASE 3 TEST COMPLETE")
-        logger.info("=" * 70)
-        logger.info(f"✓ Frames processed: {test_frame_count}")
-        logger.info(f"✓ Unique pieces detected: {len(test_pieces_seen)}")
-        logger.info(f"✓ Pieces captured: {test_captures_count}")
-        logger.info("")
-
-        # Provide guidance
-        if test_frame_count < 100:
-            logger.warning("⚠ Very few frames processed - camera may not be working")
-        elif len(test_pieces_seen) == 0:
-            logger.warning("⚠ No pieces detected - check ROI configuration")
-        elif test_captures_count == 0:
-            logger.warning("⚠ No captures - check capture settings or piece placement")
-        else:
-            logger.info("✅ Detection pipeline working correctly!")
-            logger.info("")
-            logger.info("Check captured_pieces/ directory for saved images")
-            logger.info("")
-
-        # Cleanup
-        self.camera.unregister_consumer("phase3_test")
-        logger.info("✓ Test callback unregistered")
-
-        self.camera.stop_capture()
-        logger.info("✓ Camera stopped")
-
-        logger.info("=" * 70)
-        logger.info("PHASE 3 TEST FINISHED")
-        logger.info("=" * 70)
-        logger.info("")
-
-        # Ask user to review results
-        logger.info("📋 REVIEW TEST RESULTS:")
-        logger.info("")
-        logger.info("Did the detection test work correctly?")
-        logger.info("  - Were pieces detected? (check logs above)")
-        logger.info("  - Were zone flags correct?")
-        logger.info("  - Were pieces captured?")
-        logger.info("  - Are images in captured_pieces/ directory?")
-        logger.info("")
-        logger.info("If YES: System will continue to Phase 4 automatically")
-        logger.info("If NO: Press Ctrl+C to stop and review configuration")
-        logger.info("")
-        logger.info("Continuing in 10 seconds...")
-        logger.info("")
-
-        # Give user time to read and interrupt if needed
-        for i in range(10, 0, -1):
-            logger.info(f"  Continuing in {i}...")
-            time.sleep(1)
-            QApplication.processEvents()
-
-        logger.info("")
-        logger.info("✓ Proceeding to Phase 4")
-        logger.info("")
-
-    # ========================================================================
     # PHASE 4: CALLBACK REGISTRATION
     # ========================================================================
 
@@ -659,10 +467,14 @@ class LegoSorting008(QObject):
         """Register all callbacks to connect modules."""
         logger.info("Registering callbacks between modules...")
 
-        # Processing → Orchestrator callback
+
+        # ================================================================
+        # Processing Coordinator → Orchestrator
+        # ================================================================
         def on_piece_identified_orchestrator(identified_piece: IdentifiedPiece):
             """Store identified piece in central dictionary."""
-            logger.info(f"Callback: Piece {identified_piece.piece_id} identified, storing in dict")
+            logger.info(f"✅ Piece {identified_piece.piece_id} identified: "
+                        f"{identified_piece.name} → Bin {identified_piece.bin_number}")
             self.identified_pieces_dict[identified_piece.piece_id] = identified_piece
 
         self.processing_coordinator.register_identification_callback(
@@ -747,19 +559,21 @@ class LegoSorting008(QObject):
         if not self.is_running:
             return
 
-        # Run detection
+        # Run detection (updates tracking state)
         detection_result = self.detector_coordinator.process_frame_for_consumer(frame)
-        tracked_pieces = detection_result.get('tracked_pieces', [])
 
-        # Check for captures
-        capture_packages = self.capture_controller.check_and_process_captures(
-            frame,
-            tracked_pieces
-        )
+        # Get TrackedPiece objects
+        tracked_pieces = self.detector_coordinator.get_tracked_pieces()
 
-        # Add captures to queue
+        # Check for captures - RETURNS list of CapturePackage objects
+        capture_packages = self.capture_controller.check_and_process_captures(frame, tracked_pieces)
+
+        # Submit captured pieces to processing queue
         for capture_package in capture_packages:
-            self.processing_queue_manager.submit_piece(capture_package)
+            logger.info(f"📦 Piece {capture_package.piece_id} captured → routing to processing queue")
+            success = self.processing_queue_manager.submit_piece(capture_package)
+            if not success:
+                logger.error(f"  ✗ Queue full, could not submit piece {capture_package.piece_id}")
 
         # Check for pieces ready to sort
         for piece in tracked_pieces:
@@ -786,10 +600,6 @@ class LegoSorting008(QObject):
 
             if not success:
                 logger.error(f"Failed to sort piece {piece.id}")
-
-        # Update GUI
-        if self.sorting_gui:
-            self.sorting_gui.update_tracking_display(tracked_pieces)
 
     # ========================================================================
     # PHASE 7: SHUTDOWN

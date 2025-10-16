@@ -328,6 +328,7 @@ class CapturePackage:
     capture_timestamp: float  # When the capture occurred
     capture_position: Tuple[int, int]  # Frame coordinates where piece was captured
     original_bbox: Tuple[int, int, int, int]  # Original bounding box in frame coordinates
+    image_path: Optional[str] = None # File location for passing to the processing coordinator
 
     def save_image(self, file_path: str) -> bool:
         """

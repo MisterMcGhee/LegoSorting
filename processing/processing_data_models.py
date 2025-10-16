@@ -224,7 +224,7 @@ class IdentifiedPiece:
         return {
             "piece_id": self.piece_id,
             "element_id": self.element_id,
-            "name": self.name,
+            "b": self.name,
             "category_path": self.get_full_category_path(),
             "primary_category": self.primary_category,
             "secondary_category": self.secondary_category,
