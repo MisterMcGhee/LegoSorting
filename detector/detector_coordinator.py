@@ -476,6 +476,82 @@ class DetectorCoordinator:
 
         return frame_pieces
 
+    def mark_piece_as_captured(self, piece_id: int) -> bool:
+        """
+        Mark a piece as captured in the piece tracker.
+
+        This method updates the authoritative ROI piece stored in piece_tracker,
+        ensuring that subsequent calls to get_tracked_pieces() return pieces
+        with the correct captured status.
+
+        ARCHITECTURAL NOTE:
+        The piece_tracker maintains pieces in ROI coordinates (source of truth).
+        When get_tracked_pieces() is called, it creates NEW TrackedPiece objects
+        in frame coordinates by copying data from the ROI pieces. Therefore,
+        status flags like 'captured' must be updated on the ROI pieces, not on
+        the frame coordinate copies.
+
+        WORKFLOW:
+        1. CaptureController captures piece (using frame coordinates)
+        2. Orchestrator calls this method to update ROI piece
+        3. GUI calls get_tracked_pieces() and receives updated frame pieces
+
+        Args:
+            piece_id: The ID of the piece to mark as captured
+
+        Returns:
+            True if piece was found and marked, False if piece_id not found
+
+        """
+        # Get the authoritative ROI pieces from tracker
+        roi_pieces = self.piece_tracker.get_active_pieces()
+
+        # Find the piece by ID and update its captured status
+        for piece in roi_pieces:
+            if piece.id == piece_id:
+                # Update capture flags on the ROI piece (source of truth)
+                piece.captured = True
+                piece.being_processed = True
+                piece.processing_start_time = time.time()
+
+                logger.debug(f"Marked piece {piece_id} as captured in piece_tracker")
+                return True
+
+        # Piece not found - may have already been removed from tracking
+        logger.warning(f"Could not mark piece {piece_id} as captured - piece not found in tracker")
+        return False
+
+    def mark_piece_processing_complete(self, piece_id: int) -> bool:
+        """
+        Mark a piece's processing as complete in the piece tracker.
+
+        This method updates the processing status flags when identification
+        is complete. This is typically called by the processing coordinator
+        callback in the orchestrator.
+
+        Args:
+            piece_id: The ID of the piece that finished processing
+
+        Returns:
+            True if piece was found and marked, False if piece_id not found
+
+        """
+        # Get the authoritative ROI pieces from tracker
+        roi_pieces = self.piece_tracker.get_active_pieces()
+
+        # Find the piece by ID and update its processing status
+        for piece in roi_pieces:
+            if piece.id == piece_id:
+                # Mark processing as complete
+                piece.being_processed = False
+
+                logger.debug(f"Marked piece {piece_id} processing as complete in piece_tracker")
+                return True
+
+        # Piece not found - may have already exited tracking
+        logger.warning(f"Could not mark piece {piece_id} processing complete - piece not found in tracker")
+        return False
+
     # ========================================================================
     # SYSTEM MANAGEMENT
     # ========================================================================

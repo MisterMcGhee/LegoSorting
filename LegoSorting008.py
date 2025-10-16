@@ -467,15 +467,28 @@ class LegoSorting008(QObject):
         """Register all callbacks to connect modules."""
         logger.info("Registering callbacks between modules...")
 
-
         # ================================================================
         # Processing Coordinator → Orchestrator
         # ================================================================
         def on_piece_identified_orchestrator(identified_piece: IdentifiedPiece):
-            """Store identified piece in central dictionary."""
-            logger.info(f"✅ Piece {identified_piece.piece_id} identified: "
+            """
+            Store identified piece in central dictionary and update tracking flags.
+
+            This callback is triggered when the processing coordinator completes
+            identification of a piece. We store the result and update the
+            piece's processing status in the tracker.
+            """
+            piece_id = identified_piece.piece_id
+
+            logger.info(f"✅ Piece {piece_id} identified: "
                         f"{identified_piece.name} → Bin {identified_piece.bin_number}")
-            self.identified_pieces_dict[identified_piece.piece_id] = identified_piece
+
+            # Store in central repository for hardware sorting
+            self.identified_pieces_dict[piece_id] = identified_piece
+
+            # Mark processing as complete in the tracker
+            # This updates the authoritative ROI piece so GUI shows correct state
+            self.detector_coordinator.mark_piece_processing_complete(piece_id)
 
         self.processing_coordinator.register_identification_callback(
             on_piece_identified_orchestrator
@@ -483,7 +496,6 @@ class LegoSorting008(QObject):
         logger.info("  ✓ Processing → Orchestrator callback registered")
 
         logger.info("✓ Core callbacks registered")
-
     # ========================================================================
     # PHASE 5: GUI CREATION
     # ========================================================================
@@ -555,54 +567,111 @@ class LegoSorting008(QObject):
             self.shutdown_system()
 
     def on_camera_frame(self, frame):
-        """Process each camera frame."""
+        """
+        Process each camera frame through the detection and sorting pipeline.
+
+        PIPELINE FLOW:
+        1. Detector processes frame and updates tracking
+        2. Capture controller evaluates pieces for capture readiness
+        3. Captured pieces are submitted to processing queue
+        4. Capture flags are updated on authoritative ROI pieces
+        5. Identified pieces are checked for sorting readiness
+
+        COORDINATE SYSTEM NOTE:
+        The detector maintains pieces in ROI coordinates (source of truth).
+        get_tracked_pieces() creates frame coordinate COPIES for processing.
+        Any status changes must be applied back to ROI pieces via
+        mark_piece_as_captured() to ensure GUI sees correct state.
+
+        Args:
+            frame: Current camera frame from camera module
+        """
         if not self.is_running:
             return
 
-        # Run detection (updates tracking state)
+        # ====================================================================
+        # STEP 1: Run detection pipeline (updates tracking state)
+        # ====================================================================
         detection_result = self.detector_coordinator.process_frame_for_consumer(frame)
 
-        # Get TrackedPiece objects
+        # ====================================================================
+        # STEP 2: Get tracked pieces for capture evaluation
+        # ====================================================================
+        # NOTE: These are frame coordinate COPIES of the ROI pieces
         tracked_pieces = self.detector_coordinator.get_tracked_pieces()
 
-        # Check for captures - RETURNS list of CapturePackage objects
-        capture_packages = self.capture_controller.check_and_process_captures(frame, tracked_pieces)
+        # ====================================================================
+        # STEP 3: Check for pieces ready to capture
+        # ====================================================================
+        # Returns list of CapturePackage objects for newly captured pieces
+        capture_packages = self.capture_controller.check_and_process_captures(
+            frame,
+            tracked_pieces
+        )
 
-        # Submit captured pieces to processing queue
+        # ====================================================================
+        # STEP 4: Process captured pieces
+        # ====================================================================
         for capture_package in capture_packages:
-            logger.info(f"📦 Piece {capture_package.piece_id} captured → routing to processing queue")
-            success = self.processing_queue_manager.submit_piece(capture_package)
-            if not success:
-                logger.error(f"  ✗ Queue full, could not submit piece {capture_package.piece_id}")
+            piece_id = capture_package.piece_id
 
-        # Check for pieces ready to sort
+            logger.info(f"📦 Piece {piece_id} captured → routing to processing queue")
+
+            # Update the authoritative ROI piece with captured status
+            # This ensures subsequent get_tracked_pieces() calls return pieces
+            # with the correct captured=True flag for GUI color coding
+            success = self.detector_coordinator.mark_piece_as_captured(piece_id)
+
+            if not success:
+                logger.warning(f"  ⚠️  Could not mark piece {piece_id} as captured in tracker")
+
+            # Submit to processing queue
+            queue_success = self.processing_queue_manager.submit_piece(capture_package)
+
+            if not queue_success:
+                logger.error(f"  ✗ Queue full, could not submit piece {piece_id}")
+
+        # ====================================================================
+        # STEP 5: Check for pieces ready to sort
+        # ====================================================================
+        # Pieces must be:
+        # - In exit zone
+        # - Identified (present in identified_pieces_dict)
+        # - Processing complete
+        # - Rightmost in exit zone (to prevent double-sorting)
+
         for piece in tracked_pieces:
+            # Only consider pieces in exit zone
             if not piece.in_exit_zone:
                 continue
 
+            # Check if piece has been identified
             identified_piece = self.identified_pieces_dict.get(piece.id)
-
             if identified_piece is None:
                 continue
 
+            # Ensure identification is complete
             if not identified_piece.complete:
                 continue
 
+            # Only sort the rightmost piece in exit zone to prevent double-sorts
             if not getattr(piece, 'is_rightmost_in_exit_zone', False):
                 continue
 
-            logger.info(f"Triggering sort for piece {piece.id} → bin {identified_piece.bin_number}")
+            # Piece is ready to sort!
+            logger.info(f"🎯 Triggering sort for piece {piece.id} → bin {identified_piece.bin_number}")
 
+            # Trigger hardware sorting
             success = self.hardware_coordinator.trigger_sort_for_piece(
                 piece_id=piece.id,
                 bin_number=identified_piece.bin_number
             )
 
             if not success:
-                logger.error(f"Failed to sort piece {piece.id}")
+                logger.error(f"❌ Failed to sort piece {piece.id}")
 
     # ========================================================================
-    # PHASE 7: SHUTDOWN
+    # PHASE 7 or 6?: SHUTDOWN
     # ========================================================================
 
     @pyqtSlot()
