@@ -316,7 +316,8 @@ class ProcessingCoordinator:
         identified_piece = IdentifiedPiece(
             piece_id=capture_package.piece_id,
             image_path=capture_package.image_path,
-            capture_timestamp=capture_package.capture_timestamp
+            capture_timestamp=capture_package.capture_timestamp,
+            processed_image=capture_package.processed_image
         )
 
         logger.info(f"Processing piece {capture_package.piece_id}")

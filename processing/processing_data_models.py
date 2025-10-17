@@ -12,6 +12,7 @@ This file contains only the essential data needed for processing,
 with no extra fields for metrics or debugging that aren't actively used.
 """
 
+import numpy as np
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
@@ -85,6 +86,7 @@ class IdentifiedPiece:
     piece_id: int  # Links back to TrackedPiece from detection
     image_path: str  # Path to saved image file
     capture_timestamp: float  # When image was captured
+    processed_image: Optional[np.ndarray] = None  # Numpy array of cropped piece image
 
     # ========================================================================
     # API IDENTIFICATION FIELDS (Set by identification_api_handler)
