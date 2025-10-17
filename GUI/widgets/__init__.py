@@ -11,6 +11,7 @@ from .camera_view import (
     CameraViewROI,
     CameraViewTracking,
     CameraViewUnited,
+    CameraViewSorting,
     ViewStyles
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     'CameraViewROI',
     'CameraViewTracking',
     'CameraViewUnited',
+    'CameraViewSorting',
     'ViewStyles'
 ]

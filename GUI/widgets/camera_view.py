@@ -924,3 +924,233 @@ class CameraViewUnited(BaseCameraViewWidget):
         elif hasattr(piece, 'in_exit_zone') and piece.in_exit_zone:
             cv2.putText(frame, "EXIT", (x, y + h + 15),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+
+
+# ============================================================================
+# SORTING CAMERA VIEW WIDGET (SELF-CONFIGURING)
+# ============================================================================
+
+class CameraViewSorting(CameraViewUnited):
+    """
+    Self-configuring camera view widget for sorting operations.
+
+    This widget automatically loads ROI and zone configuration from the
+    config manager, and provides color-coded piece tracking based on
+    processing state. It integrates with the detector coordinator and
+    orchestrator to determine piece processing states.
+
+    Features:
+    - Auto-loads ROI and zones from configuration (no manual setup required)
+    - Color-coded bounding boxes showing processing stage
+    - Real-time piece state tracking
+    - Integrates seamlessly with sorting GUI
+
+    Color Coding:
+    - Gray (128, 128, 128): Detected, not captured yet
+    - Orange (0, 165, 255): Captured, queued for processing
+    - Green (0, 255, 0): Identified successfully
+    - Magenta (255, 0, 255): Unknown/overflow piece
+
+    Usage:
+        # In sorting GUI - just create and use:
+        view = CameraViewSorting(
+            config_manager=config_manager,
+            detector_coordinator=detector_coordinator,
+            orchestrator=orchestrator
+        )
+        camera.register_consumer("sorting_gui", view.receive_frame, "async", 5)
+
+        # ROI and zones are automatically loaded and configured!
+        # No need to call set_roi() or set_zones()
+
+    The widget automatically updates piece colors based on their state in
+    the detection and processing pipeline, providing real-time visual feedback
+    during sorting operations.
+    """
+
+    def __init__(self, config_manager, detector_coordinator, orchestrator, parent=None):
+        """
+        Initialize sorting camera view with automatic configuration.
+
+        This constructor:
+        1. Calls parent CameraViewUnited.__init__() to setup base functionality
+        2. Stores references to system modules for piece state tracking
+        3. Automatically loads ROI and zone configuration from config
+        4. Initializes piece tracking dictionaries
+
+        Args:
+            config_manager: Configuration manager for loading ROI/zone settings
+            detector_coordinator: For accessing tracked pieces and their states
+            orchestrator: For accessing identified pieces dictionary
+            parent: Optional parent widget
+        """
+        # Call parent constructor first
+        super().__init__(parent)
+
+        # Store module references for piece state tracking
+        self.config_manager = config_manager
+        self.detector_coordinator = detector_coordinator
+        self.orchestrator = orchestrator
+
+        # Initialize piece tracking dictionaries
+        # These are updated periodically by sorting GUI via update_piece_tracking()
+        self.tracked_pieces_dict = {}  # Maps piece_id -> TrackedPiece
+        self.identified_pieces_dict = {}  # Maps piece_id -> IdentifiedPiece
+
+        # Auto-configure ROI and zones from configuration
+        self._load_configuration()
+
+        logger.info("CameraViewSorting initialized with auto-configuration")
+
+    def _load_configuration(self):
+        """
+        Automatically load ROI and zone configuration from config manager.
+
+        This method is called during __init__ to configure the widget without
+        requiring manual setup by the parent GUI. It loads:
+        - ROI coordinates (x, y, width, height) from detector_roi config
+        - Zone percentages (entry, exit) from detector config
+
+        This eliminates the need for the sorting GUI to manually configure
+        the widget after creation.
+        """
+        try:
+            # Load ROI configuration
+            roi_config = self.config_manager.get_module_config("detector_roi")
+            self.set_roi(
+                roi_config["x"],
+                roi_config["y"],
+                roi_config["w"],
+                roi_config["h"]
+            )
+            logger.info(f"Auto-loaded ROI: ({roi_config['x']}, {roi_config['y']}, "
+                        f"{roi_config['w']}, {roi_config['h']})")
+
+            # Load zone configuration
+            detector_config = self.config_manager.get_module_config("detector")
+            zones = detector_config.get("zones", {})
+            entry_pct = zones.get("entry_percentage", 15) / 100.0
+            exit_pct = zones.get("exit_percentage", 15) / 100.0
+            self.set_zones(entry_pct, exit_pct)
+            logger.info(f"Auto-loaded zones: entry={entry_pct:.2f}, exit={exit_pct:.2f}")
+
+        except Exception as e:
+            logger.error(f"Error loading configuration for CameraViewSorting: {e}", exc_info=True)
+            # Set default values if config loading fails
+            logger.warning("Using default ROI and zone values")
+            self.set_roi(100, 50, 1720, 980)
+            self.set_zones(0.15, 0.15)
+
+    def update_piece_tracking(self, tracked_pieces_dict: Dict, identified_pieces_dict: Dict):
+        """
+        Update the dictionaries used for piece state tracking and color-coding.
+
+        This should be called periodically by the sorting GUI (typically in a
+        timer callback) to keep the piece colors synchronized with the current
+        processing state.
+
+        Args:
+            tracked_pieces_dict: {piece_id: TrackedPiece} from detector coordinator
+            identified_pieces_dict: {piece_id: IdentifiedPiece} from orchestrator
+        """
+        self.tracked_pieces_dict = tracked_pieces_dict
+        self.identified_pieces_dict = identified_pieces_dict
+
+    def _get_piece_color(self, piece_id: int) -> tuple:
+        """
+        Determine bounding box color based on piece processing stage.
+
+        This method overrides the parent's _get_piece_color() to provide
+        sorting-specific color logic based on the piece's current state
+        in the detection and processing pipeline.
+
+        Color Logic:
+        1. Gray: Piece is detected but not yet captured
+        2. Orange: Piece is captured and queued for processing
+        3. Green: Piece is successfully identified with valid bin assignment
+        4. Magenta: Piece is identified as unknown (bin 0 = overflow)
+
+        The method looks up the piece in both tracked_pieces_dict (for capture
+        state) and identified_pieces_dict (for identification state) to
+        determine the appropriate color.
+
+        Args:
+            piece_id: The piece ID to look up
+
+        Returns:
+            BGR color tuple for OpenCV drawing
+        """
+        # Check if piece is in tracked pieces dictionary
+        if piece_id not in self.tracked_pieces_dict:
+            logger.debug(f"Piece {piece_id}: Not in tracked_pieces_dict → GRAY")
+            return (128, 128, 128)  # Gray - detected but not tracked yet
+
+        tracked_piece = self.tracked_pieces_dict[piece_id]
+
+        # Check if piece has been captured
+        if not tracked_piece.captured:
+            logger.debug(f"Piece {piece_id}: Not captured → GRAY")
+            return (128, 128, 128)  # Gray - detected but not captured
+
+        # Check if piece has been identified
+        if piece_id in self.identified_pieces_dict:
+            identified_piece = self.identified_pieces_dict[piece_id]
+
+            # Check if it's unknown/overflow (bin 0)
+            if hasattr(identified_piece, 'bin_number') and identified_piece.bin_number == 0:
+                logger.info(f"Piece {piece_id}: Unknown/Overflow → MAGENTA")
+                return (255, 0, 255)  # Magenta - unknown/overflow
+            else:
+                logger.info(f"Piece {piece_id}: Identified → GREEN")
+                return (0, 255, 0)  # Green - identified successfully
+
+        # Piece is captured but not yet identified
+        logger.info(f"Piece {piece_id}: Captured, awaiting identification → ORANGE")
+        return (0, 165, 255)  # Orange - captured, queued for processing
+
+    def process_frame(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Process frame with ROI, zones, and color-coded piece tracking.
+
+        This method overrides the parent's process_frame() to provide the
+        complete sorting view with:
+        1. ROI rectangle and zones (from parent)
+        2. Color-coded piece bounding boxes (custom logic)
+        3. Piece ID labels
+
+        The color of each piece's bounding box reflects its current state
+        in the processing pipeline, providing real-time visual feedback.
+
+        Args:
+            frame: Input frame from camera
+
+        Returns:
+            Frame with all overlays drawn
+        """
+        # Start with parent's ROI and zone overlays
+        display_frame = super().process_frame(frame)
+
+        # Draw tracked pieces with custom color-coding
+        if self.tracked_pieces:
+            for piece in self.tracked_pieces:
+                piece_id = piece.get('id')
+                bbox = piece.get('bbox')
+
+                if bbox:
+                    x, y, w, h = bbox
+
+                    # Get color based on processing stage
+                    color = self._get_piece_color(piece_id)
+
+                    # Draw bounding box
+                    cv2.rectangle(display_frame, (x, y), (x + w, y + h), color, 2)
+
+                    # Draw piece ID label with colored background
+                    label = f"ID:{piece_id}"
+                    label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+                    cv2.rectangle(display_frame, (x, y - label_size[1] - 5),
+                                  (x + label_size[0], y), color, -1)
+                    cv2.putText(display_frame, label, (x, y - 3),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        return display_frame

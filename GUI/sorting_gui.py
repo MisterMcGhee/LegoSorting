@@ -6,22 +6,27 @@ FILE LOCATION: GUI/sorting_gui.py
 This GUI displays the machine's operation in real-time during sorting sessions.
 It shows live camera feed with tracked pieces, bin status, and recently processed pieces.
 
+ARCHITECTURE CHANGES (Refactored):
+- CameraViewSorting now auto-configures ROI and zones from config
+- All widget-related frame processing logic moved to camera_view.py
+- Sorting GUI simplified to focus on display and coordination
+
 LAYOUT:
-┌─────────────────────────────────────┬──────────┐
-│                                     │          │
-│                                     │ Recently │
-│      Camera View (2/3 height)       │   Proc.  │
-│      - Live feed with ROI           │  Piece   │
-│      - Color-coded piece tracking   │          │
-│      - Zone overlays                │  [img]   │
-│                                     │  Brick   │
-├─────────────────────────────────────┤  2x4     │
-│  Bin Status Panel (1/3 height)      │  #3001   │
-│  [1] [2] [3] [4] [5] [6] [7] [8]   │  → Bin2  │
-│  2x4 Plt ... ... ... ... ... ...    │          │
-│  ████░░░ ██░░ ... ... ... ... ...   │          │
-│  [Reset][Reset]... ...              │          │
-└─────────────────────────────────────┴──────────┘
+┌─────────────────────────────────┬──────────┐
+│                                 │          │
+│                                 │ Recently │
+│      Camera View (2/3 height)   │   Proc.  │
+│      - Live feed with ROI       │  Piece   │
+│      - Color-coded piece tracking│         │
+│      - Zone overlays            │  [img]   │
+│                                 │  Brick   │
+├─────────────────────────────────┤  2x4     │
+│  Bin Status Panel (1/3 height)  │  #3001   │
+│  [1] [2] [3] [4] [5] [6] [7] [8]│  → Bin2  │
+│  2x4 Plt ... ... ... ... ... ... │         │
+│  ████░░░ ██░░ ... ... ... ... ...│         │
+│  [Reset][Reset]... ...           │          │
+└─────────────────────────────────┴──────────┘
 
 CALLBACKS:
 - bin_assignment_module calls on_bin_assigned(bin_num, category)
@@ -30,11 +35,16 @@ CALLBACKS:
 
 FEATURES:
 - Real-time camera view with ROI, zones, and tracked pieces
+- Auto-configured ROI and zones (loaded from config automatically)
 - Color-coded bounding boxes showing piece processing stage
 - Bin status showing category assignment and capacity
 - Recently processed piece display with identification details
 - Bin reset buttons for manual capacity management
 """
+
+# ============================================================================
+# IMPORTS
+# ============================================================================
 
 import sys
 import logging
@@ -51,8 +61,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QSize
 from PyQt5.QtGui import QFont, QPixmap, QImage, QPainter, QPen, QColor
 
-# Import camera view widget
-from GUI.widgets.camera_view import CameraViewUnited, ViewStyles
+# Import camera view widget - using new self-configuring CameraViewSorting
+from GUI.widgets.camera_view import CameraViewSorting, ViewStyles
 
 logger = logging.getLogger(__name__)
 
@@ -75,13 +85,6 @@ class SortingGUIStyles:
     COLOR_INFO_HOVER = "#2980B9"
     COLOR_NEUTRAL = "#95A5A6"  # Gray - neutral
     COLOR_NEUTRAL_HOVER = "#7F8C8D"
-
-    # Piece tracking colors (BGR for OpenCV, matching camera_view.py)
-    # These are used for bounding box drawing
-    COLOR_DETECTED = (128, 128, 128)  # Gray - detected, not captured
-    COLOR_CAPTURED = (0, 165, 255)  # Orange - captured, queued
-    COLOR_IDENTIFIED = (0, 255, 0)  # Green - identified successfully
-    COLOR_UNKNOWN = (255, 0, 255)  # Magenta - identified as unknown
 
     # Background colors
     BACKGROUND_DARK = "#2b2b2b"
@@ -538,130 +541,6 @@ class RecentlyProcessedPanel(QGroupBox):
 
 
 # ============================================================================
-# CAMERA VIEW WITH TRACKING
-# ============================================================================
-
-class TrackingCameraView(CameraViewUnited):
-    """
-    Extended camera view with color-coded piece tracking.
-
-    This extends CameraViewUnited to add color-coding based on piece
-    processing stage (detected, captured, identified, unknown).
-
-    REQUIRES:
-    - Access to tracked_pieces dict from detector
-    - Access to identified_pieces dict from processing
-
-    The orchestrator must call update_piece_tracking() with both dicts.
-    """
-
-    def __init__(self, parent=None):
-        """Initialize tracking camera view."""
-        super().__init__(parent)
-
-        # Storage for piece status lookups
-        self.tracked_pieces_dict = {}
-        self.identified_pieces_dict = {}
-
-    def update_piece_tracking(self, tracked_pieces_dict: Dict, identified_pieces_dict: Dict):
-        """
-        Update the dictionaries used for color-coding pieces.
-
-        Should be called by orchestrator whenever piece status changes.
-
-        Args:
-            tracked_pieces_dict: {piece_id: TrackedPiece} from detector
-            identified_pieces_dict: {piece_id: IdentifiedPiece} from processing
-        """
-        self.tracked_pieces_dict = tracked_pieces_dict
-        self.identified_pieces_dict = identified_pieces_dict
-
-    def _get_piece_color(self, piece_id: int) -> tuple:
-        """
-        Determine bounding box color based on piece processing stage.
-
-        Color logic:
-        - Gray: Detected, not captured yet
-        - Orange: Captured, queued for processing
-        - Green: Identified successfully
-        - Magenta: Identified as unknown/overflow
-
-        Args:
-            piece_id: The piece ID to look up
-
-        Returns:
-            BGR color tuple for OpenCV drawing
-        """
-        # Check if piece is tracked
-        if piece_id not in self.tracked_pieces_dict:
-            logger.debug(f"Piece {piece_id}: Not in tracked_pieces_dict → GRAY")
-            return SortingGUIStyles.COLOR_DETECTED
-
-        tracked_piece = self.tracked_pieces_dict[piece_id]
-
-        # Check if captured
-        if not tracked_piece.captured:
-            logger.debug(f"Piece {piece_id}: Not captured → GRAY")
-            return SortingGUIStyles.COLOR_DETECTED
-
-        # Check if identified
-        if piece_id in self.identified_pieces_dict:
-            identified_piece = self.identified_pieces_dict[piece_id]
-
-            # Check if unknown/overflow
-            if hasattr(identified_piece, 'bin_number') and identified_piece.bin_number == 0:
-                logger.info(f"Piece {piece_id}: Unknown/Overflow → MAGENTA")
-                return SortingGUIStyles.COLOR_UNKNOWN
-            else:
-                logger.info(f"Piece {piece_id}: Identified → GREEN")
-                return SortingGUIStyles.COLOR_IDENTIFIED
-
-        # Captured but not yet identified
-        logger.info(f"Piece {piece_id}: Captured, waiting for identification → ORANGE")
-        return SortingGUIStyles.COLOR_CAPTURED
-
-    def process_frame(self, frame: np.ndarray) -> np.ndarray:
-        """
-        Process frame with ROI, zones, and color-coded piece tracking.
-
-        Overrides parent method to add custom color logic.
-
-        Args:
-            frame: Input frame from camera
-
-        Returns:
-            Frame with all overlays drawn
-        """
-        # Start with parent's processing (ROI and zones)
-        display_frame = super().process_frame(frame)
-
-        # Draw tracked pieces with custom colors
-        if self.tracked_pieces:
-            for piece in self.tracked_pieces:
-                piece_id = piece.get('id')
-                bbox = piece.get('bbox')
-
-                if bbox:
-                    x, y, w, h = bbox
-
-                    # Get color based on processing stage
-                    color = self._get_piece_color(piece_id)
-
-                    # Draw bounding box
-                    cv2.rectangle(display_frame, (x, y), (x + w, y + h), color, 2)
-
-                    # Draw piece ID label
-                    label = f"ID:{piece_id}"
-                    label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
-                    cv2.rectangle(display_frame, (x, y - label_size[1] - 5),
-                                  (x + label_size[0], y), color, -1)
-                    cv2.putText(display_frame, label, (x, y - 3),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-        return display_frame
-
-
-# ============================================================================
 # MAIN SORTING GUI
 # ============================================================================
 
@@ -671,6 +550,11 @@ class SortingGUI(QMainWindow):
 
     INITIALIZATION:
     Called by LegoSorting008 orchestrator after all modules are initialized.
+
+    ARCHITECTURE IMPROVEMENT:
+    The CameraViewSorting widget now auto-configures itself with ROI and zones
+    from the config manager. This eliminates the need for manual configuration
+    in this GUI class, keeping widget-related logic in the widget module.
 
     LAYOUT:
     - Top 2/3: Camera view with tracking (left 3/4) + Recently processed (right 1/4)
@@ -683,10 +567,11 @@ class SortingGUI(QMainWindow):
     3. hardware_controller.register_sort_callback(on_piece_sorted)
 
     UPDATES:
-    - Camera view: Updates automatically via camera consumer pattern
+    - Camera view: Auto-configured on creation, updates via camera consumer pattern
     - Bin assignments: Via on_bin_assigned callback
     - Recently processed: Via on_piece_identified callback
     - Bin capacity: Via on_piece_sorted callback
+    - Piece colors: Via periodic timer updating piece tracking state
     """
 
     def __init__(self, orchestrator):
@@ -731,8 +616,19 @@ class SortingGUI(QMainWindow):
 
         logger.info("Sorting GUI initialized")
 
+    # ========================================================================
+    # UI SETUP
+    # ========================================================================
+
     def _setup_ui(self):
-        """Create the main UI layout."""
+        """
+        Create the main UI layout.
+
+        ARCHITECTURE NOTE:
+        The camera view is now created using CameraViewSorting, which
+        automatically loads its ROI and zone configuration from the
+        config manager. No manual configuration is needed.
+        """
         self.setWindowTitle("LEGO Sorting Machine - Runtime")
         self.setMinimumSize(1400, 900)
 
@@ -757,7 +653,13 @@ class SortingGUI(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         # Camera view (2/3 height of left side)
-        self.camera_view = TrackingCameraView()
+        # ARCHITECTURE IMPROVEMENT: CameraViewSorting auto-configures ROI and zones
+        # from config manager - no manual setup required!
+        self.camera_view = CameraViewSorting(
+            config_manager=self.orchestrator.config_manager,
+            detector_coordinator=self.detector,
+            orchestrator=self.orchestrator
+        )
         self.camera_view.setMinimumSize(800, 600)
         self.camera_view.set_fps_visible(True)
         left_layout.addWidget(self.camera_view, stretch=2)
@@ -777,7 +679,7 @@ class SortingGUI(QMainWindow):
         self.recent_piece_panel.setMaximumWidth(350)
         main_layout.addWidget(self.recent_piece_panel, stretch=1)
 
-        logger.info("UI layout created")
+        logger.info("UI layout created with auto-configured camera view")
 
     # ========================================================================
     # CALLBACK REGISTRATION
@@ -880,6 +782,8 @@ class SortingGUI(QMainWindow):
         Start camera feed to the camera view widget.
 
         Registers the camera_view as a consumer of camera frames.
+        The CameraViewSorting widget handles all frame processing internally,
+        including ROI/zone overlays and color-coded piece tracking.
         """
         if self.camera:
             logger.info("Registering camera view as frame consumer")
@@ -895,10 +799,15 @@ class SortingGUI(QMainWindow):
 
     def _setup_update_timer(self):
         """
-        Setup timer to periodically update piece tracking colors.
+        Setup timer to periodically update piece tracking state.
 
-        This timer calls update_piece_tracking() to refresh the
-        color-coding based on current piece processing states.
+        This timer calls _update_piece_colors() which provides the
+        CameraViewSorting widget with current piece tracking dictionaries.
+        The widget uses these to determine proper color-coding for each piece.
+
+        ARCHITECTURE NOTE:
+        The widget handles all color logic internally. We just provide it
+        with the current state via update_piece_tracking().
         """
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self._update_piece_colors)
@@ -906,10 +815,19 @@ class SortingGUI(QMainWindow):
 
     def _update_piece_colors(self):
         """
-        Update piece tracking colors in camera view.
+        Update piece tracking state in camera view.
 
         Called periodically by timer. Fetches current tracked pieces
-        and identified pieces, then updates camera view.
+        and identified pieces, then updates camera view for color-coding.
+
+        ARCHITECTURE IMPROVEMENT:
+        The CameraViewSorting widget handles all color logic internally.
+        We just provide it with the current state dictionaries, and it
+        determines the appropriate color for each piece based on its
+        processing stage (detected/captured/identified/unknown).
+
+        This separation of concerns keeps widget logic in the widget module
+        and GUI logic in the GUI module.
         """
         try:
             # Check if detector exists (won't exist in test mode)
@@ -920,25 +838,22 @@ class SortingGUI(QMainWindow):
             tracked_pieces = self.detector.get_tracked_pieces()
 
             # Convert list to dict for lookup
+            # The widget uses this dict to check piece capture status
             tracked_dict = {p.id: p for p in tracked_pieces}
 
-            # Get identified pieces from ORCHESTRATOR
+            # Get identified pieces from orchestrator
+            # The widget uses this dict to check piece identification status
             identified_dict = {}
             if self.orchestrator and hasattr(self.orchestrator, 'get_identified_pieces'):
                 identified_dict = self.orchestrator.get_identified_pieces()
 
-            # DEBUG: Log summary of what we have
-            if len(tracked_dict) > 0:  # Only log when there are pieces
-                logger.info(f"🔍 GUI Update: {len(tracked_dict)} tracked, {len(identified_dict)} identified")
-                for piece_id in tracked_dict:
-                    piece = tracked_dict[piece_id]
-                    is_identified = piece_id in identified_dict
-                    logger.info(f"  Piece {piece_id}: captured={piece.captured}, identified={is_identified}")
-
-            # Update camera view with both dicts
+            # Update camera view's piece tracking state
+            # The CameraViewSorting widget uses these dicts internally to
+            # determine the appropriate color for each piece's bounding box
             self.camera_view.update_piece_tracking(tracked_dict, identified_dict)
 
-            # Set tracked pieces for drawing
+            # Convert tracked pieces to dict format for display
+            # The widget needs pieces in this format for drawing bounding boxes
             tracked_pieces_dicts = []
             for piece in tracked_pieces:
                 tracked_pieces_dicts.append({
@@ -947,17 +862,25 @@ class SortingGUI(QMainWindow):
                     'center': piece.center
                 })
 
+            # Set tracked pieces for drawing
+            # This tells the widget which pieces to draw on the frame
             self.camera_view.set_tracked_pieces(tracked_pieces_dicts)
 
-        except Exception as e:
-            logger.error(f"Error updating piece colors: {e}", exc_info=True)
+        except Exception as e:  # ✅ CORRECT - aligned with try
+            logger.error(f"Error updating piece tracking: {e}", exc_info=True)
 
     # ========================================================================
     # LIFECYCLE MANAGEMENT
     # ========================================================================
 
     def closeEvent(self, event):
-        """Handle window close event."""
+        """
+        Handle window close event.
+
+        Performs cleanup operations when the GUI window is closed:
+        - Stops the piece tracking update timer
+        - Unregisters as a camera frame consumer
+        """
         logger.info("Sorting GUI closing")
 
         # Stop update timer
@@ -983,6 +906,11 @@ def main():
     Standalone test of sorting GUI (for development).
 
     Creates a mock orchestrator with dummy modules for testing UI layout.
+    This allows testing the GUI appearance and basic functionality without
+    requiring the full sorting system to be running.
+
+    NOTE: This test mode will not display ROI overlays since the mock
+    config manager returns empty configuration.
     """
     import sys
 
@@ -992,16 +920,36 @@ def main():
     )
 
     # Create mock orchestrator with dummy modules
+    class MockConfigManager:
+        """Mock config manager for testing."""
+
+        def get_module_config(self, module_name):
+            """Return dummy config."""
+            if module_name == "detector_roi":
+                return {"x": 100, "y": 50, "w": 1720, "h": 980}
+            elif module_name == "detector":
+                return {"zones": {"entry_percentage": 15, "exit_percentage": 15}}
+            return {}
+
     class MockOrchestrator:
+        """Mock orchestrator for testing."""
+
         def __init__(self):
+            self.config_manager = MockConfigManager()
             self.camera = None
             self.detector_coordinator = None
             self.processing_coordinator = None
-            self.hardware_controller = None
+            self.hardware_coordinator = None
             self.bin_assignment_module = None
-            self.bin_capacity_module = MockBinCapacity()
+            self.bin_capacity_manager = MockBinCapacity()
+
+        def get_identified_pieces(self):
+            """Return empty dict for testing."""
+            return {}
 
     class MockBinCapacity:
+        """Mock bin capacity manager for testing."""
+
         def get_bin_capacity_percentage(self, bin_num):
             return 0
 
@@ -1015,6 +963,7 @@ def main():
     gui.show()
 
     logger.info("Sorting GUI test mode - UI only, no actual functionality")
+    logger.info("Note: Camera view will show 'No camera feed' message")
 
     sys.exit(app.exec_())
 
