@@ -6,7 +6,7 @@ and handles the preprocessing needed to create ready-to-identify image packages.
 
 Key Responsibilities:
 - Evaluate piece readiness for capture (fully visible, in valid zone, stable tracking)
-- Apply capture timing controls and cooldowns
+- Apply capture timing controls and cool downs
 - Crop and preprocess images with piece ID overlay
 - Create complete image packages ready for API identification
 - Log capture events with position data
@@ -35,7 +35,7 @@ import time
 import logging
 import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
-from detector.detector_data_models import TrackedPiece, CapturePackage
+from detector.detector_data_models import CapturePackage
 from pathlib import Path
 from detector.detector_data_models import TrackedPiece
 from detector.zone_manager import ZoneManager
@@ -387,7 +387,7 @@ class CaptureController:
         crop_height = crop_y2 - crop_y1
 
         logger.debug(f"Calculated crop region: ({crop_x}, {crop_y}, {crop_width}, {crop_height})")
-        return (crop_x, crop_y, crop_width, crop_height)
+        return crop_x, crop_y, crop_width, crop_height
 
     def _crop_piece_image(self, frame: np.ndarray,
                           crop_region: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
@@ -606,15 +606,14 @@ if __name__ == "__main__":
     This demonstrates capture eligibility assessment, image processing,
     and capture package creation.
     """
-    import sys
     from detector_data_models import TrackedPiece, Detection, create_tracked_piece_from_detection
     from zone_manager import create_zone_manager, ZoneManager
 
     logging.basicConfig(level=logging.INFO)
     logger.info("Testing CaptureController with synthetic data")
 
-
     # Create mock config manager
+
     class MockConfigManager:
         """Mock config manager with test configuration"""
 

@@ -26,7 +26,7 @@ This module does NOT:
 import time
 import logging
 import numpy as np
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Dict, Any
 from detector.detector_data_models import Detection, TrackedPiece, RegionOfInterest, create_tracked_piece_from_detection
 from enhanced_config_manager import ModuleConfig
 
@@ -652,11 +652,9 @@ if __name__ == "__main__":
     This demonstrates piece creation, matching, and lifecycle management
     using simulated detections moving across the ROI.
     """
-    import sys
 
     logging.basicConfig(level=logging.INFO)
     logger.info("Testing PieceTracker with synthetic data")
-
 
     # Create a mock config manager for testing
     class MockConfigManager:

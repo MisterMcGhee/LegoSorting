@@ -14,7 +14,7 @@ import numpy as np
 import time
 import logging
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional
 from enum import Enum
 import cv2
 
@@ -328,7 +328,7 @@ class CapturePackage:
     capture_timestamp: float  # When the capture occurred
     capture_position: Tuple[int, int]  # Frame coordinates where piece was captured
     original_bbox: Tuple[int, int, int, int]  # Original bounding box in frame coordinates
-    image_path: Optional[str] = None # File location for passing to the processing coordinator
+    image_path: Optional[str] = None  # File location for passing to the processing coordinator
 
     def save_image(self, file_path: str) -> bool:
         """

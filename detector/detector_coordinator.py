@@ -17,10 +17,10 @@ CRITICAL ARCHITECTURAL NOTES:
 - This coordinator performs all coordinate conversions
 
 The pipeline flow:
-1. vision_processor: frame → detections (ROI coords)
-2. piece_tracker: detections → tracked_pieces (ROI coords)
-3. zone_manager: tracked_pieces → tracked_pieces with zone flags (ROI coords)
-4. coordinator: tracked_pieces (ROI coords) → formatted results (frame coords)
+1. vision_processor: frame → detections (ROI cords)
+2. piece_tracker: detections → tracked_pieces (ROI cords)
+3. zone_manager: tracked_pieces → tracked_pieces with zone flags (ROI cords)
+4. coordinator: tracked_pieces (ROI cords) → formatted results (frame cords)
 """
 
 import time
@@ -33,7 +33,6 @@ from detector.vision_processor import VisionProcessor
 from detector.piece_tracker import PieceTracker
 from detector.zone_manager import ZoneManager
 from detector.detector_data_models import RegionOfInterest, TrackedPiece
-from enhanced_config_manager import ModuleConfig
 
 # Set up module logger
 logger = logging.getLogger(__name__)
@@ -208,7 +207,7 @@ class DetectorCoordinator:
             Bounding box in frame coordinates (x, y, w, h)
         """
         x, y, w, h = roi_bbox
-        return (x + self._roi_offset_x, y + self._roi_offset_y, w, h)
+        return x + self._roi_offset_x, y + self._roi_offset_y, w, h
 
     def _convert_roi_center_to_frame(self, roi_center: Tuple[float, float]) -> Tuple[float, float]:
         """
@@ -221,7 +220,7 @@ class DetectorCoordinator:
             Center point in frame coordinates (x, y)
         """
         x, y = roi_center
-        return (x + self._roi_offset_x, y + self._roi_offset_y)
+        return x + self._roi_offset_x, y + self._roi_offset_y
 
     def _convert_tracked_piece_to_frame_coords(self, piece: TrackedPiece) -> TrackedPiece:
         """
