@@ -51,7 +51,7 @@ import sys
 import signal
 import logging
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from enum import Enum
 
 # PyQt5 for GUI framework
@@ -88,6 +88,7 @@ from processing.processing_data_models import IdentifiedPiece
 from hardware.hardware_coordinator import HardwareCoordinator, create_hardware_coordinator
 from hardware.arduino_servo_module import create_arduino_servo_controller
 from hardware.bin_capacity_module import create_bin_capacity_manager
+from hardware.chute_state_manager import create_chute_state_manager
 
 # ============================================================================
 # LOGGING CONFIGURATION
@@ -434,14 +435,14 @@ class LegoSorting008(QObject):
             logger.info("✓ Hardware pipeline ready")
 
             # ================================================================
-            # STEP 6: Register Callbacks (TODO - Phase 4)
+            # STEP 6: Register Callbacks
             # ================================================================
             logger.info("Step 6: Registering callbacks...")
             self.register_callbacks()
             logger.info("✓ Callbacks registered")
 
             # ================================================================
-            # STEP 7: Create Sorting GUI (TODO - Phase 6)
+            # STEP 7: Create Sorting GUI
             # ================================================================
             logger.info("Step 7: Creating sorting GUI...")
             self.create_sorting_gui()
@@ -496,9 +497,66 @@ class LegoSorting008(QObject):
         logger.info("  ✓ Processing → Orchestrator callback registered")
 
         logger.info("✓ Core callbacks registered")
+
+    # ========================================================================
+    # HELPER METHODS FOR SORTING LOGIC
+    # ========================================================================
+
+    def _get_rightmost_identified_piece(
+        self,
+        tracked_pieces: List[TrackedPiece]
+    ) -> Optional[TrackedPiece]:
+        """
+        Find the rightmost piece that has been identified and is ready for sorting.
+
+        This is orchestration logic that bridges detection and processing pipelines.
+        Used for chute pre-positioning - finds the next piece that will need sorting.
+
+        Since pieces cannot overtake each other on the conveyor, the rightmost
+        identified piece is guaranteed to be the next piece needing the chute.
+
+        Args:
+            tracked_pieces: List of currently tracked pieces
+
+        Returns:
+            TrackedPiece with highest X coordinate that meets criteria, or None
+        """
+        candidates = []
+
+        for piece in tracked_pieces:
+            # Must be identified
+            identified_piece = self.identified_pieces_dict.get(piece.id)
+            if identified_piece is None:
+                continue
+
+            # Identification must be complete
+            if not identified_piece.complete:
+                continue
+
+            # Must still be in ROI (not exited yet)
+            if piece.has_exited_roi:
+                continue
+
+            candidates.append(piece)
+
+        if not candidates:
+            return None
+
+        # Return piece with highest X coordinate (rightmost)
+        # Use center[0] which is the X coordinate of piece center
+        rightmost = max(candidates, key=lambda p: p.center[0])
+
+        logger.debug(
+            f"Rightmost identified piece: {rightmost.id} at "
+            f"x={rightmost.center[0]:.1f}"
+        )
+
+        return rightmost
+
     # ========================================================================
     # PHASE 5: GUI CREATION
     # ========================================================================
+
 
     def create_sorting_gui(self):
         """Create and configure the sorting GUI."""
@@ -632,44 +690,73 @@ class LegoSorting008(QObject):
                 logger.error(f"  ✗ Queue full, could not submit piece {piece_id}")
 
         # ====================================================================
-        # STEP 5: Check for pieces ready to sort
+        # STEP 5: Chute positioning and sorting logic (State Machine)
         # ====================================================================
-        # Pieces must be:
-        # - In exit zone
-        # - Identified (present in identified_pieces_dict)
-        # - Processing complete
-        # - Rightmost in exit zone (to prevent double-sorting)
 
-        for piece in tracked_pieces:
-            # Only consider pieces in exit zone
-            if not piece.in_exit_zone:
-                continue
+        # Update chute state machine (check if fall timer expired)
+        self.hardware_coordinator.update_chute_state()
 
-            # Check if piece has been identified
-            identified_piece = self.identified_pieces_dict.get(piece.id)
-            if identified_piece is None:
-                continue
+        # Get current chute status
+        chute_status = self.hardware_coordinator.get_chute_status()
 
-            # Ensure identification is complete
-            if not identified_piece.complete:
-                continue
+        # ───────────────────────────────────────────────────────────────────
+        # CASE 1: Chute is IDLE - Look for next piece to position for
+        # ───────────────────────────────────────────────────────────────────
+        if self.hardware_coordinator.is_chute_available():
+            # Find rightmost identified piece using our helper method
+            rightmost_piece = self._get_rightmost_identified_piece(tracked_pieces)
 
-            # Only sort the rightmost piece in exit zone to prevent double-sorts
-            if not getattr(piece, 'is_rightmost_in_exit_zone', False):
-                continue
+            if rightmost_piece is not None:
+                # Get bin assignment
+                identified_piece = self.identified_pieces_dict[rightmost_piece.id]
 
-            # Piece is ready to sort!
-            logger.info(f"🎯 Triggering sort for piece {piece.id} → bin {identified_piece.bin_number}")
+                logger.info(
+                    f"🎯 Found rightmost identified piece {rightmost_piece.id} "
+                    f"→ bin {identified_piece.bin_number} "
+                    f"(at x={rightmost_piece.center[0]:.1f})"  # ADD THIS
+                )
 
-            # Trigger hardware sorting
-            success = self.hardware_coordinator.trigger_sort_for_piece(
-                piece_id=piece.id,
-                bin_number=identified_piece.bin_number
-            )
+                # Pre-position chute for this piece
+                success = self.hardware_coordinator.position_chute_for_piece(
+                    piece_id=rightmost_piece.id,
+                    bin_number=identified_piece.bin_number
+                )
 
-            if not success:
-                logger.error(f"❌ Failed to sort piece {piece.id}")
+                if not success:
+                    logger.error(f"✗ Failed to position chute for piece {rightmost_piece.id}")
 
+        # ───────────────────────────────────────────────────────────────────
+        # CASE 2: Chute is POSITIONED - Watch for piece to exit
+        # ───────────────────────────────────────────────────────────────────
+        elif chute_status['state'] == 'positioned':
+            positioned_piece_id = chute_status['positioned_piece_id']
+
+            # Look for this specific piece in tracked pieces
+            for piece in tracked_pieces:
+                if piece.id != positioned_piece_id:
+                    continue
+
+                # Check if this piece has exited the ROI
+                if piece.has_exited_roi:
+                    logger.info(f"🚪 Positioned piece {piece.id} exited → Starting fall timer")
+
+                    # Notify hardware coordinator
+                    self.hardware_coordinator.notify_piece_exited(piece.id)
+
+                    # Remove from identified pieces dict (piece is committed to bin)
+                    self.identified_pieces_dict.pop(piece.id, None)
+
+                    break
+
+        # ───────────────────────────────────────────────────────────────────
+        # CASE 3: Chute is WAITING_FOR_FALL - Do nothing, timer runs automatically
+        # ───────────────────────────────────────────────────────────────────
+        elif chute_status['state'] == 'waiting_for_fall':
+            # Timer is checked at top of this section via update_chute_state()
+            if 'fall_time_remaining' in chute_status:
+                remaining = chute_status['fall_time_remaining']
+                if remaining > 0:
+                    logger.debug(f"⏳ Waiting for fall to complete: {remaining:.2f}s remaining")
     # ========================================================================
     # PHASE 7 or 6?: SHUTDOWN
     # ========================================================================

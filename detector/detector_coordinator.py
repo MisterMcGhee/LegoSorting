@@ -129,6 +129,40 @@ class DetectorCoordinator:
         logger.info(f"All subsystems initialized with ROI")
 
     # ========================================================================
+    # EXIT DETECTION
+    # ========================================================================
+
+    def _update_exit_flags(self, tracked_pieces: List[TrackedPiece]) -> None:
+        """
+        Update exit flags for pieces that have left the ROI.
+
+        A piece is considered "exited" when its right edge moves past
+        the right edge of the ROI. We record the exit timestamp for
+        fall time calculations.
+
+        Args:
+            tracked_pieces: List of TrackedPiece objects in ROI coordinates
+        """
+        if not self._roi:
+            return  # ROI not configured yet
+
+        roi_right_edge = self._roi.width  # Right edge in ROI coordinates
+
+        for piece in tracked_pieces:
+            # Skip if already marked as exited
+            if piece.has_exited_roi:
+                continue
+
+            # Check if piece right edge is past ROI right edge
+            # piece.right_edge is already in ROI coordinates
+            if piece.right_edge > roi_right_edge:
+                # Piece has exited!
+                piece.has_exited_roi = True
+                piece.exit_timestamp = time.time()
+
+                logger.info(f"🚪 Piece {piece.id} exited ROI at x={piece.right_edge:.1f}")
+
+    # ========================================================================
     # MAIN PROCESSING PIPELINE
     # ========================================================================
 
@@ -174,6 +208,9 @@ class DetectorCoordinator:
 
             # Step 3: Zone status management (updates zone flags, still ROI coordinates)
             tracked_pieces = self.zone_manager.update_piece_zones(tracked_pieces)
+
+            # NEW: Step 3.5: Update exit detection flags
+            self._update_exit_flags(tracked_pieces)
 
             # Step 4: Convert to frame coordinates and format for consumers
             formatted_results = self._format_results_for_consumers(tracked_pieces, detections)

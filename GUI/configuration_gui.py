@@ -293,8 +293,8 @@ class ConfigurationGUI(QMainWindow):
         row1.addWidget(self.save_all_btn)
 
         self.load_all_btn = QPushButton("📂 Reload All")
-        self.load_all_btn.setToolTip("Reload all configurations from file")
-        self.load_all_btn.clicked.connect(self.load_all_configs)
+        self.load_all_btn.setToolTip("Reload all configurations and reinitialize hardware")
+        self.load_all_btn.clicked.connect(self.reload_all_with_hardware_reinit)
         self.load_all_btn.setStyleSheet(self.get_compact_button_style("#3498DB", "#2980B9"))
         row1.addWidget(self.load_all_btn)
 
@@ -533,7 +533,7 @@ class ConfigurationGUI(QMainWindow):
     # ========================================================================
 
     def load_all_configs(self):
-        """Load configuration for all tabs."""
+        """Load configuration for all tabs (without hardware reinitialization)."""
         logger.info("=" * 60)
         logger.info("Loading all configurations...")
         logger.info("=" * 60)
@@ -566,6 +566,214 @@ class ConfigurationGUI(QMainWindow):
         # Clear modified flags
         self.modified_tabs.clear()
         self.update_modified_indicator()
+
+    def reload_all_with_hardware_reinit(self):
+        """
+        Reload all configurations AND reinitialize hardware modules.
+
+        This is called when the user clicks the "Reload All" button.
+        It performs a full reload of configuration from disk and
+        reinitializes hardware modules with the new settings.
+
+        This is different from load_all_configs() which is called
+        during startup and should NOT reinitialize already-initialized hardware.
+        """
+        logger.info("=" * 70)
+        logger.info("RELOAD ALL WITH HARDWARE REINITIALIZATION")
+        logger.info("=" * 70)
+
+        # Step 1: Load all tab configurations from disk
+        logger.info("Step 1: Loading configurations from disk...")
+        success_count = 0
+        fail_count = 0
+
+        for name, tab in self.tabs.items():
+            try:
+                if tab.load_config():
+                    logger.info(f"✓ {name} tab loaded")
+                    success_count += 1
+                else:
+                    logger.warning(f"⚠ {name} tab load returned False")
+                    fail_count += 1
+            except Exception as e:
+                logger.error(f"✗ {name} tab load failed: {e}", exc_info=True)
+                fail_count += 1
+
+        # Step 2: Reinitialize hardware modules with new configuration
+        logger.info("=" * 70)
+        logger.info("Step 2: Reinitializing hardware modules...")
+        logger.info("=" * 70)
+
+        hardware_reinit_status = []
+
+        # Reinitialize Arduino servo controller
+        if self.arduino:
+            try:
+                logger.info("Reinitializing Arduino servo controller...")
+
+                # Get the updated configuration
+                arduino_config = self.config_manager.get_module_config("arduino_servo")
+
+                # Disconnect existing connection
+                logger.info("Disconnecting existing Arduino connection...")
+                self.arduino.disconnect()
+
+                # Update Arduino internal configuration with new values
+                self.arduino.port = arduino_config['port']
+                self.arduino.baud_rate = arduino_config['baud_rate']
+                self.arduino.timeout = arduino_config['timeout']
+                self.arduino.connection_retries = arduino_config['connection_retries']
+                self.arduino.retry_delay = arduino_config['retry_delay']
+                self.arduino.simulation_mode = arduino_config['simulation_mode']
+                self.arduino.default_position = arduino_config['default_position']
+                self.arduino.min_bin_separation = arduino_config['min_bin_separation']
+
+                logger.info(f"  Port: {self.arduino.port}")
+                logger.info(f"  Baud Rate: {self.arduino.baud_rate}")
+                logger.info(f"  Simulation Mode: {self.arduino.simulation_mode}")
+
+                # Reconnect with new settings
+                if not self.arduino.simulation_mode:
+                    logger.info(f"Reconnecting to Arduino on port: {self.arduino.port}")
+
+                    if self.arduino._connect_to_arduino():
+                        logger.info("✓ Arduino reconnected successfully")
+                        hardware_reinit_status.append(("Arduino", True, f"Connected to {self.arduino.port}"))
+                    else:
+                        logger.error("✗ Failed to reconnect to Arduino")
+                        hardware_reinit_status.append(("Arduino", False, "Connection failed"))
+                else:
+                    logger.info("✓ Arduino in simulation mode - no hardware connection needed")
+                    self.arduino.initialized = True
+                    hardware_reinit_status.append(("Arduino", True, "Simulation mode enabled"))
+
+                # Reload bin positions from updated config
+                logger.info("Reloading bin positions...")
+                if self.arduino.reload_positions_from_config():
+                    logger.info("✓ Bin positions reloaded")
+                else:
+                    logger.warning("⚠ Bin positions reload returned False")
+
+            except Exception as e:
+                logger.error(f"✗ Failed to reinitialize Arduino: {e}", exc_info=True)
+                hardware_reinit_status.append(("Arduino", False, str(e)))
+
+        # Reinitialize Camera
+        if self.camera:
+            try:
+                logger.info("Reinitializing camera...")
+
+                # Get new camera config
+                camera_config = self.config_manager.get_module_config("camera")
+
+                # Stop current capture
+                if hasattr(self.camera, 'stop_capture'):
+                    logger.info("Stopping camera capture...")
+                    self.camera.stop_capture()
+
+                # Release camera hardware
+                if hasattr(self.camera, 'release'):
+                    logger.info("Releasing camera hardware...")
+                    self.camera.release()
+
+                # Update camera configuration
+                if hasattr(self.camera, 'device_id'):
+                    self.camera.device_id = camera_config['device_id']
+                if hasattr(self.camera, 'width'):
+                    self.camera.width = camera_config['width']
+                if hasattr(self.camera, 'height'):
+                    self.camera.height = camera_config['height']
+                if hasattr(self.camera, 'fps'):
+                    self.camera.fps = camera_config['fps']
+
+                # Reinitialize with new settings
+                if hasattr(self.camera, 'initialize'):
+                    logger.info(f"Reinitializing camera with device_id: {camera_config['device_id']}")
+                    if self.camera.initialize():
+                        logger.info("✓ Camera reinitialized")
+                        hardware_reinit_status.append(("Camera", True, f"Device {camera_config['device_id']}"))
+
+                        # Restart capture
+                        if hasattr(self.camera, 'start_capture'):
+                            if self.camera.start_capture():
+                                logger.info("✓ Camera capture restarted")
+                            else:
+                                logger.warning("⚠ Camera capture restart failed")
+                    else:
+                        logger.warning("⚠ Camera reinitialization returned False")
+                        hardware_reinit_status.append(("Camera", False, "Initialization failed"))
+                else:
+                    logger.warning("Camera has no initialize method")
+
+            except Exception as e:
+                logger.error(f"✗ Failed to reinitialize camera: {e}", exc_info=True)
+                hardware_reinit_status.append(("Camera", False, str(e)))
+
+        logger.info("=" * 70)
+
+        # Step 3: Update UI status indicators
+        self.update_status_indicators()
+
+        # Step 4: Show results to user
+        if fail_count == 0 and all(status[1] for status in hardware_reinit_status):
+            # Perfect success
+            self.statusBar().showMessage(
+                f"✓ All configurations reloaded and hardware reinitialized",
+                5000
+            )
+            logger.info(f"✓ All {success_count} tabs loaded and hardware reinitialized successfully")
+
+            # Build success message
+            success_msg = f"✓ All configurations reloaded successfully!\n\n"
+            success_msg += f"Configuration tabs loaded: {success_count}\n\n"
+
+            if hardware_reinit_status:
+                success_msg += "Hardware reinitialized:\n"
+                for module, success, details in hardware_reinit_status:
+                    success_msg += f"  • {module}: {details}\n"
+
+            QMessageBox.information(
+                self,
+                "Reload Successful",
+                success_msg
+            )
+
+        else:
+            # Partial failure
+            self.statusBar().showMessage(
+                f"⚠ {success_count} configs loaded, some issues occurred",
+                5000
+            )
+
+            # Build detailed message
+            warning_msg = "Configuration reload completed with some issues:\n\n"
+
+            if fail_count > 0:
+                warning_msg += f"Configuration tabs:\n"
+                warning_msg += f"  • Loaded: {success_count}\n"
+                warning_msg += f"  • Failed: {fail_count}\n\n"
+
+            if hardware_reinit_status:
+                warning_msg += "Hardware reinitialization:\n"
+                for module, success, details in hardware_reinit_status:
+                    status_icon = "✓" if success else "✗"
+                    warning_msg += f"  {status_icon} {module}: {details}\n"
+
+            warning_msg += "\nCheck logs for details."
+
+            QMessageBox.warning(
+                self,
+                "Reload Issues",
+                warning_msg
+            )
+
+            logger.warning(f"⚠ Reload completed with issues: {success_count} tabs succeeded, {fail_count} failed")
+
+        # Step 5: Clear modified flags
+        self.modified_tabs.clear()
+        self.update_modified_indicator()
+
+        logger.info("=" * 70)
 
     def save_all_configs(self):
         """Save configuration for all tabs."""

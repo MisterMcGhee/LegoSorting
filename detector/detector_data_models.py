@@ -136,7 +136,9 @@ class TrackedPiece:
     in_valid_zone: bool = False
     in_exit_zone: bool = False
     exit_zone_entry_time: Optional[float] = None  # When did piece enter exit zone?
-    is_rightmost_in_exit_zone: bool = False
+
+    has_exited_roi: bool = False  # Piece moved past right edge of ROI
+    exit_timestamp: Optional[float] = None  # When piece exited ROI
 
     # ========================================================================
     # TRACKING QUALITY METRICS

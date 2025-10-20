@@ -28,7 +28,7 @@ focusing purely on zone business logic and piece status management.
 
 import time
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 from detector.detector_data_models import TrackedPiece, RegionOfInterest
@@ -702,7 +702,6 @@ if __name__ == "__main__":
     This demonstrates zone boundary calculation, piece status updates,
     and filtering functionality.
     """
-    import sys
     from detector_data_models import RegionOfInterest
 
     logging.basicConfig(level=logging.INFO)

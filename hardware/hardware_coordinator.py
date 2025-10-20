@@ -51,6 +51,7 @@ import logging
 import threading
 from typing import Dict, List, Callable
 from enhanced_config_manager import EnhancedConfigManager, ModuleConfig
+from hardware.chute_state_manager import create_chute_state_manager, ChuteStateManager
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,9 @@ class HardwareCoordinator:
         self.servo = servo_controller
         self.config_manager = config_manager
 
+        # Create chute state manager
+        self.chute_state_manager = create_chute_state_manager(config_manager)
+
         # ============================================================
         # LOAD CONFIGURATION
         # ============================================================
@@ -119,7 +123,7 @@ class HardwareCoordinator:
         # Each callback should be a function that accepts a bin_number
         self.sort_callbacks: List[Callable[[int], None]] = []
 
-        logger.info("Hardware coordinator initialized")
+        logger.info("Hardware coordinator initialized with chute state manager")
         logger.info(f"  Overflow bin: {self.overflow_bin}")
 
     # ========================================================================
@@ -265,153 +269,95 @@ class HardwareCoordinator:
     # This is the main functionality - executing the physical sort operation
     # by checking capacity, moving the servo, and updating counts.
 
-    def trigger_sort_for_piece(self, piece_id: int, bin_number: int) -> bool:
-        """
-        Execute physical sorting for a piece.
+        # ========================================================================
+        # CHUTE POSITIONING (Delegates to ChuteStateManager)
+        # ========================================================================
 
-        This is called by the main orchestrator when a piece reaches the
-        exit zone and is ready to be physically sorted. All decision-making
-        has already happened - this function just executes the physical
-        operation.
+        def is_chute_available(self) -> bool:
+            """Check if chute is available for positioning."""
+            return self.chute_state_manager.is_available()
 
-        WHAT ALREADY HAPPENED:
-        The caller (LegoSorting008) has already determined:
-        - The piece is fully processed (IdentifiedPiece.complete = True)
-        - The bin assignment (bin_number from bin_assignment_module)
-        - The timing is correct (piece in exit zone, rightmost position)
+        def get_chute_status(self) -> dict:
+            """Get current chute status."""
+            status = self.chute_state_manager.get_status()
+            return {
+                'state': status.state.value,
+                'positioned_piece_id': status.positioned_piece_id,
+                'positioned_bin': status.positioned_bin,
+                'fall_time_remaining': status.fall_time_remaining,
+                'available': status.available
+            }
 
-        WHAT THIS FUNCTION DOES:
-        This function executes the physical sorting sequence:
-        1. Check if target bin has capacity
-        2. If full, redirect to overflow bin
-        3. Move servo to target bin position
-        4. Update bin piece count
-        5. Notify registered callbacks (update GUI)
-        6. Update statistics
+        def position_chute_for_piece(self, piece_id: int, bin_number: int) -> bool:
+            """
+            Position chute for a specific piece (pre-positioning).
 
-        Args:
-            piece_id: Piece identifier (used for logging and statistics)
-            bin_number: Target bin number (0-9)
+            Args:
+                piece_id: ID of piece to position for
+                bin_number: Target bin number
 
-        Returns:
-            True if sorting operation successful, False if failed
-
-        Example:
-            # In LegoSorting008 detector callback:
-            if piece.is_rightmost_in_exit_zone and identified_piece.complete:
-                success = hardware_coordinator.trigger_sort_for_piece(
-                    piece_id=piece.id,
-                    bin_number=identified_piece.bin_number
-                )
-        """
-        # ============================================================
-        # THREAD SAFETY: ACQUIRE LOCK
-        # ============================================================
-        # Use a lock to ensure only one sort operation happens at a time
-        # This prevents multiple threads from trying to move the servo
-        # simultaneously, which would cause mechanical conflicts
-        with self.lock:
-            logger.info(f"Sorting piece {piece_id} to bin {bin_number}")
-
-            # ============================================================
-            # STEP 1: CHECK BIN CAPACITY
-            # ============================================================
-            # Before we move the servo, check if the target bin can
-            # accept another piece. If it's full, we'll redirect to
-            # the overflow bin instead.
-
-            # Start with the target bin from processing
-            actual_target_bin = bin_number
-
-            # Ask bin_capacity if this bin can accept another piece
-            if not self.bin_capacity.can_accept_piece(actual_target_bin):
-                # Target bin is full! Redirect to overflow
-                logger.warning(
-                    f"Bin {actual_target_bin} is full! "
-                    f"Redirecting to overflow bin {self.overflow_bin}"
-                )
-
-                # Change target to overflow bin
-                actual_target_bin = self.overflow_bin
-
-                # Track that we had to use overflow
-                self.overflow_count += 1
-
-                # Check if overflow bin is also full (disaster scenario!)
-                if not self.bin_capacity.can_accept_piece(self.overflow_bin):
-                    logger.error(f"Overflow bin {self.overflow_bin} is also full!")
-                    logger.error("Cannot sort piece - all capacity exhausted")
-
-                    # Update failure counter
-                    self.failed_sorts += 1
-
-                    # Return False to indicate failure
-                    # The piece will fall off the conveyor unsorted
-                    return False
-
-            # ============================================================
-            # STEP 2: MOVE SERVO TO TARGET BIN
-            # ============================================================
-            # Now that we know which bin to use (either original target
-            # or overflow), move the servo to that position.
-
-            # Use wait=False for non-blocking operation
-            # This means the servo starts moving immediately, and we
-            # continue without waiting for it to reach the position
-            # This is important for real-time operation
-            success = self.servo.move_to_bin(actual_target_bin, wait=False)
-
-            # Check if servo movement command succeeded
-            if not success:
-                # Servo failed to move (maybe disconnected, position invalid, etc.)
-                logger.error(f"Failed to move servo to bin {actual_target_bin}")
-
-                # Update failure counter
-                self.failed_sorts += 1
-
-                # Return False to indicate failure
-                # The piece will fall off the conveyor unsorted
+            Returns:
+                True if positioning successful
+            """
+            # Check if chute is available
+            if not self.chute_state_manager.is_available():
+                logger.debug(f"Chute not available for piece {piece_id}")
                 return False
 
-            # ============================================================
-            # STEP 3: UPDATE BIN CAPACITY COUNT
-            # ============================================================
-            # The servo is now moving (or has moved) to the target bin.
-            # Update our tracking of how many pieces are in that bin.
+            logger.info(f"📍 Positioning chute for piece {piece_id} → bin {bin_number}")
 
-            # Note: add_piece() internally checks capacity and triggers
-            # warning/full callbacks if thresholds are reached
-            self.bin_capacity.add_piece(actual_target_bin)
+            # Check bin capacity
+            if not self.bin_capacity_manager.can_accept_piece(bin_number):
+                logger.warning(f"Bin {bin_number} full, redirecting to overflow bin 0")
+                bin_number = 0
 
-            # ============================================================
-            # STEP 4: NOTIFY CALLBACKS
-            # ============================================================
-            # Now that the physical sort is complete (servo moved and
-            # count updated), notify all registered callbacks.
-            # This is where the GUI gets updated!
+            # Move servo to bin position
+            servo_success = self.servo_controller.move_to_bin(bin_number, wait=False)
 
-            # Pass the ACTUAL bin number (which may be overflow if
-            # original target was full)
-            self._notify_sort_callbacks(actual_target_bin)
+            if not servo_success:
+                logger.error(f"Failed to move servo to bin {bin_number}")
+                return False
 
-            # ============================================================
-            # STEP 5: UPDATE STATISTICS
-            # ============================================================
-            # Track that we successfully sorted a piece
-            self.total_sorted += 1
+            # Update state machine
+            state_success = self.chute_state_manager.position_for_piece(piece_id, bin_number)
 
-            # ============================================================
-            # STEP 6: LOG SUCCESS
-            # ============================================================
-            logger.info(f"✓ Piece {piece_id} sorted to bin {actual_target_bin}")
+            if not state_success:
+                logger.error(f"State machine rejected positioning for piece {piece_id}")
+                return False
 
-            # Log if this was an overflow redirect
-            # (helps with debugging and monitoring)
-            if actual_target_bin != bin_number:
-                logger.info(f"  (Redirected from full bin {bin_number})")
-
-            # Return True to indicate success
+            logger.info(f"✓ Chute positioned for piece {piece_id} at bin {bin_number}")
             return True
+
+        def notify_piece_exited(self, piece_id: int) -> bool:
+            """
+            Notify coordinator that positioned piece has exited ROI.
+
+            Starts the fall timer and updates bin capacity.
+
+            Args:
+                piece_id: ID of piece that exited
+
+            Returns:
+                True if this was the positioned piece
+            """
+            success = self.chute_state_manager.notify_piece_exited(piece_id)
+
+            if success:
+                # Update bin capacity (piece committed to bin)
+                bin_number = self.chute_state_manager.get_positioned_bin()
+                if bin_number is not None:
+                    self.bin_capacity_manager.add_piece_to_bin(bin_number)
+                    logger.info(f"✓ Piece {piece_id} committed to bin {bin_number}")
+
+            return success
+
+        def update_chute_state(self) -> None:
+            """
+            Update chute state machine (call every frame).
+
+            Checks if fall timer has expired and transitions state.
+            """
+            self.chute_state_manager.update()
 
     # ========================================================================
     # STATISTICS AND MONITORING
@@ -480,38 +426,17 @@ class HardwareCoordinator:
     # ========================================================================
 
     def release(self):
-        """
-        Clean shutdown of hardware coordinator.
+        """Clean shutdown of hardware coordinator."""
+        logger.info("Releasing hardware coordinator...")
 
-        Logs final statistics and returns servo to home position.
-        This should be called when shutting down the sorting system.
+        # Reset chute state
+        self.chute_state_manager.reset()
 
-        WHAT IT DOES:
-        1. Logs final statistics for the session
-        2. Returns servo to safe home position
-        3. Prepares system for shutdown
+        # Return servo to home position
+        if self.servo_controller:
+            self.servo_controller.home()
 
-        WHEN TO CALL:
-        Call this when the sorting session is ending, before
-        shutting down the application.
-
-        Example:
-            # At end of sorting session:
-            coordinator.release()
-            # Now safe to exit application
-        """
-        logger.info("Releasing hardware coordinator")
-
-        # Log final statistics
-        # This gives us a summary of the entire sorting session
-        self._log_final_statistics()
-
-        # Return servo to safe home position
-        # This ensures servo is in a known position for next startup
-        self.servo.home()
-
-        logger.info("Hardware coordinator released")
-
+        logger.info("✓ Hardware coordinator released")
 
 # ============================================================================
 # FACTORY FUNCTION

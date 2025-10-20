@@ -177,34 +177,29 @@ class ConfigSchema:
             },
 
             # =================================================================
-            # SERVO MODULE
-            # Used by: servo_controller.py (future hardware package)
-            # Controls: Servo motor parameters for bin selection
-            # =================================================================
-            ModuleConfig.SERVO.value: {
-                "min_pulse": 500,  # Minimum servo pulse width (microseconds)
-                "max_pulse": 2500,  # Maximum servo pulse width (microseconds)
-                "default_position": 90,  # Default servo angle (degrees)
-                "speed": 100,  # Servo movement speed
-                "calibration_positions": {},  # Calibrated positions for each bin
-                "calibration_mode": False,  # Enable calibration mode
-                "min_bin_separation": 20  # Minimum degrees between bins
-            },
-
-            # =================================================================
             # ARDUINO SERVO MODULE
             # Used by: arduino_servo_controller.py (future hardware package)
             # Controls: Arduino communication for servo control
             # =================================================================
+            # In enhanced_config_manager.py - Replace BOTH servo sections with this ONE:
+
             ModuleConfig.ARDUINO_SERVO.value: {
-                "port": "",  # Serial port (e.g., "COM3" or "/dev/ttyUSB0")
+                # Connection settings
+                "port": "",  # Serial port (e.g., "COM3" or "/dev/cu.usbmodem...")
                 "baud_rate": 57600,  # Serial communication speed
                 "timeout": 1.0,  # Serial timeout in seconds
-                "servo_count": 9,  # Number of servos connected
-                "servo_pins": [2, 3, 4, 5, 6, 7, 8, 9, 10],  # Arduino pins for each servo
                 "connection_retries": 3,  # Connection retry attempts
                 "retry_delay": 1.0,  # Seconds between retries
-                "simulation_mode": False  # Run without real Arduino (testing)
+                "simulation_mode": False,  # Run without real Arduino (testing)
+
+                # Servo hardware parameters
+                "min_pulse": 500,  # Minimum servo pulse width (microseconds)
+                "max_pulse": 2500,  # Maximum servo pulse width (microseconds)
+                "default_position": 90,  # Default/home servo angle (degrees)
+                "min_bin_separation": 20,  # Minimum degrees between bins
+
+                # Bin position mapping
+                "bin_positions": {}  # Calibrated positions: {bin_number: angle}
             },
 
             # =================================================================

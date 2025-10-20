@@ -1,25 +1,26 @@
 # hardware/arduino_servo_module.py
 """
-arduino_servo_module.py - Servo control for bin selection in Lego sorting machine
+arduino_servo_module.py - Servo control for bin selection (SIMPLIFIED WRITE-ONLY)
 
 This module controls the servo motor that directs pieces into different bins.
-It manages the Arduino serial connection, bin position mappings, and all
-servo movement operations.
+It manages the Arduino serial connection and servo movement operations.
+
+COMMUNICATION MODEL:
+- Write-only: Commands are sent to Arduino, no responses expected
+- If serial port opens successfully, assume Arduino is connected
+- User verifies functionality via configuration GUI testing
+
+COMMAND PROTOCOL:
+- Sends: "A,{angle}\n" (e.g., "A,90\n" for 90 degrees)
+- Arduino moves servo and optionally responds "OK\n" (we don't read it)
 
 RESPONSIBILITIES:
-- Serial connection to Arduino (with retry logic)
+- Serial connection to Arduino
 - Bin-to-angle position mapping and validation
 - Servo movement commands (move to bin, move to angle, home)
 - Auto-calculation of evenly-spaced bin positions
 - Position testing and calibration support
 - Simulation mode for development without hardware
-- Bootstrap default positions on first run
-
-CONFIGURATION WRITE POLICY:
-- Writes to config ONLY during initialization if positions are missing/invalid
-- This is a "safety net" to ensure system starts with valid defaults
-- Normal configuration changes go through config_gui, not this module
-- Config GUI calls auto_calculate_bin_positions() and saves results itself
 
 DOES NOT:
 - Track bin capacity (that's bin_capacity_module)
@@ -27,27 +28,7 @@ DOES NOT:
 - Coordinate with other hardware (that's hardware_coordinator)
 
 CONFIGURATION:
-All settings stored in 'arduino_servo' section of config.json via enhanced_config_manager.
-This includes connection settings, hardware parameters, and calibrated bin positions.
-
-USAGE:
-    servo = create_arduino_servo_controller(config_manager)
-
-    # Move to specific bin
-    servo.move_to_bin(3)
-
-    # Auto-calculate positions (GUI can use this)
-    positions = servo.auto_calculate_bin_positions(9)
-    # GUI then saves: config_manager.update_module_config(...)
-
-    # Reload after GUI changes config
-    servo.reload_positions_from_config()
-
-    # Test all positions
-    servo.test_all_positions()
-
-    # Return to home
-    servo.home()
+All settings stored in 'arduino_servo' section of config.json
 """
 
 import time
@@ -64,8 +45,7 @@ class ArduinoServoController:
     """
     Controls servo motor for directing Lego pieces to bins via Arduino.
 
-    This class manages all aspects of servo control including connection,
-    position mapping, movement commands, and calibration support.
+    Simplified write-only implementation for Mac/USB-dongle setups.
     """
 
     def __init__(self, config_manager: EnhancedConfigManager):
@@ -77,7 +57,7 @@ class ArduinoServoController:
         """
         self.config_manager = config_manager
 
-        # Load configuration from arduino_servo section
+        # Load configuration
         arduino_config = config_manager.get_module_config(ModuleConfig.ARDUINO_SERVO.value)
         sorting_config = config_manager.get_module_config(ModuleConfig.SORTING.value)
 
@@ -108,8 +88,6 @@ class ArduinoServoController:
         # =====================================================================
         # BIN POSITION MAPPING
         # =====================================================================
-        # Format: {bin_number: angle}
-        # Example: {0: 90, 1: 10, 2: 30, 3: 50, 4: 70, ...}
         self.bin_positions = {}
 
         # Load positions from config or auto-calculate defaults
@@ -122,12 +100,10 @@ class ArduinoServoController:
             except ValueError as e:
                 logger.error(f"Invalid positions in config: {e}")
                 logger.info("Auto-calculating valid defaults")
-                # Pass max_bins directly - it means TOTAL bins
                 self.bin_positions = self.auto_calculate_bin_positions(self.max_bins)
                 self._save_default_positions_to_config()
         else:
             logger.info("No bin positions found - creating defaults (first run)")
-            # Pass max_bins directly - it means TOTAL bins
             self.bin_positions = self.auto_calculate_bin_positions(self.max_bins)
             self._save_default_positions_to_config()
 
@@ -148,40 +124,317 @@ class ArduinoServoController:
             logger.info("No Arduino connection required")
             self.initialized = True
         else:
-            logger.info("=== HARDWARE MODE ===")
+            logger.info("=== HARDWARE MODE (WRITE-ONLY) ===")
             self._connect_to_arduino()
 
         # Log initialization status
         self._log_initialization_status()
 
     # ========================================================================
-    # SECTION 1: BIN POSITION MANAGEMENT
+    # SECTION 1: ARDUINO CONNECTION (SIMPLIFIED)
+    # ========================================================================
+
+    def _connect_to_arduino(self) -> bool:
+        """
+        Establish serial connection to Arduino.
+
+        Write-only mode: If port opens successfully, assume Arduino is there.
+        No response verification - user confirms via GUI testing.
+
+        Returns:
+            True if connection successful, False otherwise
+        """
+        with self.lock:
+            logger.info("=" * 70)
+            logger.info("STARTING CONNECTION ATTEMPT")
+            logger.info("=" * 70)
+            logger.info(f"Port: {self.port}")
+            logger.info(f"Baud: {self.baud_rate}")
+            logger.info(f"Timeout: {self.timeout}")
+            logger.info(f"Retries: {self.connection_retries}")
+
+            for attempt in range(self.connection_retries):
+                try:
+                    logger.info("─" * 70)
+                    logger.info(
+                        f"ATTEMPT {attempt + 1}/{self.connection_retries}"
+                    )
+                    logger.info("─" * 70)
+
+                    # Open serial connection
+                    logger.info(f"[1/5] Opening serial port: {self.port}")
+                    self.arduino = serial.Serial(
+                        port=self.port,
+                        baudrate=self.baud_rate,
+                        timeout=self.timeout,
+                        write_timeout=self.timeout
+                    )
+                    logger.info("    ✓ serial.Serial() succeeded")
+                    logger.info(f"    Port is open: {self.arduino.is_open}")
+
+                    # Wait for Arduino to reset after connection
+                    logger.info("[2/5] Waiting for Arduino reset (2.5s)...")
+                    time.sleep(2.5)
+                    logger.info("    ✓ Reset wait complete")
+
+                    # Clear any buffered data
+                    logger.info("[3/5] Clearing buffers...")
+                    self.arduino.reset_input_buffer()
+                    self.arduino.reset_output_buffer()
+                    logger.info("    ✓ Buffers cleared")
+
+                    # Mark as initialized
+                    logger.info("[4/5] Setting initialized flag...")
+                    self.initialized = True
+                    logger.info(f"    ✓ self.initialized = {self.initialized}")
+
+                    logger.info("[5/5] Connection complete!")
+                    logger.info("=" * 70)
+                    logger.info("CONNECTION SUCCESS")
+                    logger.info("=" * 70)
+                    logger.info("✓ Serial port opened successfully")
+                    logger.info("✓ Write-only mode - connection ready")
+                    logger.info("✓ Use GUI buttons to test servo movement")
+                    logger.info("=" * 70)
+
+                    return True
+
+                except serial.SerialException as e:
+                    logger.error("=" * 70)
+                    logger.error(f"CONNECTION ATTEMPT {attempt + 1} FAILED")
+                    logger.error("=" * 70)
+                    logger.error(f"Error type: {type(e).__name__}")
+                    logger.error(f"Error message: {e}")
+                    logger.error("=" * 70)
+
+                    if self.arduino:
+                        try:
+                            self.arduino.close()
+                        except:
+                            pass
+                        self.arduino = None
+
+                except Exception as e:
+                    logger.error("=" * 70)
+                    logger.error(f"UNEXPECTED ERROR IN ATTEMPT {attempt + 1}")
+                    logger.error("=" * 70)
+                    logger.error(f"Error type: {type(e).__name__}")
+                    logger.error(f"Error message: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    logger.error("=" * 70)
+
+                    if self.arduino:
+                        try:
+                            self.arduino.close()
+                        except:
+                            pass
+                        self.arduino = None
+
+                # Wait before retry
+                if attempt < self.connection_retries - 1:
+                    logger.info(f"Retrying in {self.retry_delay} seconds...")
+                    time.sleep(self.retry_delay)
+
+            # All connection attempts failed
+            logger.error("=" * 70)
+            logger.error("ALL CONNECTION ATTEMPTS FAILED")
+            logger.error("=" * 70)
+            logger.error("✗ Failed to open serial port after all attempts")
+            logger.error(f"Port: {self.port}")
+            logger.error(f"Attempts: {self.connection_retries}")
+            logger.error("")
+            logger.error("TROUBLESHOOTING:")
+            logger.error("  1. Check Arduino is plugged in")
+            logger.error("  2. Verify correct port is selected")
+            logger.error("  3. Close Arduino IDE or other serial programs")
+            logger.error("  4. Check port permissions")
+            logger.error("  5. Try unplugging/replugging Arduino")
+            logger.error("  6. Run: ls -l /dev/cu.* to see available ports")
+            logger.error("=" * 70)
+
+            self.initialized = False
+            return False
+
+    def disconnect(self):
+        """Safely disconnect from Arduino."""
+        with self.lock:
+            if self.arduino:
+                try:
+                    logger.info("Disconnecting from Arduino...")
+
+                    # Move to safe position first
+                    self.home()
+                    time.sleep(0.5)
+
+                    # Close connection
+                    self.arduino.close()
+                    self.arduino = None
+                    self.initialized = False
+
+                    logger.info("Arduino disconnected")
+
+                except Exception as e:
+                    logger.error(f"Error during disconnect: {e}")
+
+    def _send_command(self, angle: int) -> bool:
+        """
+        Send movement command to Arduino (write-only).
+
+        Command format: "A,{angle}\n"
+
+        Args:
+            angle: Target angle (already validated by caller)
+
+        Returns:
+            True if command sent successfully, False if send failed
+        """
+        with self.lock:
+            if self.simulation_mode:
+                logger.debug(f"[SIMULATION] Command: A,{angle}")
+                return True
+
+            if not self.arduino:
+                logger.error("No Arduino connection")
+                return False
+
+            try:
+                # Format and send command
+                command = f"A,{angle}\n"
+                self.arduino.write(command.encode())
+                self.arduino.flush()  # Ensure data is sent immediately
+
+                logger.debug(f"Sent: {command.strip()}")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to send command A,{angle}: {e}")
+                return False
+
+    # ========================================================================
+    # SECTION 2: SERVO MOVEMENT CONTROL
+    # ========================================================================
+
+    def move_to_angle(self, angle: float, wait: bool = True) -> bool:
+        """
+        Move servo to specific angle.
+
+        Args:
+            angle: Target angle (0-180 degrees)
+            wait: If True, block until movement completes
+
+        Returns:
+            True if command sent successfully
+        """
+        with self.lock:
+            # Validate angle
+            if angle < self.min_angle or angle > self.max_angle:
+                logger.error(f"Angle {angle} out of range [{self.min_angle}-{self.max_angle}]")
+                return False
+
+            # Simulation mode
+            if self.simulation_mode:
+                logger.info(f"[SIMULATION] Moving servo to {angle}°")
+                self.current_angle = angle
+                return True
+
+            # Hardware mode - check initialization
+            if not self.initialized:
+                logger.error("Arduino not initialized - cannot move servo")
+                return False
+
+            try:
+                # Send move command
+                angle_int = int(angle)
+                success = self._send_command(angle_int)
+
+                if not success:
+                    logger.error(f"Failed to send move command to {angle}°")
+                    return False
+
+                # Wait for movement to complete if requested
+                if wait:
+                    angle_difference = abs(angle - self.current_angle)
+                    # Assume servo speed of 60°/second + small buffer
+                    movement_time = (angle_difference / 60.0) + 0.1
+                    time.sleep(movement_time)
+
+                # Update current position
+                self.current_angle = angle
+                logger.debug(f"Servo at {angle}°")
+                return True
+
+            except Exception as e:
+                logger.error(f"Movement to {angle}° failed: {e}")
+                return False
+
+    def move_to_bin(self, bin_number: int, wait: bool = True) -> bool:
+        """
+        Move servo to position for specified bin.
+
+        Args:
+            bin_number: Target bin (0 to max_bins)
+            wait: If True, block until movement completes
+
+        Returns:
+            True if movement successful
+        """
+        with self.lock:
+            # Validate bin number
+            if bin_number not in self.bin_positions:
+                logger.error(f"Bin {bin_number} not configured")
+                return False
+
+            # Get target angle for this bin
+            target_angle = self.bin_positions[bin_number]
+
+            # Execute movement
+            success = self.move_to_angle(target_angle, wait)
+
+            if success:
+                self.current_bin = bin_number
+                logger.info(f"Moved to bin {bin_number} (angle {target_angle}°)")
+            else:
+                logger.error(f"Failed to move to bin {bin_number}")
+
+            return success
+
+    def home(self) -> bool:
+        """
+        Return servo to home/default position.
+
+        Used for:
+        - Startup: Initialize to known safe position
+        - Shutdown: Return to neutral position
+        - Testing: Return to reference point
+        - Manual reset: User-initiated reset via GUI
+
+        Returns:
+            True if movement successful
+        """
+        logger.info("Returning to home position")
+        success = self.move_to_angle(self.default_position, wait=True)
+        if success:
+            self.current_bin = None
+        return success
+
+    # ========================================================================
+    # SECTION 3: BIN POSITION MANAGEMENT
     # ========================================================================
 
     def auto_calculate_bin_positions(self, total_bins: int) -> Dict[int, float]:
         """
         Calculate evenly-spaced positions for ALL bins across servo range.
 
-        This function distributes ALL bins (including overflow bin 0) evenly
-        across the usable servo range. No bin gets special positioning.
-
         Args:
-            total_bins: TOTAL number of bins INCLUDING overflow bin 0.
-                       For example, if total_bins=6, creates bins 0,1,2,3,4,5.
-                       Bin 0 is the overflow bin, bins 1-(total_bins-1) are sorting bins.
+            total_bins: TOTAL number of bins INCLUDING overflow bin 0
 
         Returns:
-            Dictionary mapping bin numbers to angles.
-
-        Example:
-            # Want 6 total bins (0-5)?
-            positions = auto_calculate_bin_positions(6)
-            # Returns: {0: 10, 1: 42, 2: 74, 3: 106, 4: 138, 5: 170}
-            # All 6 bins evenly distributed with 32° spacing
+            Dictionary mapping bin numbers to angles
         """
         logger.info(f"Auto-calculating positions for {total_bins} TOTAL bins")
 
-        # Define usable range (leave margins at edges to avoid mechanical limits)
+        # Define usable range (leave margins at edges)
         edge_margin = 10  # degrees
         usable_min = self.min_angle + edge_margin
         usable_max = self.max_angle - edge_margin
@@ -197,49 +450,31 @@ class ArduinoServoController:
             positions[0] = usable_min + (usable_range / 2.0)
         else:
             # Distribute ALL bins evenly across the range
-            # This includes the overflow bin (0) as part of the distribution
             spacing = usable_range / (total_bins - 1)
 
             for i in range(total_bins):
-                bin_number = i  # Bins 0, 1, 2, 3, ... total_bins-1
+                bin_number = i
                 angle = usable_min + (i * spacing)
                 positions[bin_number] = round(angle, 1)
 
         logger.info(f"Auto-calculated {len(positions)} total positions: {positions}")
-        logger.info(f"  Overflow bin (0): {positions[0]}°")
-        if total_bins > 1:
-            logger.info(f"  Sorting bins (1-{total_bins - 1}): distributed evenly")
-
         return positions
 
     def reload_positions_from_config(self) -> bool:
         """
         Reload bin positions from config file.
 
-        This should be called after config_gui updates positions in config.json.
-        It refreshes the servo module's in-memory positions to match the
-        config file.
+        Called by config GUI after updating positions.
 
         Returns:
-            True if positions reloaded successfully, False if validation failed
-
-        Example workflow:
-            # In config GUI after user clicks Apply:
-            config_manager.update_module_config('arduino_servo',
-                                                {'bin_positions': new_positions})
-            config_manager.save_config()
-
-            # Then refresh servo module:
-            servo.reload_positions_from_config()
+            True if positions reloaded successfully
         """
         with self.lock:
             try:
-                # Read fresh config from file
                 arduino_config = self.config_manager.get_module_config(
                     ModuleConfig.ARDUINO_SERVO.value
                 )
 
-                # Load and validate positions
                 saved_positions = arduino_config.get('bin_positions', {})
 
                 if not saved_positions:
@@ -262,16 +497,7 @@ class ArduinoServoController:
                 return False
 
     def get_bin_positions(self) -> Dict[int, float]:
-        """
-        Get copy of current in-memory bin position mappings.
-
-        Note: This returns the positions currently loaded in memory.
-        If the config file has been updated externally, call
-        reload_positions_from_config() first to refresh.
-
-        Returns:
-            Dictionary of {bin_number: angle}
-        """
+        """Get copy of current bin position mappings."""
         with self.lock:
             return self.bin_positions.copy()
 
@@ -279,14 +505,10 @@ class ArduinoServoController:
         """
         Load and validate bin positions from config data.
 
-        This is an internal helper used during initialization and reload.
-        It validates that positions are reasonable and complete.
-
-        Validation checks:
+        Validates:
         - All angles within valid range [0-180°]
-        - All expected bins have positions [0 through max_bins]
+        - All expected bins have positions
         - Values are numeric
-        - Warns if adjacent bins are too close together
 
         Args:
             saved_positions: Raw positions from config
@@ -324,7 +546,7 @@ class ArduinoServoController:
         if missing_bins:
             raise ValueError(f"Missing positions for bins: {sorted(missing_bins)}")
 
-        # Check separation between adjacent bins (warning only, not error)
+        # Check separation between adjacent bins (warning only)
         sorted_positions = sorted(validated.items(), key=lambda x: x[1])
         for i in range(len(sorted_positions) - 1):
             bin1, angle1 = sorted_positions[i]
@@ -340,17 +562,7 @@ class ArduinoServoController:
         return validated
 
     def _save_default_positions_to_config(self):
-        """
-        Save current positions to config (INTERNAL - bootstrap only).
-
-        This is ONLY called during __init__ if no valid positions exist.
-        It ensures the system has a working configuration to start with.
-
-        This is a "safety net" operation for first run or config recovery.
-        Normal configuration changes should go through config_gui.
-
-        Policy: Servo module writes to config ONLY in bootstrap scenarios.
-        """
+        """Save bootstrap default positions to config."""
         logger.info("Saving bootstrap default positions to config")
         arduino_config = self.config_manager.get_module_config(
             ModuleConfig.ARDUINO_SERVO.value
@@ -364,244 +576,26 @@ class ArduinoServoController:
         logger.info("✓ Default positions saved (first run bootstrap)")
 
     # ========================================================================
-    # SECTION 2: ARDUINO CONNECTION MANAGEMENT
-    # ========================================================================
-
-    def _connect_to_arduino(self) -> bool:
-        """
-        Establish serial connection to Arduino with retry logic.
-
-        Returns:
-            True if connection successful, False otherwise
-        """
-        with self.lock:
-            for attempt in range(self.connection_retries):
-                try:
-                    logger.info(
-                        f"Connecting to Arduino on {self.port} "
-                        f"(attempt {attempt + 1}/{self.connection_retries})"
-                    )
-
-                    # Open serial connection
-                    self.arduino = serial.Serial(
-                        port=self.port,
-                        baudrate=self.baud_rate,
-                        timeout=self.timeout
-                    )
-
-                    # Wait for Arduino to reset after connection
-                    time.sleep(2.5)
-
-                    # Clear any buffered data
-                    self.arduino.reset_input_buffer()
-                    self.arduino.reset_output_buffer()
-
-                    # Mark as initialized
-                    self.initialized = True
-                    logger.info("✓ Arduino connected successfully")
-
-                    # Move to home position
-                    self.home()
-
-                    return True
-
-                except serial.SerialException as e:
-                    logger.error(f"Connection attempt {attempt + 1} failed: {e}")
-                    if self.arduino:
-                        try:
-                            self.arduino.close()
-                        except:
-                            pass
-                        self.arduino = None
-
-                # Wait before retry
-                if attempt < self.connection_retries - 1:
-                    logger.info(f"Retrying in {self.retry_delay} seconds...")
-                    time.sleep(self.retry_delay)
-
-            # All connection attempts failed
-            logger.error("❌ Failed to connect to Arduino after all attempts")
-            logger.error("System will run in degraded mode")
-            self.initialized = False
-            return False
-
-    def disconnect(self):
-        """Safely disconnect from Arduino."""
-        with self.lock:
-            if self.arduino:
-                try:
-                    logger.info("Disconnecting from Arduino...")
-
-                    # Move to safe position first
-                    self.home()
-                    time.sleep(0.5)
-
-                    # Close connection
-                    self.arduino.close()
-                    self.arduino = None
-                    self.initialized = False
-
-                    logger.info("Arduino disconnected")
-
-                except Exception as e:
-                    logger.error(f"Error during disconnect: {e}")
-
-    def _send_command(self, command: str) -> Optional[str]:
-        """
-        Send command to Arduino and read response.
-
-        Args:
-            command: Command string to send
-
-        Returns:
-            Response from Arduino, or None if failed
-        """
-        with self.lock:
-            if self.simulation_mode:
-                logger.debug(f"[SIMULATION] Command: {command}")
-                return "OK"
-
-            if not self.arduino:
-                logger.error("No Arduino connection")
-                return None
-
-            try:
-                # Send command (newline-terminated)
-                self.arduino.write(f"{command}\n".encode())
-
-                # Read response
-                response = self.arduino.readline().decode().strip()
-                logger.debug(f"Command: {command} -> Response: {response}")
-                return response
-
-            except Exception as e:
-                logger.error(f"Command '{command}' failed: {e}")
-                return None
-
-    # ========================================================================
-    # SECTION 3: SERVO MOVEMENT CONTROL
-    # ========================================================================
-
-    def move_to_bin(self, bin_number: int, wait: bool = True) -> bool:
-        """
-        Move servo to position for specified bin.
-
-        Args:
-            bin_number: Target bin (0-9)
-            wait: If True, block until movement completes
-
-        Returns:
-            True if movement successful
-        """
-        with self.lock:
-            # Validate bin number
-            if bin_number not in self.bin_positions:
-                logger.error(f"Bin {bin_number} not configured")
-                return False
-
-            # Get target angle for this bin
-            target_angle = self.bin_positions[bin_number]
-
-            # Execute movement
-            success = self.move_to_angle(target_angle, wait)
-
-            if success:
-                self.current_bin = bin_number
-                logger.info(f"Moved to bin {bin_number} (angle {target_angle}°)")
-            else:
-                logger.error(f"Failed to move to bin {bin_number}")
-
-            return success
-
-    def move_to_angle(self, angle: float, wait: bool = True) -> bool:
-        """
-        Move servo to specific angle.
-
-        Args:
-            angle: Target angle (0-180 degrees)
-            wait: If True, block until movement completes
-
-        Returns:
-            True if movement successful
-        """
-        with self.lock:
-            # Validate angle
-            if angle < self.min_angle or angle > self.max_angle:
-                logger.error(f"Angle {angle} out of range [{self.min_angle}-{self.max_angle}]")
-                return False
-
-            # Simulation mode
-            if self.simulation_mode:
-                logger.info(f"[SIMULATION] Moving servo to {angle}°")
-                self.current_angle = angle
-                return True
-
-            # Hardware mode - check initialization
-            if not self.initialized:
-                logger.error("Arduino not initialized - cannot move servo")
-                return False
-
-            try:
-                # Send move command to Arduino
-                response = self._send_command(f"MOVE {int(angle)}")
-
-                if response != "OK":
-                    logger.error(f"Move command rejected: {response}")
-                    return False
-
-                # Wait for movement to complete if requested
-                if wait:
-                    angle_difference = abs(angle - self.current_angle)
-                    # Assume servo speed of 60°/second + small buffer
-                    movement_time = (angle_difference / 60.0) + 0.1
-                    time.sleep(movement_time)
-
-                # Update current position
-                self.current_angle = angle
-                logger.debug(f"Servo at {angle}°")
-                return True
-
-            except Exception as e:
-                logger.error(f"Movement to {angle}° failed: {e}")
-                return False
-
-    def home(self) -> bool:
-        """
-        Return servo to home/default position.
-
-        Returns:
-            True if movement successful
-        """
-        logger.info("Returning to home position")
-        success = self.move_to_angle(self.default_position, wait=True)
-        if success:
-            self.current_bin = None
-        return success
-
-    # ========================================================================
-    # SECTION 4: TESTING AND CALIBRATION SUPPORT
+    # SECTION 4: TESTING AND CALIBRATION
     # ========================================================================
 
     def test_all_positions(self, dwell_time: float = 1.0) -> bool:
         """
         Test all bin positions by moving through them sequentially.
 
-        This function is used for calibration and verification. It moves
-        the servo to each bin position in order, pausing at each one.
+        User watches servo physically move to verify positions are correct.
 
         Args:
             dwell_time: Seconds to pause at each position
 
         Returns:
-            True if all movements successful
+            True if all commands sent successfully
         """
         logger.info("=" * 60)
         logger.info("TESTING ALL BIN POSITIONS")
         logger.info("=" * 60)
 
-        # Get sorted list of bins (by bin number)
         sorted_bins = sorted(self.bin_positions.items())
-
         all_success = True
 
         for bin_number, angle in sorted_bins:
@@ -611,12 +605,12 @@ class ArduinoServoController:
             success = self.move_to_bin(bin_number, wait=True)
 
             if not success:
-                logger.error(f"✗ Failed to move to bin {bin_number}")
+                logger.error(f"✗ Failed to send command for bin {bin_number}")
                 print(f"✗ FAILED: Bin {bin_number}")
                 all_success = False
             else:
-                logger.info(f"✓ Bin {bin_number} OK")
-                print(f"✓ Bin {bin_number} reached successfully")
+                logger.info(f"✓ Command sent for bin {bin_number}")
+                print(f"✓ Bin {bin_number} command sent")
 
             # Pause at position
             time.sleep(dwell_time)
@@ -628,11 +622,11 @@ class ArduinoServoController:
 
         logger.info("=" * 60)
         if all_success:
-            logger.info("✓ ALL POSITIONS TESTED SUCCESSFULLY")
-            print("✓ All bin positions tested successfully!")
+            logger.info("✓ ALL POSITION COMMANDS SENT SUCCESSFULLY")
+            print("✓ All bin position commands sent successfully!")
         else:
-            logger.warning("✗ SOME POSITIONS FAILED")
-            print("✗ Some positions failed - check logs")
+            logger.warning("✗ SOME COMMANDS FAILED")
+            print("✗ Some commands failed - check logs")
         logger.info("=" * 60)
 
         return all_success
@@ -646,7 +640,7 @@ class ArduinoServoController:
             dwell_time: Seconds to hold position
 
         Returns:
-            True if movement successful
+            True if command sent successfully
         """
         logger.info(f"Testing bin {bin_number}")
         print(f"\nTesting Bin {bin_number}...")
@@ -654,14 +648,15 @@ class ArduinoServoController:
         success = self.move_to_bin(bin_number, wait=True)
 
         if success:
-            logger.info(f"✓ Bin {bin_number} reached at {self.current_angle}°")
-            print(f"✓ Bin {bin_number} OK - holding position...")
+            angle = self.bin_positions[bin_number]
+            logger.info(f"✓ Command sent for bin {bin_number} ({angle}°)")
+            print(f"✓ Bin {bin_number} command sent - holding position...")
             time.sleep(dwell_time)
             self.home()
             return True
         else:
-            logger.error(f"✗ Failed to reach bin {bin_number}")
-            print(f"✗ Failed to reach bin {bin_number}")
+            logger.error(f"✗ Failed to send command for bin {bin_number}")
+            print(f"✗ Failed to send command for bin {bin_number}")
             return False
 
     # ========================================================================
@@ -669,12 +664,7 @@ class ArduinoServoController:
     # ========================================================================
 
     def get_current_position(self) -> Dict:
-        """
-        Get current servo state information.
-
-        Returns:
-            Dictionary with current angle, bin, and status
-        """
+        """Get current servo state information."""
         with self.lock:
             return {
                 'angle': self.current_angle,
@@ -687,18 +677,14 @@ class ArduinoServoController:
         """
         Check if servo is ready for operations.
 
-        Returns:
-            True if servo can accept commands
+        Returns True if:
+        - Simulation mode is enabled, OR
+        - Serial port opened successfully
         """
         return self.initialized
 
     def get_statistics(self) -> Dict:
-        """
-        Get comprehensive servo statistics and configuration.
-
-        Returns:
-            Dictionary with all servo state and config info
-        """
+        """Get comprehensive servo statistics and configuration."""
         return {
             'initialized': self.initialized,
             'simulation_mode': self.simulation_mode,
@@ -728,7 +714,8 @@ class ArduinoServoController:
 
         stats = self.get_statistics()
 
-        print(f"\nMode: {'SIMULATION' if stats['simulation_mode'] else 'HARDWARE'}")
+        mode = "SIMULATION" if stats['simulation_mode'] else "HARDWARE (WRITE-ONLY)"
+        print(f"\nMode: {mode}")
         print(f"Ready: {'YES' if self.is_ready() else 'NO'}")
 
         if not stats['simulation_mode']:
@@ -758,7 +745,7 @@ class ArduinoServoController:
         logger.info("=" * 60)
         logger.info("ARDUINO SERVO CONTROLLER INITIALIZED")
         logger.info("=" * 60)
-        logger.info(f"Mode: {'SIMULATION' if self.simulation_mode else 'HARDWARE'}")
+        logger.info(f"Mode: {'SIMULATION' if self.simulation_mode else 'HARDWARE (WRITE-ONLY)'}")
         logger.info(f"Ready: {self.initialized}")
 
         if not self.simulation_mode:
@@ -779,7 +766,7 @@ class ArduinoServoController:
         """
         Clean shutdown of servo controller.
 
-        Safely returns servo to home position and closes connections.
+        Returns servo to home position and closes serial connection.
         """
         logger.info("Releasing Arduino servo controller")
 
@@ -807,114 +794,3 @@ def create_arduino_servo_controller(config_manager: EnhancedConfigManager) -> Ar
         Initialized ArduinoServoController instance
     """
     return ArduinoServoController(config_manager)
-
-
-# ============================================================================
-# TESTING AND DEMONSTRATION
-# ============================================================================
-
-if __name__ == "__main__":
-    """
-    Test the Arduino servo module functionality.
-    This demonstrates all features using real configuration.
-    """
-
-    print("\n" + "=" * 60)
-    print("ARDUINO SERVO MODULE TEST")
-    print("=" * 60 + "\n")
-
-    # Import enhanced_config_manager
-    from enhanced_config_manager import create_config_manager
-
-    # Create real config manager
-    config_manager = create_config_manager()
-
-    # Display current configuration
-    arduino_config = config_manager.get_module_config(ModuleConfig.ARDUINO_SERVO.value)
-    sorting_config = config_manager.get_module_config(ModuleConfig.SORTING.value)
-
-    print("Current Configuration:")
-    print(f"  Simulation Mode: {arduino_config['simulation_mode']}")
-    print(f"  Port: {arduino_config['port']}")
-    print(f"  Max Bins: {sorting_config['max_bins']}")
-    print()
-
-    # Create servo controller
-    print("Initializing servo controller...")
-    servo = create_arduino_servo_controller(config_manager)
-    print()
-
-    # Print status
-    servo.print_status()
-
-    if not servo.is_ready():
-        print("⚠️  Servo not ready - check configuration and connection")
-        print("Continuing in degraded mode for demonstration...")
-        print()
-
-    # Test 1: Auto-calculate positions
-    print("\n--- Test 1: Auto-Calculate Bin Positions ---")
-    auto_positions = servo.auto_calculate_bin_positions(sorting_config['max_bins'])
-    print(f"Auto-calculated positions:")
-    for bin_num in sorted(auto_positions.keys()):
-        print(f"  Bin {bin_num}: {auto_positions[bin_num]}°")
-    print("\nNote: These were NOT saved to config (as designed)")
-    print("Config GUI would call config_manager.update_module_config() to save")
-
-    # Test 2: Get current positions
-    print("\n--- Test 2: Current Bin Positions (from memory) ---")
-    current_positions = servo.get_bin_positions()
-    print(f"Positions currently loaded in servo module:")
-    for bin_num in sorted(current_positions.keys()):
-        print(f"  Bin {bin_num}: {current_positions[bin_num]}°")
-
-    # Test 3: Test reload function
-    print("\n--- Test 3: Reload from Config ---")
-    print("Attempting to reload positions from config file...")
-    reload_success = servo.reload_positions_from_config()
-    print(f"Reload result: {'SUCCESS' if reload_success else 'FAILED'}")
-
-    # Test 4: Move to specific bins
-    if servo.is_ready():
-        print("\n--- Test 4: Movement Test ---")
-        test_bins = [0, 1, 3, servo.max_bins]
-        for bin_num in test_bins:
-            if bin_num <= servo.max_bins:
-                print(f"Moving to bin {bin_num}...")
-                success = servo.move_to_bin(bin_num, wait=True)
-                print(f"  Result: {'SUCCESS' if success else 'FAILED'}")
-                time.sleep(0.5)
-
-        # Return home
-        print("\nReturning to home position...")
-        servo.home()
-    else:
-        print("\n--- Test 4: SKIPPED (servo not ready) ---")
-
-    # Test 5: Test all positions (commented out by default)
-    print("\n--- Test 5: Full Position Sweep (optional) ---")
-    print("Uncomment in code to run: servo.test_all_positions(dwell_time=1.0)")
-    # Uncomment to run full sweep test:
-    # servo.test_all_positions(dwell_time=1.0)
-
-    # Test 6: Statistics
-    print("\n--- Test 6: Statistics ---")
-    stats = servo.get_statistics()
-    print(f"  Initialized: {stats['initialized']}")
-    print(f"  Simulation: {stats['simulation_mode']}")
-    print(f"  Current Angle: {stats['servo']['current_angle']}°")
-    print(f"  Current Bin: {stats['servo']['current_bin']}")
-    print(f"  Positions Configured: {len(stats['bins']['positions'])}")
-
-    # Cleanup
-    print("\n--- Cleanup ---")
-    servo.release()
-    print("Servo controller released")
-
-    print("\n" + "=" * 60)
-    print("TEST COMPLETE")
-    print("All tests passed with Option C architecture:")
-    print("  ✓ Servo writes config ONLY during bootstrap")
-    print("  ✓ Config GUI writes config during normal operations")
-    print("  ✓ Clear separation of responsibilities")
-    print("=" * 60 + "\n")
