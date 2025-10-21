@@ -20,7 +20,6 @@ import numpy as np
 from typing import Optional, Callable, List, Dict, Any, Tuple
 from datetime import datetime
 from collections import deque
-from error_module import CameraError
 from enhanced_config_manager import ModuleConfig
 
 # Initialize module-specific logger
@@ -113,7 +112,7 @@ class CameraHardware:
                 self.cap = cv2.VideoCapture(self.device_id)
 
                 if not self.cap.isOpened():
-                    raise CameraError(f"Failed to open camera {self.device_id}")
+                    raise RuntimeError(f"Failed to open camera {self.device_id}")
 
                 # Configure camera properties
                 self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.buffer_size)
@@ -770,12 +769,14 @@ def create_camera(camera_type="webcam", config_manager=None):
         CameraManager: The singleton camera instance
     """
     if camera_type != "webcam":
-        raise CameraError(f"Unsupported camera type: {camera_type}")
+        logger.error(f"Unsupported camera type: {camera_type}")
+        raise ValueError(f"Unsupported camera type: {camera_type}")
 
     camera = CameraManager(config_manager)
     if not camera.hardware.is_initialized:
         if not camera.initialize():
-            raise CameraError("Failed to initialize camera")
+            logger.error("Failed to initialize camera during camera creation")
+            raise RuntimeError("Failed to initialize camera")
 
     return camera
 
