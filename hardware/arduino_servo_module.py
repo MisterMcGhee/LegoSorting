@@ -631,13 +631,16 @@ class ArduinoServoController:
 
         return all_success
 
-    def test_single_bin(self, bin_number: int, dwell_time: float = 2.0) -> bool:
+    def test_single_bin(self, bin_number: int) -> bool:
         """
         Test a single bin position.
 
+        Moves the servo to the desired bin position immediately without
+        hold delay or automatic return to home. Use home() to return to
+        neutral position when desired.
+
         Args:
             bin_number: Bin to test
-            dwell_time: Seconds to hold position
 
         Returns:
             True if command sent successfully
@@ -649,10 +652,8 @@ class ArduinoServoController:
 
         if success:
             angle = self.bin_positions[bin_number]
-            logger.info(f"✓ Command sent for bin {bin_number} ({angle}°)")
-            print(f"✓ Bin {bin_number} command sent - holding position...")
-            time.sleep(dwell_time)
-            self.home()
+            logger.info(f"✓ Moved to bin {bin_number} ({angle}°)")
+            print(f"✓ Bin {bin_number} moved to {angle}°")
             return True
         else:
             logger.error(f"✗ Failed to send command for bin {bin_number}")
