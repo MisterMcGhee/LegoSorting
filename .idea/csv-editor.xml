@@ -10,14 +10,14 @@
             </Attribute>
           </value>
         </entry>
-        <entry key="/missing_piece_data.csv">
+        <entry key="/piece_history.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>
-        <entry key="/piece_history.csv">
+        <entry key="/unknown_pieces.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
