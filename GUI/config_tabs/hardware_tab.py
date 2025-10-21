@@ -643,6 +643,10 @@ class HardwareConfigTab(BaseConfigTab):
         """
         Test a single bin position using the current angle in the table.
 
+        Moves the servo to the desired position immediately without dialogue,
+        hold delay, or automatic return to home. Use the Home button to return
+        to neutral position when desired.
+
         Args:
             bin_num: Bin number to test
         """
@@ -692,16 +696,7 @@ class HardwareConfigTab(BaseConfigTab):
             success = self.arduino_module.move_to_angle(target_angle, wait=True)
 
             if success:
-                QMessageBox.information(
-                    self,
-                    "Test Successful",
-                    f"✓ Bin {bin_num} moved to {target_angle}°\n\n"
-                    f"Holding position for 2 seconds..."
-                )
-                # Hold briefly then return home
-                import time
-                time.sleep(2.0)
-                self.arduino_module.home()
+                self.logger.info(f"✓ Bin {bin_num} moved to {target_angle}°")
             else:
                 QMessageBox.warning(
                     self,
