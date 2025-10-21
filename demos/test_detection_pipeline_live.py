@@ -298,7 +298,7 @@ class VisualizationOverlay:
             f"Total Pieces: {stats.get('total_pieces', 0)}",
             f"Detections: {stats.get('detections_this_frame', 0)}",
             f"In Valid Zone: {stats.get('status_breakdown', {}).get('stable', 0)}",
-            f"Processing: {stats.get('status_breakdown', {}).get('processing', 0)}"
+            f"Processing: {stats.get('status_breakdown', {}).get('../processing', 0)}"
         ]
 
         for text in stats_text:
@@ -472,7 +472,7 @@ class CVPipelineTestEnvironment:
         logger.info("Initializing CV pipeline components")
 
         # Create configuration manager
-        self.config_manager = create_config_manager("config.json")
+        self.config_manager = create_config_manager("../config.json")
 
         # Validate configuration
         validation_report = self.config_manager.get_validation_report()

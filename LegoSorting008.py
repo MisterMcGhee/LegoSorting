@@ -311,7 +311,7 @@ class LegoSorting008(QObject):
             # ================================================================
             logger.info("Step 2: Creating camera module...")
 
-            # Factory handles initialization and raises CameraError if it fails
+            # Factory handles initialization and raises error if it fails
             self.camera = create_camera("webcam", self.config_manager)
 
             logger.info("✓ Camera module created and initialized")

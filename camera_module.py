@@ -20,7 +20,6 @@ import numpy as np
 from typing import Optional, Callable, List, Dict, Any, Tuple
 from datetime import datetime
 from collections import deque
-from error_module import CameraError
 from enhanced_config_manager import ModuleConfig
 
 # Initialize module-specific logger
