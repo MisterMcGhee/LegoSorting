@@ -269,95 +269,95 @@ class HardwareCoordinator:
     # This is the main functionality - executing the physical sort operation
     # by checking capacity, moving the servo, and updating counts.
 
-        # ========================================================================
-        # CHUTE POSITIONING (Delegates to ChuteStateManager)
-        # ========================================================================
+    # ========================================================================
+    # CHUTE POSITIONING (Delegates to ChuteStateManager)
+    # ========================================================================
 
-        def is_chute_available(self) -> bool:
-            """Check if chute is available for positioning."""
-            return self.chute_state_manager.is_available()
+    def is_chute_available(self) -> bool:
+        """Check if chute is available for positioning."""
+        return self.chute_state_manager.is_available()
 
-        def get_chute_status(self) -> dict:
-            """Get current chute status."""
-            status = self.chute_state_manager.get_status()
-            return {
-                'state': status.state.value,
-                'positioned_piece_id': status.positioned_piece_id,
-                'positioned_bin': status.positioned_bin,
-                'fall_time_remaining': status.fall_time_remaining,
-                'available': status.available
-            }
+    def get_chute_status(self) -> dict:
+        """Get current chute status."""
+        status = self.chute_state_manager.get_status()
+        return {
+            'state': status.state.value,
+            'positioned_piece_id': status.positioned_piece_id,
+            'positioned_bin': status.positioned_bin,
+            'fall_time_remaining': status.fall_time_remaining,
+            'available': status.available
+        }
 
-        def position_chute_for_piece(self, piece_id: int, bin_number: int) -> bool:
-            """
-            Position chute for a specific piece (pre-positioning).
+    def position_chute_for_piece(self, piece_id: int, bin_number: int) -> bool:
+        """
+        Position chute for a specific piece (pre-positioning).
 
-            Args:
-                piece_id: ID of piece to position for
-                bin_number: Target bin number
+        Args:
+            piece_id: ID of piece to position for
+            bin_number: Target bin number
 
-            Returns:
-                True if positioning successful
-            """
-            # Check if chute is available
-            if not self.chute_state_manager.is_available():
-                logger.debug(f"Chute not available for piece {piece_id}")
-                return False
+        Returns:
+            True if positioning successful
+        """
+        # Check if chute is available
+        if not self.chute_state_manager.is_available():
+            logger.debug(f"Chute not available for piece {piece_id}")
+            return False
 
-            logger.info(f"📍 Positioning chute for piece {piece_id} → bin {bin_number}")
+        logger.info(f"📍 Positioning chute for piece {piece_id} → bin {bin_number}")
 
-            # Check bin capacity
-            if not self.bin_capacity_manager.can_accept_piece(bin_number):
-                logger.warning(f"Bin {bin_number} full, redirecting to overflow bin 0")
-                bin_number = 0
+        # Check bin capacity
+        if not self.bin_capacity.can_accept_piece(bin_number):
+            logger.warning(f"Bin {bin_number} full, redirecting to overflow bin 0")
+            bin_number = 0
 
-            # Move servo to bin position
-            servo_success = self.servo_controller.move_to_bin(bin_number, wait=False)
+        # Move servo to bin position
+        servo_success = self.servo.move_to_bin(bin_number, wait=False)
 
-            if not servo_success:
-                logger.error(f"Failed to move servo to bin {bin_number}")
-                return False
+        if not servo_success:
+            logger.error(f"Failed to move servo to bin {bin_number}")
+            return False
 
-            # Update state machine
-            state_success = self.chute_state_manager.position_for_piece(piece_id, bin_number)
+        # Update state machine
+        state_success = self.chute_state_manager.position_for_piece(piece_id, bin_number)
 
-            if not state_success:
-                logger.error(f"State machine rejected positioning for piece {piece_id}")
-                return False
+        if not state_success:
+            logger.error(f"State machine rejected positioning for piece {piece_id}")
+            return False
 
-            logger.info(f"✓ Chute positioned for piece {piece_id} at bin {bin_number}")
-            return True
+        logger.info(f"✓ Chute positioned for piece {piece_id} at bin {bin_number}")
+        return True
 
-        def notify_piece_exited(self, piece_id: int) -> bool:
-            """
-            Notify coordinator that positioned piece has exited ROI.
+    def notify_piece_exited(self, piece_id: int) -> bool:
+        """
+        Notify coordinator that positioned piece has exited ROI.
 
-            Starts the fall timer and updates bin capacity.
+        Starts the fall timer and updates bin capacity.
 
-            Args:
-                piece_id: ID of piece that exited
+        Args:
+            piece_id: ID of piece that exited
 
-            Returns:
-                True if this was the positioned piece
-            """
-            success = self.chute_state_manager.notify_piece_exited(piece_id)
+        Returns:
+            True if this was the positioned piece
+        """
+        success = self.chute_state_manager.notify_piece_exited(piece_id)
 
-            if success:
-                # Update bin capacity (piece committed to bin)
-                bin_number = self.chute_state_manager.get_positioned_bin()
-                if bin_number is not None:
-                    self.bin_capacity_manager.add_piece_to_bin(bin_number)
-                    logger.info(f"✓ Piece {piece_id} committed to bin {bin_number}")
+        if success:
+            # Update bin capacity (piece committed to bin)
+            bin_number = self.chute_state_manager.get_positioned_bin()
+            if bin_number is not None:
+                self.bin_capacity.add_piece_to_bin(bin_number)
+                logger.info(f"✓ Piece {piece_id} committed to bin {bin_number}")
 
-            return success
+        return success
 
-        def update_chute_state(self) -> None:
-            """
-            Update chute state machine (call every frame).
+    def update_chute_state(self) -> None:
+        """
+        Update chute state machine (call every frame).
 
-            Checks if fall timer has expired and transitions state.
-            """
-            self.chute_state_manager.update()
+        Checks if fall timer has expired and transitions state.
+        """
+        self.chute_state_manager.update()
 
     # ========================================================================
     # STATISTICS AND MONITORING
@@ -433,8 +433,8 @@ class HardwareCoordinator:
         self.chute_state_manager.reset()
 
         # Return servo to home position
-        if self.servo_controller:
-            self.servo_controller.home()
+        if self.servo:
+            self.servo.home()
 
         logger.info("✓ Hardware coordinator released")
 
