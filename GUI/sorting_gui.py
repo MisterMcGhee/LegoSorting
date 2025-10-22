@@ -193,6 +193,8 @@ class BinStatusWidget(QWidget):
         super().__init__(parent)
         self.bin_number = bin_number
         self.current_capacity = 0
+        self.current_count = 0
+        self.max_capacity = 50  # Default, will be updated from config
         self.assigned_category = None
 
         self._setup_ui()
@@ -210,6 +212,14 @@ class BinStatusWidget(QWidget):
         ))
         self.label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.label)
+
+        # Count label (shows "0/50" format)
+        self.count_label = QLabel(f"0/{self.max_capacity}")
+        self.count_label.setStyleSheet(SortingGUIStyles.get_label_style(
+            size=11, bold=True, color=SortingGUIStyles.TEXT_SECONDARY
+        ))
+        self.count_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.count_label)
 
         # Capacity progress bar
         self.progress_bar = QProgressBar()
@@ -245,23 +255,32 @@ class BinStatusWidget(QWidget):
         self.label.setText(f"Bin {self.bin_number + 1}: {category}")
         logger.debug(f"Bin {self.bin_number + 1} assigned to '{category}'")
 
-    def update_capacity(self, percentage: int):
+    def update_capacity(self, count: int, max_capacity: int, percentage: int):
         """
-        Update the bin's capacity percentage.
+        Update the bin's capacity display.
 
         Called by: SortingGUI.on_piece_sorted() callback
 
         Args:
+            count: Current number of pieces in bin
+            max_capacity: Maximum capacity of the bin
             percentage: Fill percentage (0-100)
         """
+        self.current_count = count
+        self.max_capacity = max_capacity
         self.current_capacity = percentage
+
+        # Update count label
+        self.count_label.setText(f"{count}/{max_capacity}")
+
+        # Update progress bar
         self.progress_bar.setValue(percentage)
         self._update_progress_bar_style()
 
         # Enable reset button if bin has content
         self.reset_button.setEnabled(percentage > 0)
 
-        logger.debug(f"Bin {self.bin_number + 1} capacity: {percentage}%")
+        logger.debug(f"Bin {self.bin_number + 1} capacity: {count}/{max_capacity} ({percentage}%)")
 
     def _update_progress_bar_style(self):
         """Update progress bar color based on capacity level."""
@@ -289,7 +308,7 @@ class BinStatusWidget(QWidget):
 
     def reset_capacity(self):
         """Reset the bin capacity to 0. Called after bin is physically emptied."""
-        self.update_capacity(0)
+        self.update_capacity(0, self.max_capacity, 0)
         logger.info(f"Bin {self.bin_number + 1} capacity reset to 0%")
 
 
@@ -332,12 +351,19 @@ class BinStatusPanel(QGroupBox):
         layout.setSpacing(8)
         layout.setContentsMargins(10, 20, 10, 10)
 
+        # Get max_capacity from bin_capacity_module
+        max_capacity = getattr(self.bin_capacity_module, 'max_capacity', 50)
+
         # Create bin widgets in a grid (2 rows x 4 columns for 8 bins)
         rows = 2
         cols = self.num_bins // rows
 
         for i in range(self.num_bins):
             bin_widget = BinStatusWidget(i, self)
+
+            # Set the max_capacity from config
+            bin_widget.max_capacity = max_capacity
+            bin_widget.count_label.setText(f"0/{max_capacity}")
 
             # Connect reset signal to handler
             bin_widget.reset_requested.connect(self.on_bin_reset_requested)
@@ -374,9 +400,16 @@ class BinStatusPanel(QGroupBox):
             bin_number: Bin index (0-based)
         """
         if 0 <= bin_number < self.num_bins:
-            # Get current capacity from bin_capacity_module
-            capacity_pct = self.bin_capacity_module.get_bin_capacity_percentage(bin_number)
-            self.bin_widgets[bin_number].update_capacity(int(capacity_pct))
+            # Get current bin status from bin_capacity_module
+            bin_status = self.bin_capacity_module.get_bin_status(bin_number)
+
+            # Extract the data we need
+            count = bin_status.get('count', 0)
+            max_capacity = bin_status.get('max_capacity', 50)
+            percentage = int(bin_status.get('percentage', 0.0) * 100)  # Convert to 0-100 range
+
+            # Update the widget with all the information
+            self.bin_widgets[bin_number].update_capacity(count, max_capacity, percentage)
 
     def on_bin_reset_requested(self, bin_number: int):
         """
@@ -950,8 +983,16 @@ def main():
     class MockBinCapacity:
         """Mock bin capacity manager for testing."""
 
-        def get_bin_capacity_percentage(self, bin_num):
-            return 0
+        def get_bin_status(self, bin_num):
+            """Return mock bin status."""
+            return {
+                'bin_number': bin_num,
+                'count': 0,
+                'max_capacity': 50,
+                'percentage': 0.0,
+                'is_full': False,
+                'is_warning': False
+            }
 
         def reset_bin(self, bin_num):
             pass
