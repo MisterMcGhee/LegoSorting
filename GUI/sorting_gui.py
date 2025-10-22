@@ -61,8 +61,10 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QSize
 from PyQt5.QtGui import QFont, QPixmap, QImage, QPainter, QPen, QColor
 
-# Import camera view widget - using new self-configuring CameraViewSorting
+# Import widgets - using self-configuring CameraViewSorting and BinStatusWidget
 from GUI.widgets.camera_view import CameraViewSorting, ViewStyles
+from GUI.widgets.bin_status import BinStatusWidget
+from GUI.widgets.gui_styles import SortingGUIStyles
 
 logger = logging.getLogger(__name__)
 
@@ -572,7 +574,16 @@ class SortingGUI(QMainWindow):
     - Recently processed: Via on_piece_identified callback
     - Bin capacity: Via on_piece_sorted callback
     - Piece colors: Via periodic timer updating piece tracking state
+
+    THREAD SAFETY:
+    Callbacks may be called from non-GUI threads. Internal signals are used
+    to ensure all GUI updates happen in the main thread.
     """
+
+    # Thread-safe signals for GUI updates (emitted from any thread, processed in GUI thread)
+    _bin_assigned_signal = pyqtSignal(int, str)  # bin_number, category
+    _piece_identified_signal = pyqtSignal(object)  # identified_piece
+    _piece_sorted_signal = pyqtSignal(int)  # bin_number
 
     def __init__(self, orchestrator):
         """
@@ -604,6 +615,9 @@ class SortingGUI(QMainWindow):
 
         # Initialize UI
         self._setup_ui()
+
+        # Connect internal signals to GUI update slots (thread-safe)
+        self._connect_signals()
 
         # Register callbacks with modules
         self._register_callbacks()
@@ -682,6 +696,25 @@ class SortingGUI(QMainWindow):
         logger.info("UI layout created with auto-configured camera view")
 
     # ========================================================================
+    # SIGNAL CONNECTIONS (Thread Safety)
+    # ========================================================================
+
+    def _connect_signals(self):
+        """
+        Connect internal signals to GUI update slots.
+
+        THREAD SAFETY:
+        Qt's signal/slot mechanism is thread-safe. Signals emitted from
+        background threads are automatically queued and processed in the
+        GUI thread, preventing QPainter errors and race conditions.
+        """
+        self._bin_assigned_signal.connect(self._update_bin_assignment)
+        self._piece_identified_signal.connect(self._update_piece_display)
+        self._piece_sorted_signal.connect(self._update_bin_capacity)
+
+        logger.info("Internal signals connected for thread-safe GUI updates")
+
+    # ========================================================================
     # CALLBACK REGISTRATION
     # ========================================================================
 
@@ -724,8 +757,12 @@ class SortingGUI(QMainWindow):
         logger.info("Callback registration complete")
 
     # ========================================================================
-    # CALLBACK METHODS (called BY modules, not by us)
+    # CALLBACK METHODS (called BY modules from any thread)
     # ========================================================================
+    #
+    # NOTE: These callbacks may be called from non-GUI threads.
+    # They emit signals which are safely queued to the GUI thread.
+    #
 
     def on_bin_assigned(self, bin_number: int, category: str):
         """
@@ -733,15 +770,14 @@ class SortingGUI(QMainWindow):
 
         TRIGGERED BY: bin_assignment_module._notify_assignment_callbacks()
         WHEN: New category is dynamically assigned OR pre-assignments loaded
+        THREAD SAFETY: May be called from any thread - emits signal for GUI thread
 
         Args:
             bin_number: Bin index (0-based)
             category: Category name assigned to bin
         """
-        logger.info(f"GUI callback: Bin {bin_number} assigned to '{category}'")
-
-        # Update bin status panel
-        self.bin_status_panel.update_bin_assignment(bin_number, category)
+        logger.debug(f"GUI callback: Bin {bin_number} assigned to '{category}' (emitting signal)")
+        self._bin_assigned_signal.emit(bin_number, category)
 
     def on_piece_identified(self, identified_piece):
         """
@@ -749,14 +785,13 @@ class SortingGUI(QMainWindow):
 
         TRIGGERED BY: processing_coordinator._notify_identification_complete()
         WHEN: Piece identification completes (success or unknown)
+        THREAD SAFETY: May be called from any thread - emits signal for GUI thread
 
         Args:
             identified_piece: IdentifiedPiece object with all data
         """
-        logger.info(f"GUI callback: Piece identified - {identified_piece.name}")
-
-        # Update recently processed panel
-        self.recent_piece_panel.display_piece(identified_piece)
+        logger.debug(f"GUI callback: Piece identified - {identified_piece.name} (emitting signal)")
+        self._piece_identified_signal.emit(identified_piece)
 
     def on_piece_sorted(self, bin_number: int):
         """
@@ -764,13 +799,57 @@ class SortingGUI(QMainWindow):
 
         TRIGGERED BY: hardware_controller._notify_sort_callbacks()
         WHEN: Servo moves to direct piece into bin
+        THREAD SAFETY: May be called from any thread - emits signal for GUI thread
 
         Args:
             bin_number: Bin index (0-based) where piece was sorted
         """
-        logger.info(f"GUI callback: Piece sorted into Bin {bin_number}")
+        logger.debug(f"GUI callback: Piece sorted into Bin {bin_number} (emitting signal)")
+        self._piece_sorted_signal.emit(bin_number)
 
-        # Update bin capacity display
+    # ========================================================================
+    # GUI UPDATE SLOTS (always run in GUI thread)
+    # ========================================================================
+    #
+    # These methods perform actual GUI updates and are connected to signals.
+    # Qt automatically ensures they run in the GUI thread.
+    #
+
+    def _update_bin_assignment(self, bin_number: int, category: str):
+        """
+        Slot: Update bin assignment display (thread-safe).
+
+        CALLED BY: _bin_assigned_signal (always in GUI thread)
+
+        Args:
+            bin_number: Bin index (0-based)
+            category: Category name assigned to bin
+        """
+        logger.info(f"GUI update: Bin {bin_number} → '{category}'")
+        self.bin_status_panel.update_bin_assignment(bin_number, category)
+
+    def _update_piece_display(self, identified_piece):
+        """
+        Slot: Update recently processed piece display (thread-safe).
+
+        CALLED BY: _piece_identified_signal (always in GUI thread)
+
+        Args:
+            identified_piece: IdentifiedPiece object with all data
+        """
+        logger.info(f"GUI update: Display piece {identified_piece.name}")
+        self.recent_piece_panel.display_piece(identified_piece)
+
+    def _update_bin_capacity(self, bin_number: int):
+        """
+        Slot: Update bin capacity display (thread-safe).
+
+        CALLED BY: _piece_sorted_signal (always in GUI thread)
+
+        Args:
+            bin_number: Bin index (0-based) where piece was sorted
+        """
+        logger.info(f"GUI update: Bin {bin_number} capacity")
         self.bin_status_panel.increment_bin_capacity(bin_number)
 
     # ========================================================================
