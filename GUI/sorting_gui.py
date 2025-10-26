@@ -162,138 +162,6 @@ class SortingGUIStyles:
         """
 
 
-# ============================================================================
-# BIN STATUS WIDGET
-# ============================================================================
-
-class BinStatusWidget(QWidget):
-    """
-    Widget displaying status for a single bin.
-
-    Shows:
-    - Bin number
-    - Assigned category (or "Unassigned")
-    - Capacity percentage with color-coded progress bar
-    - Reset button to clear bin
-
-    The capacity bar changes color based on fill level:
-    - Green: < 75%
-    - Yellow: 75-90%
-    - Red: > 90%
-    """
-
-    # Signal emitted when reset button clicked
-    reset_requested = pyqtSignal(int)  # Emits bin_number
-
-    def __init__(self, bin_number: int, parent=None):
-        """
-        Initialize bin status widget.
-
-        Args:
-            bin_number: The bin number (0-based index, but displayed as 1-based)
-        """
-        super().__init__(parent)
-        self.bin_number = bin_number
-        self.current_capacity = 0
-        self.assigned_category = None
-
-        self._setup_ui()
-
-    def _setup_ui(self):
-        """Create the UI components."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(3)
-
-        # Bin number and category label
-        self.label = QLabel(f"Bin {self.bin_number + 1}: Unassigned")
-        self.label.setStyleSheet(SortingGUIStyles.get_label_style(
-            size=10, bold=True, color=SortingGUIStyles.TEXT_PRIMARY
-        ))
-        self.label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.label)
-
-        # Capacity progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximum(100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("%p%")
-        self.progress_bar.setFixedHeight(20)
-        self._update_progress_bar_style()
-        layout.addWidget(self.progress_bar)
-
-        # Reset button
-        self.reset_button = QPushButton("🔄 Reset")
-        self.reset_button.setStyleSheet(SortingGUIStyles.get_button_style(
-            SortingGUIStyles.COLOR_WARNING,
-            SortingGUIStyles.COLOR_WARNING_HOVER
-        ))
-        self.reset_button.setToolTip(f"Reset capacity for Bin {self.bin_number + 1}")
-        self.reset_button.clicked.connect(lambda: self.reset_requested.emit(self.bin_number))
-        self.reset_button.setEnabled(False)  # Disabled until bin has content
-        layout.addWidget(self.reset_button)
-
-    def update_assignment(self, category: str):
-        """
-        Update the bin's assigned category.
-
-        Called by: SortingGUI.on_bin_assigned() callback
-
-        Args:
-            category: Category name assigned to this bin
-        """
-        self.assigned_category = category
-        self.label.setText(f"Bin {self.bin_number + 1}: {category}")
-        logger.debug(f"Bin {self.bin_number + 1} assigned to '{category}'")
-
-    def update_capacity(self, percentage: int):
-        """
-        Update the bin's capacity percentage.
-
-        Called by: SortingGUI.on_piece_sorted() callback
-
-        Args:
-            percentage: Fill percentage (0-100)
-        """
-        self.current_capacity = percentage
-        self.progress_bar.setValue(percentage)
-        self._update_progress_bar_style()
-
-        # Enable reset button if bin has content
-        self.reset_button.setEnabled(percentage > 0)
-
-        logger.debug(f"Bin {self.bin_number + 1} capacity: {percentage}%")
-
-    def _update_progress_bar_style(self):
-        """Update progress bar color based on capacity level."""
-        if self.current_capacity > 90:
-            color = SortingGUIStyles.COLOR_DANGER
-        elif self.current_capacity > 75:
-            color = SortingGUIStyles.COLOR_WARNING
-        else:
-            color = SortingGUIStyles.COLOR_PRIMARY
-
-        self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                border: 1px solid #555555;
-                border-radius: 3px;
-                text-align: center;
-                color: white;
-                font-weight: bold;
-                font-size: 10px;
-            }}
-            QProgressBar::chunk {{
-                background-color: {color};
-                border-radius: 2px;
-            }}
-        """)
-
-    def reset_capacity(self):
-        """Reset the bin capacity to 0. Called after bin is physically emptied."""
-        self.update_capacity(0)
-        logger.info(f"Bin {self.bin_number + 1} capacity reset to 0%")
-
 
 # ============================================================================
 # BIN STATUS PANEL
@@ -377,8 +245,12 @@ class BinStatusPanel(QGroupBox):
         """
         if 0 <= bin_number < self.num_bins:
             # Get current capacity from bin_capacity_module
-            capacity_pct = self.bin_capacity_module.get_bin_capacity_percentage(bin_number)
-            self.bin_widgets[bin_number].update_capacity(int(capacity_pct))
+            status = self.bin_capacity_module.get_bin_status(bin_number)
+            count = status['count']
+            max_capacity = status['max_capacity']
+            percentage = int(status['percentage'] * 100)  # Convert 0.0-1.0 to 0-100
+
+            self.bin_widgets[bin_number].update_capacity(count, max_capacity, percentage)
 
     def on_bin_reset_requested(self, bin_number: int):
         """
