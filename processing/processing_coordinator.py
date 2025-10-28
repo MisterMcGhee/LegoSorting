@@ -45,6 +45,7 @@ from processing.processing_data_models import (
 from processing.identification_api_handler import IdentificationAPIHandler
 from processing.category_lookup_module import CategoryLookup
 from processing.bin_assignment_module import BinAssignmentModule
+from processing.sorted_piece_logger import create_sorted_piece_logger
 from enhanced_config_manager import EnhancedConfigManager
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,18 @@ class ProcessingCoordinator:
         self.category_lookup = category_lookup
         self.bin_assignment = bin_assignment
         self.config_manager = config_manager
+
+        # ============================================================
+        # SORTED PIECE LOGGER
+        # ============================================================
+        # Initialize the sorted piece logger (optional feature)
+        # If creation fails, set to None and continue (degraded mode)
+        try:
+            self.sorted_piece_logger = create_sorted_piece_logger(config_manager)
+            logger.info("Sorted piece logger initialized")
+        except Exception as e:
+            logger.warning(f"Failed to create sorted piece logger: {e}")
+            self.sorted_piece_logger = None
 
         # ============================================================
         # STATISTICS TRACKING
@@ -379,7 +392,20 @@ class ProcessingCoordinator:
             # Piece will be incomplete but still returned
 
         # ============================================================
-        # STEP 5: NOTIFY CALLBACKS
+        # STEP 5: LOG SORTED PIECE
+        # ============================================================
+        # Log successfully identified pieces to sorted_pieces.csv
+        # This happens after finalization but before GUI callbacks
+        # Only pieces with element_id are logged (unknowns are filtered)
+        if self.sorted_piece_logger is not None:
+            try:
+                self.sorted_piece_logger.log_piece(identified_piece)
+            except Exception as e:
+                # Failed logging shouldn't break the processing pipeline
+                logger.warning(f"Error logging sorted piece: {e}")
+
+        # ============================================================
+        # STEP 6: NOTIFY CALLBACKS
         # ============================================================
         # After processing is complete (success or failure), notify all
         # registered callbacks. This is where the GUI gets updated!
