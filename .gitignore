@@ -64,3 +64,5 @@ Thumbs.db
 # Project specific
 *.log
 *.tmp
+config.json
+config_backups/
