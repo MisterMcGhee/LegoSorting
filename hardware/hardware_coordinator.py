@@ -37,8 +37,11 @@ USAGE:
     # Register GUI callback
     coordinator.register_sort_callback(gui.on_piece_sorted)
 
-    # Main orchestrator calls when piece ready to sort:
-    success = coordinator.trigger_sort_for_piece(piece_id=123, bin_number=5)
+    # Main orchestrator positions chute when piece identified:
+    success = coordinator.position_chute_for_piece(piece_id=123, bin_number=5)
+
+    # Main orchestrator notifies when piece exits:
+    coordinator.notify_piece_exited(piece_id=123)
 
     # Get statistics:
     stats = coordinator.get_statistics()
@@ -152,25 +155,25 @@ class HardwareCoordinator:
             callback(bin_number: int)
 
         WHERE CALLBACKS ARE TRIGGERED:
-        Callbacks are triggered in trigger_sort_for_piece() after:
-        1. Bin capacity check passes (or overflow redirect)
-        2. Servo successfully moves to target position
-        3. Bin piece count is incremented
+        Callbacks are triggered in notify_piece_exited() after:
+        1. Positioned piece exits the ROI
+        2. Bin capacity is updated
+        3. Statistics are incremented
 
         OVERFLOW HANDLING:
-        If the target bin is full and the piece is redirected to overflow,
-        the callback receives the overflow bin number (typically 0), not
-        the original target bin. This tells the GUI which bin actually
-        received the piece.
+        If the target bin is full during pre-positioning, the chute is
+        redirected to overflow bin (typically bin 0). The callback will
+        receive the overflow bin number, not the original target bin.
+        This tells the GUI which bin actually received the piece.
 
-        SERVO FAILURE:
-        If servo movement fails, callbacks are NOT called. This ensures
-        callbacks only fire for successful physical sorts where the piece
-        actually made it into a bin.
+        CALLBACK TRIGGERS:
+        Callbacks are only called when a piece successfully enters a bin.
+        If chute positioning fails or piece tracking is lost, callbacks
+        are NOT called.
 
         THREAD SAFETY:
         Callbacks are called synchronously on whatever thread calls
-        trigger_sort_for_piece() (typically the main orchestrator thread).
+        notify_piece_exited() (typically the main orchestrator thread).
         The lock is held during callback execution to ensure thread safety.
 
         Args:
@@ -204,16 +207,16 @@ class HardwareCoordinator:
         one failing callback doesn't break the hardware operation.
 
         WHEN CALLED:
-        This is called in trigger_sort_for_piece() after:
-        1. Capacity check completes (with possible overflow redirect)
-        2. Servo successfully moves to target bin position
-        3. Bin count is incremented via bin_capacity.add_piece()
+        This is called in notify_piece_exited() after:
+        1. Positioned piece successfully exits the ROI
+        2. Bin count is incremented via bin_capacity.add_piece()
+        3. Statistics are updated
 
         SUCCESS ONLY:
-        This is only called if the physical sort succeeds. If servo
-        movement fails, this is NOT called. This ensures callbacks
-        only receive notifications for pieces that actually made it
-        into bins.
+        This is only called if the piece successfully enters a bin.
+        If positioning fails or tracking is lost, this is NOT called.
+        This ensures callbacks only receive notifications for pieces
+        that actually made it into bins.
 
         BIN NUMBER:
         The bin_number passed is the ACTUAL bin the piece went to,
@@ -237,14 +240,13 @@ class HardwareCoordinator:
                        (may be overflow bin if original target was full)
 
         Example Flow:
-            # In trigger_sort_for_piece():
-            self.servo.move_to_bin(actual_bin)  # Move servo
-            self.bin_capacity.add_piece(actual_bin)  # Update count
-            self._notify_sort_callbacks(actual_bin)  # Tell everyone!
+            # In notify_piece_exited():
+            self.bin_capacity.add_piece(bin_number)  # Update count
+            self._notify_sort_callbacks(bin_number)  # Tell everyone!
 
             # This calls each registered callback:
-            # 1. sorting_gui.on_piece_sorted(actual_bin)
-            # 2. any_other_registered_callback(actual_bin)
+            # 1. sorting_gui.on_piece_sorted(bin_number)
+            # 2. any_other_registered_callback(bin_number)
             # 3. etc.
         """
         # Loop through all registered callback functions
@@ -346,8 +348,17 @@ class HardwareCoordinator:
             # Update bin capacity (piece committed to bin)
             bin_number = self.chute_state_manager.get_positioned_bin()
             if bin_number is not None:
-                self.bin_capacity.add_piece_to_bin(bin_number)
+                self.bin_capacity.add_piece(bin_number)
                 logger.info(f"✓ Piece {piece_id} committed to bin {bin_number}")
+
+                # Notify GUI of bin update
+                self._notify_sort_callbacks(bin_number)
+
+                # Update statistics
+                with self.lock:
+                    self.total_sorted += 1
+                    if bin_number == self.overflow_bin:
+                        self.overflow_count += 1
 
         return success
 
@@ -478,10 +489,13 @@ def create_hardware_coordinator(bin_capacity_manager, servo_controller,
         # Register GUI callback
         hardware_coordinator.register_sort_callback(gui.on_piece_sorted)
 
-        # Use when piece needs sorting
-        success = hardware_coordinator.trigger_sort_for_piece(
+        # In main loop when piece identified:
+        success = hardware_coordinator.position_chute_for_piece(
             piece_id=123,
             bin_number=5
         )
+
+        # When piece exits ROI:
+        hardware_coordinator.notify_piece_exited(piece_id=123)
     """
     return HardwareCoordinator(bin_capacity_manager, servo_controller, config_manager)

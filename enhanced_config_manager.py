@@ -262,7 +262,9 @@ class ConfigSchema:
                 "csv_path": "./Lego_Categories.csv",
                 "confidence_threshold": 0.7,  # Minimum confidence for identification
                 "save_unknown": True,  # Log unknown pieces to CSV
-                "unknown_dir": "unknown_pieces"  # Directory for unknown piece logs
+                "unknown_dir": "unknown_pieces",  # Directory for unknown piece logs
+                "log_sorted_pieces": True,  # Enable/disable sorted piece logging
+                "sorted_pieces_path": "sorted_pieces.csv"  # Path to sorted pieces log file
             },
 
             # =================================================================

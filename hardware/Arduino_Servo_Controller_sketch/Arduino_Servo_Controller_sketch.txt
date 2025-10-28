@@ -1,0 +1,121 @@
+/*
+ * LegoSorter_Servo.ino
+ * 
+ * Arduino sketch for Lego Sorting Machine servo control
+ * 
+ * PROTOCOL:
+ * - Receives: "A,{angle}\n" (e.g., "A,90\n")
+ * 
+ * HARDWARE:
+ * - Servo connected to pin 9
+ * - Supports standard servo (0-180 degrees)
+ * 
+ * DESIGN PHILOSOPHY:
+ * - Minimal sketch - Python does validation
+ * - Fast execution - no redundant checks
+ * - Simple protocol - just parse and move
+ */
+
+#include <Servo.h>
+
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+// Pin definitions
+const int SERVO_PIN = 9;        // Servo signal pin
+
+// Servo parameters
+const int HOME_POSITION = 90;   // Home/default position
+
+// Communication
+const long BAUD_RATE = 57600;   // Must match Python code
+
+// Command buffer
+const int BUFFER_SIZE = 16;     // Just enough for "A,180\n"
+char commandBuffer[BUFFER_SIZE];
+int bufferIndex = 0;
+
+// ============================================================================
+// GLOBAL OBJECTS
+// ============================================================================
+
+Servo sorterServo;              // Servo object
+int currentAngle = HOME_POSITION; // Track current position
+
+// ============================================================================
+// SETUP
+// ============================================================================
+
+void setup() {
+  // Initialize serial communication
+  Serial.begin(BAUD_RATE);
+  
+  // Initialize servo
+  sorterServo.attach(SERVO_PIN);
+  
+  // Move to home position
+  sorterServo.write(HOME_POSITION);
+  currentAngle = HOME_POSITION;
+  
+  // Wait for servo to reach position
+  delay(500);
+  
+  // Clear any garbage from serial buffer
+  while (Serial.available() > 0) {
+    Serial.read();
+  }
+}
+
+// ============================================================================
+// MAIN LOOP
+// ============================================================================
+
+void loop() {
+  // Check if data is available
+  if (Serial.available() > 0) {
+    // Read incoming character
+    char inChar = Serial.read();
+    
+    // Check for newline (command complete)
+    if (inChar == '\n' || inChar == '\r') {
+      if (bufferIndex > 0) {
+        // Null-terminate the string
+        commandBuffer[bufferIndex] = '\0';
+        
+        // Process the command
+        processCommand(commandBuffer);
+        
+        // Reset buffer
+        bufferIndex = 0;
+      }
+    }
+    // Add character to buffer (if space available)
+    else if (bufferIndex < BUFFER_SIZE - 1) {
+      commandBuffer[bufferIndex++] = inChar;
+    }
+    // Buffer overflow - reset and ignore
+    else {
+      bufferIndex = 0;
+    }
+  }
+}
+
+// ============================================================================
+// COMMAND PROCESSING
+// ============================================================================
+
+void processCommand(const char* cmd) {
+  // Expected format: "A,{angle}"
+  // Python has already validated, so we trust the input
+  
+  // Parse angle value (starts at index 2, after "A,")
+  int angle = atoi(&cmd[2]);
+  
+  // Move servo
+  sorterServo.write(angle);
+  currentAngle = angle;
+  
+  // Send success response
+  Serial.flush(); // Ensure response is sent immediately
+}

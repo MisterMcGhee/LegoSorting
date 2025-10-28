@@ -311,7 +311,7 @@ class LegoSorting008(QObject):
             # ================================================================
             logger.info("Step 2: Creating camera module...")
 
-            # Factory handles initialization and raises CameraError if it fails
+            # Factory handles initialization and raises error if it fails
             self.camera = create_camera("webcam", self.config_manager)
 
             logger.info("✓ Camera module created and initialized")
@@ -732,21 +732,37 @@ class LegoSorting008(QObject):
             positioned_piece_id = chute_status['positioned_piece_id']
 
             # Look for this specific piece in tracked pieces
+            piece_found = False
+            piece_has_exited = False
+
             for piece in tracked_pieces:
                 if piece.id != positioned_piece_id:
                     continue
 
+                # Found the positioned piece
+                piece_found = True
+
                 # Check if this piece has exited the ROI
                 if piece.has_exited_roi:
+                    piece_has_exited = True
                     logger.info(f"🚪 Positioned piece {piece.id} exited → Starting fall timer")
 
-                    # Notify hardware coordinator
-                    self.hardware_coordinator.notify_piece_exited(piece.id)
+                break
 
-                    # Remove from identified pieces dict (piece is committed to bin)
-                    self.identified_pieces_dict.pop(piece.id, None)
+            # If piece not found in tracking, it was removed (meaning it exited)
+            # This handles the race condition where piece_tracker removes the piece
+            # before we can check has_exited_roi
+            if not piece_found:
+                logger.info(f"🚪 Positioned piece {positioned_piece_id} no longer tracked (exited) → Starting fall timer")
+                piece_has_exited = True
 
-                    break
+            # If piece has exited (either flagged or removed from tracking)
+            if piece_has_exited:
+                # Notify hardware coordinator
+                self.hardware_coordinator.notify_piece_exited(positioned_piece_id)
+
+                # Remove from identified pieces dict (piece is committed to bin)
+                self.identified_pieces_dict.pop(positioned_piece_id, None)
 
         # ───────────────────────────────────────────────────────────────────
         # CASE 3: Chute is WAITING_FOR_FALL - Do nothing, timer runs automatically

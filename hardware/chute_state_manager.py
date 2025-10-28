@@ -88,13 +88,11 @@ class ChuteStateManager:
     # ========================================================================
 
     def is_available(self) -> bool:
-        """
-        Check if chute is available for positioning.
-
-        Returns:
-            True if chute is in IDLE state and can be positioned
-        """
-        return self.state == ChuteState.IDLE
+        """Check if chute is available for positioning."""
+        available = self.state == ChuteState.IDLE
+        if not available:
+            logger.warning(f"Chute NOT available - current state: {self.state.value}")
+        return available
 
     def get_current_state(self) -> ChuteState:
         """Get current state of the chute."""
@@ -205,25 +203,18 @@ class ChuteStateManager:
         return True
 
     def update(self) -> None:
-        """
-        Update state machine (check fall timer expiration).
-
-        Call this every frame to allow state transitions.
-        Transitions WAITING_FOR_FALL → IDLE when timer expires.
-        """
+        """Update state machine (check fall timer expiration)."""
         if self.state != ChuteState.WAITING_FOR_FALL:
             return
 
-        # Check if fall time has elapsed
         elapsed = time.time() - self.fall_start_time
+        logger.debug(f"Fall timer: {elapsed:.2f}s / {self.fall_time_seconds}s")
 
         if elapsed >= self.fall_time_seconds:
-            # Transition to IDLE
             logger.info(
-                f"✓ Fall complete ({elapsed:.2f}s) → Chute available "
+                f"✅ Fall complete ({elapsed:.2f}s) → Chute available "
                 f"(WAITING_FOR_FALL → IDLE)"
             )
-
             self.state = ChuteState.IDLE
             self.positioned_piece_id = None
             self.positioned_bin = None
