@@ -335,9 +335,11 @@ class BinAssignmentModule:
         Returns:
             Next available bin number (1-max_bins), or None if all bins used
         """
-        for bin_num in range(1, self.max_bins + 1):
+        for bin_num in range(1, self.max_bins):
             if bin_num not in self.used_bins:
                 return bin_num
+
+        # All sorting bins are occupied - return None to trigger overflow routing
         return None
 
     # ========================================================================
