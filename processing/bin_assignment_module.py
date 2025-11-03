@@ -362,12 +362,12 @@ class BinAssignmentModule:
 
         Example:
             # Primary strategy
-            categories = CategoryInfo(element_id="3001", primary_category="Basic", ...)
+            categories = CategoryInfo(design_id="3001", primary_category="Basic", ...)
             result = assign_bin(categories)
             # result.bin_number = 1 (or whatever bin "Basic" is assigned to)
 
             # Secondary strategy (target_primary="Basic")
-            categories = CategoryInfo(element_id="3001", primary_category="Basic",
+            categories = CategoryInfo(design_id="3001", primary_category="Basic",
                                      secondary_category="Brick", ...)
             result = assign_bin(categories)
             # result.bin_number = 2 (or whatever bin "Brick" is assigned to)
@@ -379,7 +379,7 @@ class BinAssignmentModule:
         bin_number = self._assign_or_create_bin(category)
 
         logger.debug(
-            f"Piece {categories.element_id}: category='{category}' → Bin {bin_number}"
+            f"Piece {categories.design_id}: category='{category}' → Bin {bin_number}"
         )
 
         return BinAssignment(bin_number=bin_number)
@@ -621,7 +621,7 @@ def create_bin_assignment_module(
         bin_assignment = create_bin_assignment_module(config_manager, category_service)
 
         # Use in processing coordinator
-        categories = category_lookup.get_categories(element_id)
+        categories = category_lookup.get_categories(design_id)
         bin_result = bin_assignment.assign_bin(categories)
     """
     return BinAssignmentModule(config_manager, category_service)

@@ -73,7 +73,7 @@ class IdentificationAPIHandler:
             image_path: Path to the image file to identify
 
         Returns:
-            IdentificationResult with element_id, name, and confidence
+            IdentificationResult with design_id, name, and confidence
 
         Raises:
             FileNotFoundError: If image file doesn't exist
@@ -138,13 +138,13 @@ class IdentificationAPIHandler:
 
                 # Create result dataclass
                 result = IdentificationResult(
-                    element_id=item.get("id", "unknown"),
+                    design_id=item.get("id", "unknown"),
                     name=item.get("name", "Unknown Piece"),
                     confidence=item.get("score", 0.0)
                 )
 
                 logger.info(
-                    f"Piece identified: {result.element_id} ({result.name}) "
+                    f"Piece identified: {result.design_id} ({result.name}) "
                     f"with confidence {result.confidence:.2f}"
                 )
 
@@ -266,7 +266,7 @@ if __name__ == "__main__":
             result = api_handler.identify_piece(image_path)
 
             logger.info(f"  ✓ SUCCESS")
-            logger.info(f"    Element ID: {result.element_id}")
+            logger.info(f"    Design ID: {result.design_id}")
             logger.info(f"    Name: {result.name}")
             logger.info(f"    Confidence: {result.confidence:.2%}")
             logger.info("")

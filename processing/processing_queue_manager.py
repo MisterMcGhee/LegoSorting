@@ -480,7 +480,7 @@ if __name__ == "__main__":
         image_path="/test/path.jpg",
         capture_timestamp=time.time()
     )
-    mock_result.element_id = "3001"
+    mock_result.design_id = "3001"
     mock_result.name = "Brick 2x4"
     mock_result.identification_confidence = 0.95
     mock_result.primary_category = "Basic"

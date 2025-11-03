@@ -3,7 +3,7 @@
 processing_coordinator.py - Orchestrates the complete piece processing pipeline
 
 This module coordinates all processing steps to transform a CapturePackage into
-a complete IdentifiedPiece with element ID, categories, and bin assignment.
+a complete IdentifiedPiece with design ID, categories, and bin assignment.
 
 RESPONSIBILITIES:
 - Initialize all processing sub-modules
@@ -141,8 +141,8 @@ class ProcessingCoordinator:
         IDENTIFIED PIECE STATES:
         The IdentifiedPiece passed to callbacks may have different states:
         - Complete success: All fields populated, bin assigned
-        - Unknown piece: element_id may be None, bin_number = 0 (overflow)
-        - API failure: element_id None, categories None, bin = 0
+        - Unknown piece: design_id may be None, bin_number = 0 (overflow)
+        - API failure: design_id None, categories None, bin = 0
 
         The callback receiver should check identified_piece.complete and
         other fields to determine the actual state.
@@ -162,7 +162,7 @@ class ProcessingCoordinator:
 
             # Later, when identification completes:
             # GUI's on_piece_identified(identified_piece) is called automatically
-            # GUI can then display the image, name, element_id, bin, etc.
+            # GUI can then display the image, name, design_id, bin, etc.
         """
         # Add the callback function to our list
         self.identification_callbacks.append(callback_function)
@@ -284,7 +284,7 @@ class ProcessingCoordinator:
 
         FLOW:
         1. Create empty IdentifiedPiece with basic info
-        2. Call API to identify the piece (get element_id and name)
+        2. Call API to identify the piece (get design_id and name)
         3. Look up categories in database (get primary/secondary/tertiary)
         4. Assign a bin based on categories and strategy
         5. Finalize the piece (mark as complete)
@@ -327,16 +327,16 @@ class ProcessingCoordinator:
             # STEP 1: API IDENTIFICATION
             # ============================================================
             # Send the image to the Brickognize API to identify what piece
-            # this is. This gives us the element_id, name, and confidence.
+            # this is. This gives us the design_id, name, and confidence.
             self._run_api_identification(identified_piece, capture_package)
 
             # ============================================================
             # STEP 2: CATEGORY LOOKUP
             # ============================================================
-            # Only run if API succeeded (we got an element_id)
-            # Look up the element_id in our category database to get
+            # Only run if API succeeded (we got a design_id)
+            # Look up the design_id in our category database to get
             # the category hierarchy (primary/secondary/tertiary)
-            if identified_piece.element_id:
+            if identified_piece.design_id:
                 self._run_category_lookup(identified_piece)
 
             # ============================================================
@@ -403,18 +403,18 @@ class ProcessingCoordinator:
         Run API identification step of pipeline.
 
         Calls Brickognize API with the captured image and updates the
-        IdentifiedPiece with element_id, name, and confidence.
+        IdentifiedPiece with design_id, name, and confidence.
 
         WHAT IT DOES:
         - Reads the image file from disk
         - Sends it to the Brickognize API
-        - Gets back element_id, name, and confidence score
+        - Gets back design_id, name, and confidence score
         - Updates the identified_piece with these results
 
         ERROR HANDLING:
-        - If image file missing: Sets element_id to None
-        - If API returns no results: Sets element_id to None
-        - If network error: Sets element_id to None
+        - If image file missing: Sets design_id to None
+        - If API returns no results: Sets design_id to None
+        - If network error: Sets design_id to None
 
         The pipeline continues even if this fails - the piece just
         won't have identification data.
@@ -426,7 +426,7 @@ class ProcessingCoordinator:
             capture_package: Capture data with image path
 
         Side effects:
-            Updates identified_piece.element_id, .name, .identification_confidence
+            Updates identified_piece.design_id, .name, .identification_confidence
         """
         try:
             logger.debug(f"Step 1: API identification for piece {identified_piece.piece_id}")
@@ -436,11 +436,11 @@ class ProcessingCoordinator:
             api_result = self.api_handler.identify_piece(capture_package.image_path)
 
             # Update the identified piece with the API results
-            # This copies element_id, name, and confidence into our piece
+            # This copies design_id, name, and confidence into our piece
             identified_piece.update_from_identification(api_result)
 
             logger.debug(
-                f"API result: element_id={api_result.element_id}, "
+                f"API result: design_id={api_result.design_id}, "
                 f"confidence={api_result.confidence:.2f}"
             )
 
@@ -448,35 +448,35 @@ class ProcessingCoordinator:
             # The image file doesn't exist - critical error
             # This shouldn't happen if capture saved the file correctly
             logger.error(f"Image file not found: {e}")
-            identified_piece.element_id = None
+            identified_piece.design_id = None
 
         except ValueError as e:
             # API returned no results or invalid data
             # This happens when API doesn't recognize the piece
             logger.warning(f"API identification failed: {e}")
-            identified_piece.element_id = None
+            identified_piece.design_id = None
 
         except Exception as e:
             # Network error, timeout, or other API issue
             # Log the error and continue - piece will be marked as unknown
             logger.error(f"API error: {e}")
-            identified_piece.element_id = None
+            identified_piece.design_id = None
 
     def _run_category_lookup(self, identified_piece: IdentifiedPiece) -> None:
         """
         Run category lookup step of pipeline.
 
-        Looks up the element_id in the category database and updates the
+        Looks up the design_id in the category database and updates the
         IdentifiedPiece with category hierarchy information.
 
         WHAT IT DOES:
-        - Takes the element_id from API identification
+        - Takes the design_id from API identification
         - Looks it up in our CSV category database
         - Gets the category hierarchy (primary/secondary/tertiary)
         - Updates the identified_piece with these categories
 
         EXAMPLE:
-        - element_id: "3001"
+        - design_id: "3001"
         - Primary category: "Basic"
         - Secondary category: "Brick"
         - Tertiary category: "2x4"
@@ -495,13 +495,13 @@ class ProcessingCoordinator:
         """
         try:
             logger.debug(
-                f"Step 2: Category lookup for element_id={identified_piece.element_id}"
+                f"Step 2: Category lookup for design_id={identified_piece.design_id}"
             )
 
-            # Look up the element_id in our category database
-            # This searches the CSV file for this element_id
+            # Look up the design_id in our category database
+            # This searches the CSV file for this design_id
             category_info = self.category_lookup.get_categories(
-                identified_piece.element_id,
+                identified_piece.design_id,
                 piece_name=identified_piece.name
             )
 
@@ -561,7 +561,7 @@ class ProcessingCoordinator:
             # Create a CategoryInfo object from the identified piece data
             # This packages up all the category information for the bin assignment module
             category_info = CategoryInfo(
-                element_id=identified_piece.element_id,
+                design_id=identified_piece.design_id,
                 primary_category=identified_piece.primary_category,
                 secondary_category=identified_piece.secondary_category,
                 tertiary_category=identified_piece.tertiary_category,

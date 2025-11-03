@@ -80,7 +80,7 @@ class APITestThread(QThread):
 
             # Format the results
             result_data = {
-                'element_id': result.element_id,
+                'design_id': result.design_id,
                 'name': result.name,
                 'confidence': result.confidence
             }
@@ -88,7 +88,7 @@ class APITestThread(QThread):
             message = (
                 f"API Connection Successful!\n"
                 f"Identified: {result.name}\n"
-                f"Element ID: {result.element_id}\n"
+                f"Design ID: {result.design_id}\n"
                 f"Confidence: {result.confidence:.1%}"
             )
 
@@ -602,7 +602,7 @@ class APIConfigTab(BaseConfigTab):
             # Log detailed results
             self.log_info(f"API connection test successful!")
             if result_data:
-                self.log_info(f"  Element ID: {result_data.get('element_id', 'N/A')}")
+                self.log_info(f"  Design ID: {result_data.get('design_id', 'N/A')}")
                 self.log_info(f"  Name: {result_data.get('name', 'N/A')}")
                 self.log_info(f"  Confidence: {result_data.get('confidence', 0):.1%}")
         else:

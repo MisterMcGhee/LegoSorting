@@ -18,7 +18,7 @@ USED BY:
 - Validation logic: To verify pre-assignments are valid categories
 
 DOES NOT:
-- Look up individual pieces by element_id (that's category_lookup_module)
+- Look up individual pieces by design_id (that's category_lookup_module)
 - Assign bins (that's bin_assignment_module)
 - Store configuration data (that's enhanced_config_manager)
 """
@@ -86,7 +86,7 @@ class CategoryHierarchyService:
         - What secondary categories exist under each primary
         - What tertiary categories exist under each (primary, secondary) pair
 
-        Individual piece data (element_id -> categories) is handled by
+        Individual piece data (design_id -> categories) is handled by
         category_lookup_module, not stored here.
 
         Structure created:
@@ -121,13 +121,13 @@ class CategoryHierarchyService:
 
                     for row in csv_reader:
                         # Extract category fields (strip whitespace)
-                        element_id = row.get('element_id', '').strip()
+                        design_id = row.get('design_id', '').strip()
                         primary = row.get('primary_category', '').strip()
                         secondary = row.get('secondary_category', '').strip()
                         tertiary = row.get('tertiary_category', '').strip()
 
                         # Skip rows without required data
-                        if not element_id or not primary:
+                        if not design_id or not primary:
                             continue
 
                         # Build set of all unique primary categories
