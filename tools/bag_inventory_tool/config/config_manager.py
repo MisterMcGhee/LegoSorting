@@ -79,7 +79,10 @@ class ConfigSchema:
                 # Template creation
                 "template_padding": 10,  # Padding around piece template (pixels)
                 "normalize_size": True,  # Normalize template sizes
-                "target_template_height": 200  # Target height for normalized templates
+                "target_template_height": 200,  # Target height for normalized templates
+
+                # CSV-first approach settings
+                "piece_search_radius": 150  # How far to search for piece image from element ID text (pixels)
             },
 
             # =================================================================
@@ -99,7 +102,10 @@ class ConfigSchema:
                 # Element ID validation
                 "allowed_characters": "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
                 "min_element_id_length": 4,  # Minimum valid element ID length
-                "max_element_id_length": 10  # Maximum valid element ID length
+                "max_element_id_length": 10,  # Maximum valid element ID length
+
+                # CSV-first approach settings
+                "fuzzy_match_threshold": 0.8  # Minimum similarity for fuzzy matching (0.0-1.0)
             },
 
             # =================================================================
