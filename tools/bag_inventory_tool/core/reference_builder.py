@@ -8,14 +8,18 @@ import cv2
 import numpy as np
 import logging
 import os
+import sys
 from typing import List, Tuple, Optional
 from datetime import datetime
 
-from ..models.piece_reference import PieceReference
-from ..models.reference_library import ReferenceLibrary
-from ..utils.csv_handler import InventoryCSVHandler
-from ..utils.ocr_engine import OCREngine
-from ..utils import image_processing as img_proc
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from models.piece_reference import PieceReference
+from models.reference_library import ReferenceLibrary
+from utils.csv_handler import InventoryCSVHandler
+from utils.ocr_engine import OCREngine
+from utils import image_processing as img_proc
 
 logger = logging.getLogger(__name__)
 

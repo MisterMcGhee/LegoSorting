@@ -6,9 +6,15 @@ Provides OCR functionality for extracting element IDs from piece images
 
 import re
 import logging
+import os
+import sys
 import numpy as np
 from typing import Optional, Tuple
-from .image_processing import enhance_contrast, convert_to_grayscale
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.image_processing import enhance_contrast, convert_to_grayscale
 
 logger = logging.getLogger(__name__)
 

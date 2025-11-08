@@ -6,9 +6,14 @@ Manages the complete collection of piece references extracted from manual
 
 import json
 import os
+import sys
 from datetime import datetime
 from typing import Dict, List, Optional
-from .piece_reference import PieceReference
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from models.piece_reference import PieceReference
 
 
 class ReferenceLibrary:

@@ -13,13 +13,13 @@ import os
 import sys
 from datetime import datetime
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add current directory to path for local imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from bag_inventory_tool.config.config_manager import create_config_manager, BagInventoryModule
-from bag_inventory_tool.core.pdf_processor import PDFProcessor
-from bag_inventory_tool.core.reference_builder import ReferenceBuilder
-from bag_inventory_tool.utils.csv_handler import InventoryCSVHandler
+from config.config_manager import create_config_manager, BagInventoryModule
+from core.pdf_processor import PDFProcessor
+from core.reference_builder import ReferenceBuilder
+from utils.csv_handler import InventoryCSVHandler
 
 
 def setup_logging(verbose: bool = False) -> None:
