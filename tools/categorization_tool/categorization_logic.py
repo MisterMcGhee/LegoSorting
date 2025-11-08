@@ -35,10 +35,10 @@ logger = logging.getLogger(__name__)
 
 class UnknownPiece:
     """Data model for an unknown piece."""
-    
-    def __init__(self, element_id: str, name: str, first_seen: str,
+
+    def __init__(self, design_id: str, name: str, first_seen: str,
                  last_seen: str, encounter_count: str):
-        self.element_id = element_id
+        self.design_id = design_id
         self.name = name
         self.first_seen = first_seen
         self.last_seen = last_seen
@@ -47,7 +47,7 @@ class UnknownPiece:
     def to_dict(self) -> Dict[str, str]:
         """Convert to dictionary for CSV writing."""
         return {
-            'element_id': self.element_id,
+            'design_id': self.design_id,
             'name': self.name,
             'first_seen': self.first_seen,
             'last_seen': self.last_seen,
@@ -57,10 +57,10 @@ class UnknownPiece:
 
 class Categorization:
     """Data model for a piece categorization."""
-    
-    def __init__(self, element_id: str, name: str, primary: str,
+
+    def __init__(self, design_id: str, name: str, primary: str,
                  secondary: str, tertiary: Optional[str] = None):
-        self.element_id = element_id
+        self.design_id = design_id
         self.name = name
         self.primary = primary
         self.secondary = secondary
@@ -69,7 +69,7 @@ class Categorization:
     def to_csv_row(self) -> List[str]:
         """Convert to CSV row format."""
         return [
-            self.element_id,
+            self.design_id,
             self.name,
             self.primary,
             self.secondary,
@@ -77,7 +77,7 @@ class Categorization:
         ]
     
     def __repr__(self) -> str:
-        return (f"Categorization({self.element_id}, {self.primary}/"
+        return (f"Categorization({self.design_id}, {self.primary}/"
                 f"{self.secondary}/{self.tertiary})")
 
 
@@ -125,12 +125,12 @@ class UnknownPiecesManager:
                 
                 for row in reader:
                     # Skip empty rows
-                    element_id = row.get('element_id', '').strip()
-                    if not element_id:
+                    design_id = row.get('design_id', '').strip()
+                    if not design_id:
                         continue
                     
                     piece = UnknownPiece(
-                        element_id=element_id,
+                        design_id=design_id,
                         name=row.get('name', '').strip(),
                         first_seen=row.get('first_seen', '').strip(),
                         last_seen=row.get('last_seen', '').strip(),
@@ -145,13 +145,13 @@ class UnknownPiecesManager:
             logger.error(f"Error loading unknown pieces: {e}", exc_info=True)
             raise ValueError(f"Failed to load unknown pieces: {e}")
     
-    def remove_piece(self, element_id: str) -> bool:
+    def remove_piece(self, design_id: str) -> bool:
         """
         Remove a piece from the unknown pieces CSV.
-        
+
         Args:
-            element_id: Element ID to remove
-        
+            design_id: Design ID to remove
+
         Returns:
             True if removed successfully, False otherwise
         """
@@ -163,7 +163,7 @@ class UnknownPiecesManager:
                 fieldnames = reader.fieldnames
                 
                 for row in reader:
-                    if row.get('element_id', '').strip() != element_id:
+                    if row.get('design_id', '').strip() != design_id:
                         pieces.append(row)
             
             # Write back to file
@@ -172,7 +172,7 @@ class UnknownPiecesManager:
                 writer.writeheader()
                 writer.writerows(pieces)
             
-            logger.info(f"Removed {element_id} from unknown pieces")
+            logger.info(f"Removed {design_id} from unknown pieces")
             return True
             
         except Exception as e:
@@ -192,7 +192,7 @@ class UnknownPiecesManager:
         try:
             with open(self.csv_path, 'r', encoding='utf-8') as file:
                 reader = csv.DictReader(file)
-                count = sum(1 for row in reader if row.get('element_id', '').strip())
+                count = sum(1 for row in reader if row.get('design_id', '').strip())
             return count
         except Exception as e:
             logger.error(f"Error counting unknown pieces: {e}")
@@ -220,13 +220,13 @@ class CategoriesDatabaseManager:
         self.csv_path = csv_path
         logger.info(f"CategoriesDatabaseManager initialized: {csv_path}")
     
-    def element_exists(self, element_id: str) -> bool:
+    def design_exists(self, design_id: str) -> bool:
         """
-        Check if an element ID already exists in the database.
-        
+        Check if a design ID already exists in the database.
+
         Args:
-            element_id: Element ID to check
-        
+            design_id: Design ID to check
+
         Returns:
             True if exists, False otherwise
         """
@@ -237,7 +237,7 @@ class CategoriesDatabaseManager:
             with open(self.csv_path, 'r', encoding='utf-8') as file:
                 reader = csv.DictReader(file)
                 for row in reader:
-                    if row.get('element_id', '').strip() == element_id:
+                    if row.get('design_id', '').strip() == design_id:
                         return True
             return False
         except Exception as e:
@@ -285,7 +285,7 @@ class CategoriesDatabaseManager:
                 fieldnames = reader.fieldnames
                 
                 for row in reader:
-                    if row.get('element_id', '').strip() == categorization.element_id:
+                    if row.get('design_id', '').strip() == categorization.design_id:
                         # Update this row
                         row['name'] = categorization.name
                         row['primary_category'] = categorization.primary
@@ -418,21 +418,21 @@ class CategorizationController:
         """
         return self.unknown_manager.load_pieces()
     
-    def save_categorization(self, element_id: str, name: str,
+    def save_categorization(self, design_id: str, name: str,
                            primary: str, secondary: str,
                            tertiary: Optional[str] = None,
                            allow_update: bool = False) -> tuple[bool, str]:
         """
         Save a piece categorization.
-        
+
         Args:
-            element_id: Element ID
+            design_id: Design ID
             name: Piece name
             primary: Primary category
             secondary: Secondary category
             tertiary: Optional tertiary category
-            allow_update: Allow updating if element already exists
-        
+            allow_update: Allow updating if design already exists
+
         Returns:
             Tuple of (success, message)
         """
@@ -441,26 +441,26 @@ class CategorizationController:
         if not valid:
             logger.warning(f"Validation failed: {error}")
             return False, error
-        
+
         # Sanitize categories
         primary = self.validator.sanitize_category(primary)
         secondary = self.validator.sanitize_category(secondary)
         tertiary = self.validator.sanitize_category(tertiary) if tertiary else ""
-        
+
         # Create categorization object
-        categorization = Categorization(element_id, name, primary, secondary, tertiary)
-        
-        # Check if element already exists
-        if self.database_manager.element_exists(element_id):
+        categorization = Categorization(design_id, name, primary, secondary, tertiary)
+
+        # Check if design already exists
+        if self.database_manager.design_exists(design_id):
             if allow_update:
                 # Update existing entry
                 success = self.database_manager.update_categorization(categorization)
                 if success:
-                    return True, f"Updated categorization for {element_id}"
+                    return True, f"Updated categorization for {design_id}"
                 else:
                     return False, "Failed to update database"
             else:
-                return False, f"Element {element_id} already exists in database"
+                return False, f"Design {design_id} already exists in database"
         
         # Add new categorization
         success = self.database_manager.add_categorization(categorization)
@@ -468,9 +468,9 @@ class CategorizationController:
             return False, "Failed to save to database"
         
         # Remove from unknown pieces
-        self.unknown_manager.remove_piece(element_id)
-        
-        return True, f"Categorized {element_id} successfully"
+        self.unknown_manager.remove_piece(design_id)
+
+        return True, f"Categorized {design_id} successfully"
     
     def reload_category_hierarchy(self):
         """Reload the category hierarchy service."""

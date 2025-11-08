@@ -6,9 +6,9 @@ This module handles looking up piece categories from the Lego_Categories.csv dat
 
 RESPONSIBILITIES:
 - Load and cache Lego_Categories.csv database
-- Look up element_id → category information
+- Look up design_id → category information
 - Return CategoryInfo dataclass
-- Log unknown element_ids for manual database updates
+- Log unknown design_ids for manual database updates
 - Track encounter counts for unknown pieces
 
 DOES NOT:
@@ -57,7 +57,7 @@ class CategoryLookup:
         self.save_unknown = module_config["save_unknown"]
         self.unknown_log_path = "unknown_pieces.csv"  # Root directory
 
-        # Category database cache (element_id -> category info)
+        # Category database cache (design_id -> category info)
         self.categories_data: Dict[str, Dict[str, str]] = {}
 
         # Thread safety for unknown logging
@@ -86,13 +86,13 @@ class CategoryLookup:
                 csv_reader = csv.DictReader(file)
 
                 for row in csv_reader:
-                    element_id = row.get('element_id', '').strip()
+                    design_id = row.get('design_id', '').strip()
 
-                    if not element_id:
+                    if not design_id:
                         continue  # Skip empty rows
 
                     # Store complete piece information
-                    self.categories_data[element_id] = {
+                    self.categories_data[design_id] = {
                         'name': row.get('name', '').strip(),
                         'primary_category': row.get('primary_category', '').strip(),
                         'secondary_category': row.get('secondary_category', '').strip(),
@@ -113,7 +113,7 @@ class CategoryLookup:
                 with open(self.unknown_log_path, 'w', newline='', encoding='utf-8') as file:
                     writer = csv.writer(file)
                     writer.writerow([
-                        'element_id',
+                        'design_id',
                         'name',
                         'first_seen',
                         'last_seen',
@@ -123,26 +123,26 @@ class CategoryLookup:
             except Exception as e:
                 logger.error(f"Failed to create unknown pieces log: {e}")
 
-    def get_categories(self, element_id: str,
+    def get_categories(self, design_id: str,
                        piece_name: Optional[str] = None) -> CategoryInfo:
         """
-        Look up categories for an element_id.
+        Look up categories for a design_id.
 
-        If the element_id is not found in the database:
+        If the design_id is not found in the database:
         - Logs it to unknown_pieces.csv for manual addition
         - Returns CategoryInfo with "Unknown" primary category
         - Sets found_in_database=False
 
         Args:
-            element_id: Element ID from Brickognize (e.g., "3001")
+            design_id: Design ID from Brickognize (e.g., "3001")
             piece_name: Optional piece name from API (for logging unknowns)
 
         Returns:
             CategoryInfo with category hierarchy (or "Unknown" if not found)
         """
-        # Check if element exists in database
-        if element_id in self.categories_data:
-            piece_data = self.categories_data[element_id]
+        # Check if design exists in database
+        if design_id in self.categories_data:
+            piece_data = self.categories_data[design_id]
 
             # Extract categories (handle empty strings as None)
             primary = piece_data.get('primary_category') or "Unknown"
@@ -156,12 +156,12 @@ class CategoryLookup:
                 tertiary = None
 
             logger.debug(
-                f"Found categories for {element_id}: "
+                f"Found categories for {design_id}: "
                 f"{primary}/{secondary}/{tertiary}"
             )
 
             return CategoryInfo(
-                element_id=element_id,
+                design_id=design_id,
                 primary_category=primary,
                 secondary_category=secondary,
                 tertiary_category=tertiary,
@@ -169,33 +169,33 @@ class CategoryLookup:
             )
 
         else:
-            # Element not found - log it as unknown
-            logger.warning(f"Element ID not found in database: {element_id}")
+            # Design not found - log it as unknown
+            logger.warning(f"Design ID not found in database: {design_id}")
 
             if self.save_unknown:
-                self._log_unknown_piece(element_id, piece_name)
+                self._log_unknown_piece(design_id, piece_name)
 
             return CategoryInfo(
-                element_id=element_id,
+                design_id=design_id,
                 primary_category="Unknown",
                 secondary_category=None,
                 tertiary_category=None,
                 found_in_database=False
             )
 
-    def element_exists(self, element_id: str) -> bool:
+    def design_exists(self, design_id: str) -> bool:
         """
-        Check if an element_id exists in the database.
+        Check if a design_id exists in the database.
 
         Args:
-            element_id: Element ID to check
+            design_id: Design ID to check
 
         Returns:
-            True if element exists in database
+            True if design exists in database
         """
-        return element_id in self.categories_data
+        return design_id in self.categories_data
 
-    def _log_unknown_piece(self, element_id: str, piece_name: Optional[str] = None):
+    def _log_unknown_piece(self, design_id: str, piece_name: Optional[str] = None):
         """
         Log an unknown piece to unknown_pieces.csv.
 
@@ -203,7 +203,7 @@ class CategoryLookup:
         If it's new, creates a new entry.
 
         Args:
-            element_id: Unknown element ID
+            design_id: Unknown design ID
             piece_name: Optional name from API (helps identify the piece)
         """
         with self.unknown_log_lock:
@@ -215,37 +215,37 @@ class CategoryLookup:
                     with open(self.unknown_log_path, 'r', encoding='utf-8') as file:
                         reader = csv.DictReader(file)
                         for row in reader:
-                            existing_entries[row['element_id']] = row
+                            existing_entries[row['design_id']] = row
 
                 # Current timestamp
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                # Check if we've seen this element before
-                if element_id in existing_entries:
+                # Check if we've seen this design before
+                if design_id in existing_entries:
                     # Update existing entry
-                    existing_entries[element_id]['last_seen'] = now
-                    existing_entries[element_id]['encounter_count'] = str(
-                        int(existing_entries[element_id]['encounter_count']) + 1
+                    existing_entries[design_id]['last_seen'] = now
+                    existing_entries[design_id]['encounter_count'] = str(
+                        int(existing_entries[design_id]['encounter_count']) + 1
                     )
                     logger.info(
-                        f"Unknown piece {element_id} encountered again "
-                        f"(count: {existing_entries[element_id]['encounter_count']})"
+                        f"Unknown piece {design_id} encountered again "
+                        f"(count: {existing_entries[design_id]['encounter_count']})"
                     )
                 else:
                     # New unknown piece
-                    existing_entries[element_id] = {
-                        'element_id': element_id,
+                    existing_entries[design_id] = {
+                        'design_id': design_id,
                         'name': piece_name or "Unknown",
                         'first_seen': now,
                         'last_seen': now,
                         'encounter_count': '1'
                     }
-                    logger.info(f"New unknown piece logged: {element_id} ({piece_name})")
+                    logger.info(f"New unknown piece logged: {design_id} ({piece_name})")
 
                 # Write updated log
                 with open(self.unknown_log_path, 'w', newline='', encoding='utf-8') as file:
                     writer = csv.DictWriter(file, fieldnames=[
-                        'element_id',
+                        'design_id',
                         'name',
                         'first_seen',
                         'last_seen',

@@ -194,7 +194,7 @@ class PieceCategorizationGUI(QMainWindow):
         # UI references (set in init_ui)
         self.progress_bar = None
         self.progress_label = None
-        self.element_id_label = None
+        self.design_id_label = None
         self.name_label = None
         self.encounter_label = None
         self.dates_label = None
@@ -302,10 +302,10 @@ class PieceCategorizationGUI(QMainWindow):
         details_layout.setLabelAlignment(Qt.AlignRight | Qt.AlignTop)
         details_layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
 
-        # Element ID (large and prominent)
-        self.element_id_label = QLabel("---")
-        self.element_id_label.setStyleSheet("color: #3498DB; font-size: 18px; font-weight: bold;")
-        details_layout.addRow("Element ID:", self.element_id_label)
+        # Design ID (large and prominent)
+        self.design_id_label = QLabel("---")
+        self.design_id_label.setStyleSheet("color: #3498DB; font-size: 18px; font-weight: bold;")
+        details_layout.addRow("Design ID:", self.design_id_label)
 
         # Piece name (allow for long names with wrapping)
         self.name_label = QLabel("---")
@@ -495,7 +495,7 @@ class PieceCategorizationGUI(QMainWindow):
         piece = self.unknown_pieces[self.current_index]
 
         # Update labels
-        self.element_id_label.setText(piece.element_id)
+        self.design_id_label.setText(piece.design_id)
         self.name_label.setText(piece.name or "Unknown Name")
         self.encounter_label.setText(f"{piece.encounter_count} time(s)")
         self.dates_label.setText(f"First: {piece.first_seen}\nLast: {piece.last_seen}")
@@ -544,7 +544,7 @@ class PieceCategorizationGUI(QMainWindow):
         self.progress_label.setText("✓ All pieces categorized!")
         self.progress_bar.setValue(self.progress_bar.maximum())
 
-        self.element_id_label.setText("---")
+        self.design_id_label.setText("---")
         self.name_label.setText("No pieces to categorize")
         self.encounter_label.setText("---")
         self.dates_label.setText("---")
@@ -662,11 +662,11 @@ class PieceCategorizationGUI(QMainWindow):
 
         # Check for duplicates
         allow_update = False
-        if self.controller.database_manager.element_exists(piece.element_id):
+        if self.controller.database_manager.design_exists(piece.design_id):
             reply = QMessageBox.question(
                 self,
-                "Duplicate Element ID",
-                f"Element ID {piece.element_id} already exists in the database.\n\n"
+                "Duplicate Design ID",
+                f"Design ID {piece.design_id} already exists in the database.\n\n"
                 "Do you want to update it with the new categorization?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
@@ -677,7 +677,7 @@ class PieceCategorizationGUI(QMainWindow):
 
         # Save via controller
         success, message = self.controller.save_categorization(
-            piece.element_id,
+            piece.design_id,
             piece.name,
             primary,
             secondary,

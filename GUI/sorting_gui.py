@@ -281,7 +281,7 @@ class RecentlyProcessedPanel(QGroupBox):
     Shows:
     - Cropped piece image
     - Part name
-    - Element ID
+    - Design ID
     - Assigned bin number
     - Processing timestamp
 
@@ -328,11 +328,11 @@ class RecentlyProcessedPanel(QGroupBox):
         self.name_label.setWordWrap(True)
         info_layout.addWidget(self.name_label)
 
-        self.element_id_label = QLabel("Element ID: -")
-        self.element_id_label.setStyleSheet(SortingGUIStyles.get_label_style(
+        self.design_id_label = QLabel("Design ID: -")
+        self.design_id_label.setStyleSheet(SortingGUIStyles.get_label_style(
             size=11, color=SortingGUIStyles.TEXT_SECONDARY
         ))
-        info_layout.addWidget(self.element_id_label)
+        info_layout.addWidget(self.design_id_label)
 
         self.bin_label = QLabel("→ Bin: -")
         self.bin_label.setStyleSheet(SortingGUIStyles.get_label_style(
@@ -388,8 +388,8 @@ class RecentlyProcessedPanel(QGroupBox):
             piece_name = identified_piece.name if identified_piece.name else "Unknown"
             self.name_label.setText(f"Part Name: {piece_name}")
 
-            element_id = identified_piece.element_id if identified_piece.element_id else "?"
-            self.element_id_label.setText(f"Element ID: {element_id}")
+            design_id = identified_piece.design_id if identified_piece.design_id else "?"
+            self.design_id_label.setText(f"Design ID: {design_id}")
 
             bin_num = identified_piece.bin_number
             if bin_num == 0:
@@ -408,7 +408,7 @@ class RecentlyProcessedPanel(QGroupBox):
             timestamp_str = time.strftime("%H:%M:%S", time.localtime())
             self.timestamp_label.setText(f"Time: {timestamp_str}")
 
-            logger.debug(f"Displayed piece: {piece_name} (ID: {element_id}) → Bin {bin_num}")
+            logger.debug(f"Displayed piece: {piece_name} (Design ID: {design_id}) → Bin {bin_num}")
 
         except Exception as e:
             logger.error(f"Error displaying piece: {e}", exc_info=True)

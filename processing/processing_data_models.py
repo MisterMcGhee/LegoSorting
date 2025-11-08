@@ -31,7 +31,7 @@ class IdentificationResult:
     This is what the API handler returns after sending an image
     to the identification service.
     """
-    element_id: str  # Official Lego element ID (e.g., "3001")
+    design_id: str  # Official Lego design ID (shape only)
     name: str  # Human-readable name (e.g., "Brick 2x4")
     confidence: float  # API confidence score (0.0 to 1.0)
 
@@ -42,13 +42,13 @@ class CategoryInfo:
     Result from category database lookup.
 
     This is what the category lookup module returns after searching
-    the CSV database for an element_id.
+    the CSV database for a design_id.
     """
-    element_id: str
+    design_id: str
     primary_category: str  # e.g., "Basic", "Technic", "Plates"
     secondary_category: Optional[str] = None  # e.g., "Brick", "Pin", "Tile"
     tertiary_category: Optional[str] = None  # e.g., "2x4", "1x1", "Round"
-    found_in_database: bool = True  # False if element_id not in CSV
+    found_in_database: bool = True  # False if design_id not in CSV
 
 
 @dataclass
@@ -91,7 +91,7 @@ class IdentifiedPiece:
     # ========================================================================
     # API IDENTIFICATION FIELDS (Set by identification_api_handler)
     # ========================================================================
-    element_id: Optional[str] = None
+    design_id: Optional[str] = None
     name: Optional[str] = None
     identification_confidence: Optional[float] = None
 
@@ -124,7 +124,7 @@ class IdentifiedPiece:
         Args:
             result: IdentificationResult from identification_api_handler
         """
-        self.element_id = result.element_id
+        self.design_id = result.design_id
         self.name = result.name
         self.identification_confidence = result.confidence
 
@@ -172,7 +172,7 @@ class IdentifiedPiece:
             True if piece has been fully processed
         """
         return all([
-            self.element_id is not None,
+            self.design_id is not None,
             self.primary_category is not None,
             self.bin_number is not None
         ])
@@ -225,7 +225,7 @@ class IdentifiedPiece:
         """
         return {
             "piece_id": self.piece_id,
-            "element_id": self.element_id,
+            "design_id": self.design_id,
             "b": self.name,
             "category_path": self.get_full_category_path(),
             "primary_category": self.primary_category,
@@ -249,7 +249,7 @@ class IdentifiedPiece:
         status = "COMPLETE" if self.complete else "INCOMPLETE"
         return (
             f"IdentifiedPiece(id={self.piece_id}, "
-            f"element_id={self.element_id}, "
+            f"design_id={self.design_id}, "
             f"name={self.name}, "
             f"bin={self.bin_number}, "
             f"confidence={self.confidence:.2f}, "
@@ -281,7 +281,7 @@ if __name__ == "__main__":
 
     # Simulate API identification
     api_result = IdentificationResult(
-        element_id="3001",
+        design_id="3001",
         name="Brick 2x4",
         confidence=0.95
     )
@@ -291,7 +291,7 @@ if __name__ == "__main__":
 
     # Simulate category lookup
     category_result = CategoryInfo(
-        element_id="3001",
+        design_id="3001",
         primary_category="Basic",
         secondary_category="Brick",
         tertiary_category="2x4",
