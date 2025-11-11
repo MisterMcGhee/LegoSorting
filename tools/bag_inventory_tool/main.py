@@ -13,13 +13,13 @@ import os
 import sys
 from datetime import datetime
 
-# Add current directory to path for local imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config.config_manager import create_config_manager, BagInventoryModule
-from core.pdf_processor import PDFProcessor
-from core.reference_builder import ReferenceBuilder
-from utils.csv_handler import InventoryCSVHandler
+from bag_inventory_tool.config.config_manager import create_config_manager, BagInventoryModule
+from bag_inventory_tool.core.pdf_processor import PDFProcessor
+from bag_inventory_tool.core.reference_builder import ReferenceBuilder
+from bag_inventory_tool.utils.csv_handler import InventoryCSVHandler
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -87,7 +87,7 @@ def prompt_for_reference_pages(pdf_processor: PDFProcessor) -> list:
 
 def generate_report(library, inventory, output_dir: str) -> None:
     """
-    Generate extraction report using CSV-first approach.
+    Generate extraction report.
 
     Args:
         library: ReferenceLibrary
@@ -95,15 +95,7 @@ def generate_report(library, inventory, output_dir: str) -> None:
         output_dir: Output directory
     """
     stats = library.get_statistics()
-
-    # Coverage analysis
-    csv_element_ids = inventory.get_element_ids()
-    extracted_element_ids = set(library.get_all_element_ids())
-    missing_element_ids = csv_element_ids - extracted_element_ids
-
-    found_count = len(extracted_element_ids)
-    total_count = len(csv_element_ids)
-    success_rate = (found_count / total_count * 100) if total_count > 0 else 0
+    unvalidated = library.get_unvalidated_pieces()
 
     report_lines = [
         "="*70,
@@ -112,58 +104,75 @@ def generate_report(library, inventory, output_dir: str) -> None:
         "",
         f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"Set: {library.set_number} - {library.set_name}",
-        f"Approach: CSV-first (CSV inventory is source of truth)",
         "",
         "-"*70,
-        "EXTRACTION RESULTS",
+        "EXTRACTION STATISTICS",
         "-"*70,
         f"Reference Pages: {', '.join(map(str, library.reference_pages))}",
-        f"CSV Element IDs: {total_count} pieces",
-        f"Found in Reference Pages: {found_count} pieces ({success_rate:.1f}%)",
-        f"Missing from Reference: {len(missing_element_ids)} pieces",
+        f"Total Pieces Extracted: {stats['total_pieces']}",
+        f"Validated Against CSV: {stats['validated_pieces']} ({stats['validation_rate']:.1f}%)",
+        f"Failed Validation: {stats['unvalidated_pieces']}",
         f"Average OCR Confidence: {stats['average_ocr_confidence']:.2f}",
         "",
         "-"*70,
-        "CSV INVENTORY SUMMARY",
+        "CSV INVENTORY",
         "-"*70,
-        f"Total Unique Pieces: {inventory.get_total_pieces()}",
-        f"Total Piece Quantity: {inventory.get_total_quantity()}",
+        f"Total Unique Pieces in CSV: {inventory.get_total_pieces()}",
+        f"Total Quantity in CSV: {inventory.get_total_quantity()}",
         "",
     ]
 
-    # Show missing pieces (important to know what we couldn't find)
-    if missing_element_ids:
-        report_lines.extend([
-            "-"*70,
-            f"MISSING PIECES ({len(missing_element_ids)} not found in reference pages)",
-            "-"*70,
-            "",
-            "The following element IDs from CSV were NOT found in reference pages:",
-            ""
-        ])
+    # Coverage analysis
+    csv_element_ids = inventory.get_element_ids()
+    extracted_element_ids = set(library.get_all_element_ids())
 
-        for element_id in sorted(list(missing_element_ids))[:30]:  # Show first 30
+    in_csv_not_extracted = csv_element_ids - extracted_element_ids
+    extracted_not_in_csv = extracted_element_ids - csv_element_ids
+
+    report_lines.extend([
+        "-"*70,
+        "COVERAGE ANALYSIS",
+        "-"*70,
+        f"Pieces in CSV but NOT extracted: {len(in_csv_not_extracted)}",
+    ])
+
+    if in_csv_not_extracted:
+        report_lines.append("\nMissing from extraction:")
+        for element_id in sorted(list(in_csv_not_extracted))[:20]:  # Show first 20
             name = inventory.get_piece_name(element_id)
-            report_lines.append(f"  • {element_id}: {name}")
+            report_lines.append(f"  - {element_id}: {name}")
+        if len(in_csv_not_extracted) > 20:
+            report_lines.append(f"  ... and {len(in_csv_not_extracted) - 20} more")
 
-        if len(missing_element_ids) > 30:
-            report_lines.append(f"\n  ... and {len(missing_element_ids) - 30} more")
+    report_lines.extend([
+        "",
+        f"Pieces extracted but NOT in CSV: {len(extracted_not_in_csv)}",
+    ])
 
-        report_lines.append("")
-        report_lines.append("Possible reasons:")
-        report_lines.append("  - OCR didn't detect the element ID")
-        report_lines.append("  - Element ID not on specified reference pages")
-        report_lines.append("  - Fuzzy matching threshold too strict (try lowering)")
-        report_lines.append("")
+    if extracted_not_in_csv:
+        report_lines.append("\nExtra pieces extracted:")
+        for element_id in sorted(list(extracted_not_in_csv))[:20]:
+            piece = library.get_piece(element_id)
+            conf = piece.ocr_confidence if piece else 0
+            report_lines.append(f"  - {element_id} (OCR conf: {conf:.2f})")
+        if len(extracted_not_in_csv) > 20:
+            report_lines.append(f"  ... and {len(extracted_not_in_csv) - 20} more")
+
+    report_lines.extend([
+        "",
+        "-"*70,
+        "VALIDATION FAILURES",
+        "-"*70,
+    ])
+
+    if unvalidated:
+        report_lines.append(f"\n{len(unvalidated)} pieces failed CSV validation:")
+        for piece in unvalidated[:30]:  # Show first 30
+            report_lines.append(f"  - {piece.element_id}: {piece.name} (conf: {piece.ocr_confidence:.2f})")
+        if len(unvalidated) > 30:
+            report_lines.append(f"  ... and {len(unvalidated) - 30} more")
     else:
-        report_lines.extend([
-            "-"*70,
-            "SUCCESS!",
-            "-"*70,
-            "",
-            "✓ ALL CSV element IDs found in reference pages!",
-            ""
-        ])
+        report_lines.append("\n✓ All extracted pieces validated against CSV!")
 
     report_lines.extend([
         "",
