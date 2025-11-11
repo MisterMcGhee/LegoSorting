@@ -60,30 +60,6 @@ pip install -r requirements.txt
 
 **Note:** The first time EasyOCR runs, it will download language models (~100MB). This is normal.
 
-### Step 4: Verify Installation
-
-```bash
-# Test that all imports work correctly
-python test_imports.py
-```
-
-You should see:
-```
-Testing imports...
-  Importing config.config_manager...
-    ✓ Success
-  Importing models...
-    ✓ Success
-  Importing utils...
-    ✓ Success
-  Importing core...
-    ✓ Success
-
-✓ All imports successful!
-```
-
-If you see any import errors, make sure you've activated the virtual environment and installed all dependencies.
-
 ## Usage
 
 ### Basic Usage
