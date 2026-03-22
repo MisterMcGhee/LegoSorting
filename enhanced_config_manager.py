@@ -214,7 +214,8 @@ class ConfigSchema:
                 "cache_dir": "api_cache",  # Directory for cached responses
                 "timeout": 10.0,  # API request timeout (seconds)
                 "retry_count": 3,  # Number of retry attempts
-                "rate_limit": 5.0  # Requests per second limit
+                "rate_limit": 5.0,  # Requests per second limit
+                "color_confidence_threshold": 0.5  # Minimum color confidence to accept (0.0-1.0)
             },
 
             # =================================================================
