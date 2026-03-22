@@ -10,6 +10,35 @@ These models define the data contracts between processing modules:
 
 This file contains only the essential data needed for processing,
 with no extra fields for metrics or debugging that aren't actively used.
+
+--- ID TERMINOLOGY GLOSSARY ---
+
+LEGO uses three distinct ID concepts that must not be conflated:
+
+  design_id   — Identifies the mold/shape only, independent of color.
+                The same design_id applies to a piece in any color.
+                Example: "3001" = 2×4 Brick (red, blue, white, etc.)
+                Source: Brickognize API, BrickLink, Rebrickable (as "part_num").
+
+  color_id    — Identifies a specific LEGO color.
+                Example: "5" = Red, "1" = White, "26" = Black.
+                Source: LEGO's official color catalog; Rebrickable color list.
+                Not yet captured by this system (planned for color recognition).
+
+  element_id  — A unique integer identifying one specific piece in one specific
+                color (i.e., a design + color combination). Historically this
+                looked like a concatenation of design_id + color_id, but since
+                roughly 2015 LEGO assigns non-composite unique integers that
+                bear no guaranteed arithmetic relationship to design_id or
+                color_id. Always treat element_id as an opaque integer.
+                Example: 300121 ≠ design_id "3001" + color_id "21".
+                Source: Rebrickable element data; LEGO's Pick-A-Brick catalog.
+                Not yet captured by this system (requires color_id first).
+
+Current pipeline: image → Brickognize API → design_id (shape only)
+Future pipeline:  image → Brickognize API → design_id
+                       → color recognition  → color_id
+                       → Rebrickable lookup → element_id
 """
 
 import numpy as np
@@ -30,8 +59,11 @@ class IdentificationResult:
 
     This is what the API handler returns after sending an image
     to the identification service.
+
+    Note: Brickognize identifies piece shape only — it returns a design_id,
+    not an element_id. Color is not determined at this stage.
     """
-    design_id: str  # Official Lego design ID (shape only)
+    design_id: str  # LEGO design ID — shape/mold only, color-independent
     name: str  # Human-readable name (e.g., "Brick 2x4")
     confidence: float  # API confidence score (0.0 to 1.0)
 
@@ -91,9 +123,17 @@ class IdentifiedPiece:
     # ========================================================================
     # API IDENTIFICATION FIELDS (Set by identification_api_handler)
     # ========================================================================
-    design_id: Optional[str] = None
+    design_id: Optional[str] = None          # Shape/mold ID — color-independent (see glossary)
     name: Optional[str] = None
     identification_confidence: Optional[float] = None
+
+    # ========================================================================
+    # COLOR IDENTIFICATION FIELDS (Set by future color recognition module)
+    # ========================================================================
+    # These fields are intentionally unpopulated until color recognition is
+    # integrated. See the module docstring glossary for definitions.
+    color_id: Optional[str] = None           # LEGO color ID (e.g., "5" = Red)
+    element_id: Optional[str] = None         # LEGO element ID — unique integer for design+color
 
     # ========================================================================
     # CATEGORY FIELDS (Set by category_lookup_module)
@@ -226,7 +266,9 @@ class IdentifiedPiece:
         return {
             "piece_id": self.piece_id,
             "design_id": self.design_id,
-            "b": self.name,
+            "color_id": self.color_id,
+            "element_id": self.element_id,
+            "name": self.name,
             "category_path": self.get_full_category_path(),
             "primary_category": self.primary_category,
             "secondary_category": self.secondary_category,
