@@ -39,8 +39,6 @@ LEGO uses three distinct ID concepts that must not be conflated:
 
 Current pipeline: image → Brickognize API (?predict_color=true)
                        → design_id + color_id (BrickLink) + color_name
-Future pipeline:  image → Brickognize API (?predict_color=true)
-                       → design_id + color_id + color_name
                        → element_id_lookup.csv → element_id
 """
 
@@ -74,6 +72,25 @@ class IdentificationResult:
     color_id: Optional[str] = None          # BrickLink color ID (see glossary)
     color_name: Optional[str] = None        # LEGO color name — display only (e.g., "Bright Red")
     color_confidence: Optional[float] = None  # Color identification confidence (0.0 to 1.0)
+
+
+@dataclass
+class ElementLookupResult:
+    """
+    Result from element ID lookup (element_id_lookup_module).
+
+    element_id is the primary result — the first element ID found for the
+    given (design_id, bricklink_color_id) pair, including any mold-variant
+    expansions.  all_element_ids contains every element ID associated with
+    that pair across all mold variants and alternates; this full list is used
+    by the bag-sorting module for doppelgänger matching.
+
+    found_in_lookup is False when no entry exists (null color, untranslatable
+    color, or part simply absent from the Rebrickable dataset).
+    """
+    element_id: Optional[str]         # Primary element ID; None if not found
+    all_element_ids: list              # All element IDs for this design+color pair
+    found_in_lookup: bool = False      # False when no entry exists in table
 
 
 @dataclass
@@ -181,6 +198,15 @@ class IdentifiedPiece:
         self.color_id = result.color_id
         self.color_name = result.color_name
         self.color_confidence = result.color_confidence
+
+    def update_from_element_lookup(self, result: ElementLookupResult):
+        """
+        Update element_id from lookup result.
+
+        Args:
+            result: ElementLookupResult from element_id_lookup_module
+        """
+        self.element_id = result.element_id
 
     def update_from_categories(self, result: CategoryInfo):
         """
