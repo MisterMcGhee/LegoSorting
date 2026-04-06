@@ -93,7 +93,7 @@ class UnknownPiecesManager:
     categorization.
     """
     
-    def __init__(self, csv_path: str = "unknown_pieces.csv"):
+    def __init__(self, csv_path: str = "data/unknown_pieces.csv"):
         """
         Initialize the unknown pieces manager.
         
@@ -396,7 +396,7 @@ class CategorizationController:
             ModuleConfig.PIECE_IDENTIFIER.value
         )
         categories_path = piece_config["csv_path"]
-        unknown_path = "unknown_pieces.csv"
+        unknown_path = "data/unknown_pieces.csv"
         
         # Create managers
         self.unknown_manager = UnknownPiecesManager(unknown_path)

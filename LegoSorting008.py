@@ -82,6 +82,7 @@ from processing.identification_api_handler import create_identification_api_hand
 from processing.category_lookup_module import create_category_lookup
 from processing.bin_assignment_module import create_bin_assignment_module
 from processing.category_hierarchy_service import create_category_hierarchy_service
+from processing.element_id_lookup_module import create_element_id_lookup
 from processing.processing_data_models import IdentifiedPiece
 
 # Hardware pipeline modules
@@ -380,12 +381,16 @@ class LegoSorting008(QObject):
             self.bin_assignment_module = bin_assignment
             logger.info("  ✓ Bin assignment module created")
 
+            element_id_lookup = create_element_id_lookup(self.config_manager)
+            logger.info("  ✓ Element ID lookup created")
+
             # Create processing coordinator
             self.processing_coordinator = create_processing_coordinator(
                 api_handler,
                 category_lookup,
                 bin_assignment,
-                self.config_manager
+                self.config_manager,
+                element_id_lookup
             )
             logger.info("  ✓ Processing coordinator created")
 
