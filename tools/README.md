@@ -27,15 +27,28 @@ variant groupings.  Printed parts (`pb`/`pr` suffix) are kept separate.
 - On first setup (before `element_id_lookup.csv` exists)
 - After a new LEGO wave ships and you encounter unknown element IDs
 
-**Launch:**
-```bash
-# First time — download + translate
-python tools/database_update_tool/database_update_launcher.py
+**First-time setup (one-time):**
 
-# Force re-download of fresh Rebrickable data
+Rebrickable's bulk-download CSVs do not include BrickLink color IDs — those
+are only available via their API.  A free API key is required once to fetch
+the color mapping.  After that the key is not needed again.
+
+1. Get a free API key at https://rebrickable.com/api/
+2. Fetch the color mapping:
+```bash
+python tools/database_update_tool/database_update_launcher.py --build-color-map --api-key YOUR_KEY
+```
+3. Generate the lookup table (downloads Rebrickable data automatically):
+```bash
+python tools/database_update_tool/database_update_launcher.py
+```
+
+**Subsequent runs (no API key needed):**
+```bash
+# Re-run with fresh Rebrickable data
 python tools/database_update_tool/database_update_launcher.py --download
 
-# Re-translate using already-cached files (fast)
+# Re-translate using already-cached files (fast, no download)
 python tools/database_update_tool/database_update_launcher.py --translate-only
 
 # Check file status without writing anything
