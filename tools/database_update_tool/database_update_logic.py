@@ -7,13 +7,32 @@ processing/element_id_lookup_module.py to resolve (design_id, BrickLink color_id
 pairs to LEGO element IDs.
 
 SOURCE DATA (Rebrickable public downloads — no API key required):
-  colors.csv.gz           — Rebrickable color list, includes bricklink_id column
-  elements.csv.gz         — element_id → (part_num, rebrickable_color_id)
+  colors.csv.gz             — Rebrickable color list (id, name, rgb, is_trans, ...)
+  elements.csv.gz           — element_id → (part_num, color_id, design_id)
   part_relationships.csv.gz — variant/print/alternate relationships between parts
+
+  Download page: https://rebrickable.com/downloads/
+  These three files cover everything needed; no additional files required.
+
+COLOR ID TRANSLATION:
+  Rebrickable and BrickLink use different integer IDs for the same LEGO colors.
+  The Brickognize API returns BrickLink color IDs, so the element lookup table
+  must also use BrickLink IDs.
+
+  Translation is done by matching LEGO official color names, which both systems
+  share (both derived from LEGO's own naming).  A bundled reference file
+  (bricklink_colors.csv, shipped with this tool) maps BrickLink IDs to names.
+  build_color_map_from_names() reads Rebrickable's colors.csv and matches each
+  color by normalized name (lowercased; Grey→Gray spelling handled automatically).
+  The result is saved as color_map.csv in raw_dir.
+
+  This step runs automatically the first time translate_and_build_lookup() is
+  called if color_map.csv does not yet exist.  Re-run with --rebuild-color-map
+  to regenerate after updating the bundled bricklink_colors.csv.
 
 TRANSLATION STEPS:
   1. Build color mapping:  rebrickable_color_id → bricklink_color_id
-     (from colors.csv bricklink_id column)
+     (auto-built from name matching against bundled bricklink_colors.csv)
 
   2. Build variant groups: part_num → frozenset of related part_nums
      Only M (Mold Variant) and A (Alternate) relationship types are merged.
@@ -48,7 +67,6 @@ RE-RUN POLICY:
 import csv
 import gzip
 import io
-import json
 import logging
 import os
 import re
@@ -62,15 +80,18 @@ logger = logging.getLogger(__name__)
 # Rebrickable public download URLs (no authentication required)
 # ---------------------------------------------------------------------------
 REBRICKABLE_BASE = "https://cdn.rebrickable.com/media/downloads"
-REBRICKABLE_API_BASE = "https://rebrickable.com/api/v3"
 
 DOWNLOAD_URLS = {
+    "colors":             f"{REBRICKABLE_BASE}/colors.csv.gz",
     "elements":           f"{REBRICKABLE_BASE}/elements.csv.gz",
     "part_relationships": f"{REBRICKABLE_BASE}/part_relationships.csv.gz",
 }
 
-# color_map.csv: saved by fetch_color_map(), read by _build_color_map()
+# color_map.csv: auto-built by build_color_map_from_names(), read by _build_color_map()
 COLOR_MAP_FILENAME = "color_map.csv"
+
+# Bundled BrickLink color reference shipped alongside this script
+_BRICKLINK_COLORS_PATH = os.path.join(os.path.dirname(__file__), "bricklink_colors.csv")
 
 # Relationship types to include in doppelgänger / variant groups
 VARIANT_REL_TYPES = {"M", "A"}   # Mold Variant, Alternate
@@ -85,6 +106,15 @@ _SUFFIX_RE = re.compile(
     r"|(?P<pattern>pat\w+)",       # pat + anything  → pattern
     re.IGNORECASE,
 )
+
+
+def _normalize_color_name(name: str) -> str:
+    """Lowercase and normalize known spelling differences between Rebrickable and BrickLink.
+
+    Both systems derive their names from LEGO's official color names, so they
+    match after normalizing case and the Grey→Gray spelling variation.
+    """
+    return name.lower().strip().replace("grey", "gray")
 
 
 def classify_part_suffix(part_num: str) -> str:
@@ -138,65 +168,89 @@ class DatabaseUpdateLogic:
         self.download_rebrickable_files(force=force_download)
         return self.translate_and_build_lookup()
 
-    def fetch_color_map(self, api_key: str) -> int:
+    def build_color_map_from_names(self) -> int:
         """
-        Fetch color data from the Rebrickable API and save the
-        Rebrickable→BrickLink color ID mapping to color_map.csv.
+        Build the Rebrickable→BrickLink color ID mapping by matching color names.
 
-        This is a one-time setup step required before translate_and_build_lookup()
-        can run.  Rebrickable's bulk-download colors.csv does not include BrickLink
-        color IDs — those are only available through the API.
+        Both Rebrickable and BrickLink derive their color names from LEGO's
+        official names, so the names match after minor normalization.
+        Reads Rebrickable's colors.csv (must be downloaded first) and the bundled
+        bricklink_colors.csv, then writes color_map.csv to raw_dir.
 
-        A free Rebrickable API key can be obtained at:
-            https://rebrickable.com/api/
-
-        Args:
-            api_key: Rebrickable API key string
+        Called automatically by translate_and_build_lookup() when color_map.csv
+        is absent.  Also callable directly via --rebuild-color-map.
 
         Returns:
-            Number of color mappings saved
+            Number of Rebrickable colors successfully mapped to BrickLink IDs
 
         Raises:
-            RuntimeError: If the API request fails
+            FileNotFoundError: If colors.csv or bricklink_colors.csv are missing
         """
-        os.makedirs(self.raw_dir, exist_ok=True)
+        rb_colors_path = os.path.join(self.raw_dir, "colors.csv")
+        bl_colors_path = _BRICKLINK_COLORS_PATH
         color_map_path = os.path.join(self.raw_dir, COLOR_MAP_FILENAME)
 
-        logger.info("  Fetching color list from Rebrickable API…")
-        all_colors = []
-        url = f"{REBRICKABLE_API_BASE}/lego/colors/?key={api_key}&page_size=200"
-
-        while url:
-            req = urllib.request.Request(
-                url,
-                headers={"Accept": "application/json", "Authorization": f"key {api_key}"},
+        if not os.path.exists(rb_colors_path):
+            raise FileNotFoundError(
+                f"Rebrickable colors.csv not found: {rb_colors_path}\n"
+                "Download it from https://rebrickable.com/downloads/ or run --download."
             )
-            try:
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-            except Exception as e:
-                raise RuntimeError(f"Rebrickable API request failed: {e}") from e
+        if not os.path.exists(bl_colors_path):
+            raise FileNotFoundError(
+                f"Bundled BrickLink color reference not found: {bl_colors_path}\n"
+                "This file should be included with the tool at tools/database_update_tool/."
+            )
 
-            all_colors.extend(data.get("results", []))
-            url = data.get("next")  # None when last page reached
+        # Load Rebrickable colors: normalized_name → rb_id
+        rb_by_name: Dict[str, str] = {}
+        with open(rb_colors_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rb_id = row.get("id", "").strip()
+                name  = row.get("name", "").strip()
+                if rb_id and name:
+                    rb_by_name[_normalize_color_name(name)] = rb_id
+        logger.info(f"  Loaded {len(rb_by_name)} Rebrickable color names")
 
-        logger.info(f"  Received {len(all_colors)} colors from API")
+        # Load bundled BrickLink colors: normalized_name → bl_id
+        bl_by_name: Dict[str, str] = {}
+        with open(bl_colors_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                bl_id = row.get("bricklink_id", "").strip()
+                name  = row.get("name", "").strip()
+                if bl_id and name:
+                    bl_by_name[_normalize_color_name(name)] = bl_id
+        logger.info(f"  Loaded {len(bl_by_name)} BrickLink color names from bundled reference")
 
-        saved = 0
+        # Match by normalized name and write color_map.csv
+        os.makedirs(self.raw_dir, exist_ok=True)
+        matched = 0
+        unmatched: List[str] = []
+
         with open(color_map_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["rebrickable_id", "bricklink_id"])
-            for color in all_colors:
-                rb_id = str(color.get("id", "")).strip()
-                ext = color.get("external_ids", {})
-                bl_ids = ext.get("BrickLink", {}).get("ext_ids", [])
-                if rb_id and bl_ids:
-                    bl_id = str(bl_ids[0]).strip()
+            for norm_name, rb_id in sorted(rb_by_name.items(), key=lambda x: int(x[1])):
+                bl_id = bl_by_name.get(norm_name)
+                if bl_id:
                     writer.writerow([rb_id, bl_id])
-                    saved += 1
+                    matched += 1
+                else:
+                    unmatched.append(f"rb_id={rb_id}: '{norm_name}'")
 
-        logger.info(f"  Saved {saved} Rebrickable→BrickLink color mappings to {color_map_path}")
-        return saved
+        logger.info(
+            f"  Color map: {matched} matched, {len(unmatched)} unmatched "
+            f"(of {len(rb_by_name)} Rebrickable colors)"
+        )
+        if unmatched:
+            logger.debug("  Unmatched Rebrickable colors (no BrickLink equivalent):")
+            for entry in unmatched[:30]:
+                logger.debug(f"    {entry}")
+            if len(unmatched) > 30:
+                logger.debug(f"    … and {len(unmatched) - 30} more")
+
+        return matched
 
     def download_rebrickable_files(self, force: bool = False) -> None:
         """Download and decompress Rebrickable CSVs into raw_dir."""
@@ -233,15 +287,8 @@ class DatabaseUpdateLogic:
         rels_path      = os.path.join(self.raw_dir, "part_relationships.csv")
 
         if not os.path.exists(color_map_path):
-            raise FileNotFoundError(
-                f"Color map not found: {color_map_path}\n\n"
-                f"The Rebrickable→BrickLink color mapping must be fetched from the\n"
-                f"Rebrickable API before translation can run.  Get a free API key at:\n"
-                f"  https://rebrickable.com/api/\n\n"
-                f"Then run:\n"
-                f"  python tools/database_update_tool/database_update_launcher.py "
-                f"--build-color-map --api-key YOUR_KEY"
-            )
+            logger.info("  color_map.csv not found — building from bundled BrickLink color names…")
+            self.build_color_map_from_names()
 
         for p in (elements_path, rels_path):
             if not os.path.exists(p):
@@ -331,35 +378,41 @@ class DatabaseUpdateLogic:
         """Return a text report of raw file status without writing any output."""
         lines = ["Database Update Tool — Status Report", "=" * 40]
 
-        # Color map (from API fetch)
+        # Bundled BrickLink color reference (shipped with tool, not downloaded)
+        bl_colors_present = os.path.exists(_BRICKLINK_COLORS_PATH)
+        bl_label = "bricklink_colors.csv (bundled)"
+        if bl_colors_present:
+            size  = os.path.getsize(_BRICKLINK_COLORS_PATH)
+            lines.append(f"  {bl_label:35s}  {size:>8,} bytes  (bundled reference)")
+        else:
+            lines.append(f"  {bl_label:35s}  MISSING — reinstall tool")
+
+        # Color map (auto-generated from name matching)
         color_map_path = os.path.join(self.raw_dir, COLOR_MAP_FILENAME)
         if os.path.exists(color_map_path):
             size  = os.path.getsize(color_map_path)
             mtime = datetime.fromtimestamp(os.path.getmtime(color_map_path)).strftime("%Y-%m-%d %H:%M")
-            lines.append(f"  {'color_map.csv':25s}  {size:>10,} bytes  last modified {mtime}")
+            lines.append(f"  {'color_map.csv (generated)':35s}  {size:>8,} bytes  last modified {mtime}")
         else:
-            lines.append(f"  {'color_map.csv':25s}  NOT FOUND — run --build-color-map --api-key YOUR_KEY")
+            lines.append(f"  {'color_map.csv (generated)':35s}  NOT FOUND — will auto-build on next run")
 
         for name in DOWNLOAD_URLS:
             path = os.path.join(self.raw_dir, f"{name}.csv")
+            label = f"{name}.csv"
             if os.path.exists(path):
-                size = os.path.getsize(path)
-                mtime = datetime.fromtimestamp(os.path.getmtime(path)).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
-                lines.append(f"  {name:25s}  {size:>10,} bytes  last modified {mtime}")
+                size  = os.path.getsize(path)
+                mtime = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M")
+                lines.append(f"  {label:35s}  {size:>8,} bytes  last modified {mtime}")
             else:
-                lines.append(f"  {name:25s}  NOT FOUND (run --download)")
+                lines.append(f"  {label:35s}  NOT FOUND — run --download")
 
         output_path = self.output_path
         if os.path.exists(output_path):
             size  = os.path.getsize(output_path)
-            mtime = datetime.fromtimestamp(os.path.getmtime(output_path)).strftime(
-                "%Y-%m-%d %H:%M"
-            )
-            lines.append(f"\n  element_id_lookup.csv   {size:>10,} bytes  generated {mtime}")
+            mtime = datetime.fromtimestamp(os.path.getmtime(output_path)).strftime("%Y-%m-%d %H:%M")
+            lines.append(f"\n  element_id_lookup.csv (output)            {size:>8,} bytes  generated {mtime}")
         else:
-            lines.append(f"\n  element_id_lookup.csv   NOT FOUND (run translation)")
+            lines.append(f"\n  element_id_lookup.csv (output)            NOT FOUND — run translation")
         return "\n".join(lines)
 
     # -----------------------------------------------------------------------
