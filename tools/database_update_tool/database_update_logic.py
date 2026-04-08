@@ -498,6 +498,6 @@ class DatabaseUpdateLogic:
 
 def create_database_update_logic(
     raw_dir: str = "data/rebrickable_raw",
-    output_path: str = "element_id_lookup.csv",
+    output_path: str = "data/element_id_lookup.csv",
 ) -> DatabaseUpdateLogic:
     return DatabaseUpdateLogic(raw_dir=raw_dir, output_path=output_path)
