@@ -29,8 +29,8 @@ FLAGS:
     --rebuild-color-map   Regenerate color_map.csv from name matching (rarely needed)
     --report              Print file status without downloading or writing output
     --debug               Enable verbose logging
-    --raw-dir PATH        Directory for cached files (default: data/rebrickable_raw)
-    --output PATH         Destination for element_id_lookup.csv (default: ./element_id_lookup.csv)
+    --raw-dir PATH        Directory for cached files (default: <project_root>/data/rebrickable_raw)
+    --output PATH         Destination for element_id_lookup.csv (default: <project_root>/data/element_id_lookup.csv)
 
 COLOR ID TRANSLATION:
     Rebrickable and BrickLink use different integers for the same LEGO colors.
@@ -43,6 +43,11 @@ import argparse
 import logging
 import os
 import sys
+
+# Resolve project root from this script's location (tools/database_update_tool/)
+# so that default paths work regardless of the caller's working directory.
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
 
 
 def _setup_logging(debug: bool = False) -> None:
@@ -109,15 +114,15 @@ def main() -> int:
     )
     parser.add_argument(
         "--raw-dir",
-        default="data/rebrickable_raw",
+        default=os.path.join(_PROJECT_ROOT, "data", "rebrickable_raw"),
         metavar="PATH",
-        help="Directory for cached Rebrickable CSV files (default: data/rebrickable_raw)",
+        help="Directory for cached Rebrickable CSV files (default: <project_root>/data/rebrickable_raw)",
     )
     parser.add_argument(
         "--output",
-        default="data/element_id_lookup.csv",
+        default=os.path.join(_PROJECT_ROOT, "data", "element_id_lookup.csv"),
         metavar="PATH",
-        help="Output path for element_id_lookup.csv (default: data/element_id_lookup.csv)",
+        help="Output path for element_id_lookup.csv (default: <project_root>/data/element_id_lookup.csv)",
     )
 
     args = parser.parse_args()

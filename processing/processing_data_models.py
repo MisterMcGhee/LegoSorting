@@ -35,7 +35,8 @@ LEGO uses three distinct ID concepts that must not be conflated:
                 Example: 300121 ≠ design_id "3001" + color_id "21".
                 Source: Offline lookup table derived from Rebrickable element data,
                 translated to BrickLink color IDs (see tools/database_update_tool).
-                Not yet captured by this system (lookup table coming tomorrow).
+                Resolved at runtime via element_id_lookup.csv
+                (see processing/element_id_lookup_module.py).
 
 Current pipeline: image → Brickognize API (?predict_color=true)
                        → design_id + color_id (BrickLink) + color_name
