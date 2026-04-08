@@ -55,7 +55,7 @@ class CategoryLookup:
 
         self.csv_path = module_config["csv_path"]
         self.save_unknown = module_config["save_unknown"]
-        self.unknown_log_path = "unknown_pieces.csv"  # Root directory
+        self.unknown_log_path = "data/unknown_pieces.csv"
 
         # Category database cache (design_id -> category info)
         self.categories_data: Dict[str, Dict[str, str]] = {}

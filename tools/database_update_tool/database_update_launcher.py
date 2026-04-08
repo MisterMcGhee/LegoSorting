@@ -115,9 +115,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--output",
-        default="element_id_lookup.csv",
+        default="data/element_id_lookup.csv",
         metavar="PATH",
-        help="Output path for element_id_lookup.csv (default: ./element_id_lookup.csv)",
+        help="Output path for element_id_lookup.csv (default: data/element_id_lookup.csv)",
     )
 
     args = parser.parse_args()

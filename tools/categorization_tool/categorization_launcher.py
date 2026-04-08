@@ -138,15 +138,14 @@ def verify_files(logger):
     logger.info("Verifying files...")
     
     # Check for unknown_pieces.csv (not critical - will be handled by GUI)
-    if os.path.exists('unknown_pieces.csv'):
+    if os.path.exists('data/unknown_pieces.csv'):
         logger.info("✓ unknown_pieces.csv found")
     else:
         logger.warning("⚠ unknown_pieces.csv not found (GUI will handle this)")
-    
+
     # Check for Lego_Categories.csv (critical)
     possible_paths = [
         'data/Lego_Categories.csv',
-        'Lego_Categories.csv'
     ]
     
     found = False
