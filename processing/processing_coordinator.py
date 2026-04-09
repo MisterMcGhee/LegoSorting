@@ -20,11 +20,12 @@ DOES NOT:
 
 PIPELINE SEQUENCE:
 1. Create IdentifiedPiece with basic info (piece_id, image_path, timestamp)
-2. API Handler → IdentificationResult → update IdentifiedPiece
-3. Category Lookup → CategoryInfo → update IdentifiedPiece
-4. Bin Assignment → BinAssignment → update IdentifiedPiece
-5. Finalize and return complete IdentifiedPiece
-6. Notify callbacks that piece is complete (for GUI updates)
+2. API Handler → IdentificationResult → update IdentifiedPiece (design_id, color_id, name)
+3. Element ID Lookup → ElementLookupResult → update IdentifiedPiece (element_id)
+4. Category Lookup → CategoryInfo → update IdentifiedPiece
+5. Bin Assignment → BinAssignment → update IdentifiedPiece
+6. Finalize and return complete IdentifiedPiece
+7. Notify callbacks that piece is complete (for GUI updates)
 
 CALLBACK SYSTEM:
 This module implements the Observer pattern to notify external systems
@@ -44,6 +45,7 @@ from processing.processing_data_models import (
 )
 from processing.identification_api_handler import IdentificationAPIHandler
 from processing.category_lookup_module import CategoryLookup
+from processing.element_id_lookup_module import ElementIDLookup
 from processing.bin_assignment_module import BinAssignmentModule
 from enhanced_config_manager import EnhancedConfigManager
 
@@ -67,7 +69,8 @@ class ProcessingCoordinator:
                  api_handler: IdentificationAPIHandler,
                  category_lookup: CategoryLookup,
                  bin_assignment: BinAssignmentModule,
-                 config_manager: EnhancedConfigManager):
+                 config_manager: EnhancedConfigManager,
+                 element_id_lookup: Optional[ElementIDLookup] = None):
         """
         Initialize processing coordinator with all sub-modules.
 
@@ -78,12 +81,14 @@ class ProcessingCoordinator:
             api_handler: Handles Brickognize API calls
             category_lookup: Looks up categories from CSV database
             bin_assignment: Assigns bins based on categories
-            config_manager: Configuration manager (for future use)
+            config_manager: Configuration manager
+            element_id_lookup: Optional element ID lookup (None until table is generated)
         """
         # Store references to all sub-modules
         # These are used throughout the processing pipeline
         self.api_handler = api_handler
         self.category_lookup = category_lookup
+        self.element_id_lookup = element_id_lookup  # Optional — degrades gracefully if None
         self.bin_assignment = bin_assignment
         self.config_manager = config_manager
 
@@ -331,7 +336,17 @@ class ProcessingCoordinator:
             self._run_api_identification(identified_piece, capture_package)
 
             # ============================================================
-            # STEP 2: CATEGORY LOOKUP
+            # STEP 2: ELEMENT ID LOOKUP
+            # ============================================================
+            # Only run if API succeeded AND returned a color_id.
+            # Maps (design_id, bricklink_color_id) → element_id using the
+            # offline table. Skipped silently when the lookup module is
+            # absent (table not yet generated) or color is below threshold.
+            if identified_piece.design_id and identified_piece.color_id:
+                self._run_element_id_lookup(identified_piece)
+
+            # ============================================================
+            # STEP 3: CATEGORY LOOKUP
             # ============================================================
             # Only run if API succeeded (we got a design_id)
             # Look up the design_id in our category database to get
@@ -340,7 +355,7 @@ class ProcessingCoordinator:
                 self._run_category_lookup(identified_piece)
 
             # ============================================================
-            # STEP 3: BIN ASSIGNMENT
+            # STEP 4: BIN ASSIGNMENT
             # ============================================================
             # Only run if we have categories (category lookup succeeded)
             # Use the categories and sorting strategy to determine which
@@ -349,7 +364,7 @@ class ProcessingCoordinator:
                 self._run_bin_assignment(identified_piece)
 
             # ============================================================
-            # STEP 4: FINALIZE
+            # STEP 5: FINALIZE
             # ============================================================
             # Mark the piece as complete. This sets the 'complete' flag
             # to True, indicating we've finished all processing stages
@@ -462,6 +477,60 @@ class ProcessingCoordinator:
             logger.error(f"API error: {e}")
             identified_piece.design_id = None
 
+    def _run_element_id_lookup(self, identified_piece: IdentifiedPiece) -> None:
+        """
+        Run element ID lookup step of pipeline.
+
+        Resolves (design_id, bricklink_color_id) → element_id using the
+        offline lookup table pre-generated by tools/database_update_tool.
+
+        Skipped silently if the element_id_lookup module is None (table not
+        yet generated). element_id remains None and sorting is unaffected.
+
+        Mold-variant and Alternate expansions are already baked into the
+        lookup table, so this step returns the correct element_id even when
+        Brickognize returns a canonical design_id that only exists in the
+        table under a variant suffix.
+
+        Called by: process_piece() as step 2
+
+        Args:
+            identified_piece: Piece being processed (updated in place)
+
+        Side effects:
+            Updates identified_piece.element_id
+        """
+        if self.element_id_lookup is None:
+            return  # table not yet generated — degrade gracefully
+
+        try:
+            logger.debug(
+                f"Step 2: Element ID lookup for "
+                f"design_id={identified_piece.design_id}, "
+                f"color_id={identified_piece.color_id}"
+            )
+
+            result = self.element_id_lookup.get_element_lookup(
+                identified_piece.design_id,
+                identified_piece.color_id,
+            )
+            identified_piece.update_from_element_lookup(result)
+
+            if result.found_in_lookup:
+                logger.debug(
+                    f"Element ID resolved: {result.element_id} "
+                    f"({len(result.all_element_ids)} variant(s) total)"
+                )
+            else:
+                logger.debug(
+                    f"Element ID not found for "
+                    f"({identified_piece.design_id}, {identified_piece.color_id})"
+                )
+
+        except Exception as e:
+            logger.error(f"Element ID lookup error: {e}", exc_info=True)
+            # element_id remains None — pipeline continues normally
+
     def _run_category_lookup(self, identified_piece: IdentifiedPiece) -> None:
         """
         Run category lookup step of pipeline.
@@ -502,7 +571,10 @@ class ProcessingCoordinator:
             # This searches the CSV file for this design_id
             category_info = self.category_lookup.get_categories(
                 identified_piece.design_id,
-                piece_name=identified_piece.name
+                piece_name=identified_piece.name,
+                color_id=identified_piece.color_id,
+                color_name=identified_piece.color_name,
+                element_id=identified_piece.element_id
             )
 
             # Update the identified piece with category results
@@ -629,55 +701,43 @@ def create_processing_coordinator(
         api_handler: IdentificationAPIHandler,
         category_lookup: CategoryLookup,
         bin_assignment: BinAssignmentModule,
-        config_manager: EnhancedConfigManager
+        config_manager: EnhancedConfigManager,
+        element_id_lookup: Optional[ElementIDLookup] = None,
 ) -> ProcessingCoordinator:
     """
     Factory function to create a processing coordinator.
 
     Called during application startup after all sub-modules are created.
 
-    WHY USE A FACTORY FUNCTION?
-    - Provides a consistent way to create instances
-    - Can add initialization logic in one place
-    - Makes testing easier (can mock the factory)
-    - Matches the pattern used by other modules
-
     Args:
         api_handler: Initialized API handler for Brickognize
         category_lookup: Initialized category lookup module
         bin_assignment: Initialized bin assignment module
         config_manager: Configuration manager instance
+        element_id_lookup: Optional element ID lookup module.  Pass None (or
+            omit) before the lookup table has been generated; the pipeline will
+            simply leave element_id as None on every piece.
 
     Returns:
         Initialized ProcessingCoordinator ready to use
 
     Example:
-        # During application startup in LegoSorting008:
         config_manager = create_config_manager()
         category_service = create_category_hierarchy_service(config_manager)
-
-        # Create all sub-modules
         api_handler = create_identification_api_handler(config_manager)
         category_lookup = create_category_lookup(config_manager)
         bin_assignment = create_bin_assignment_module(config_manager, category_service)
+        element_id_lookup = create_element_id_lookup(config_manager)
 
-        # Create the coordinator with all sub-modules
         coordinator = create_processing_coordinator(
-            api_handler,
-            category_lookup,
-            bin_assignment,
-            config_manager
+            api_handler, category_lookup, bin_assignment,
+            config_manager, element_id_lookup
         )
-
-        # Register GUI callback
-        coordinator.register_identification_callback(gui.on_piece_identified)
-
-        # Use in worker
-        identified_piece = coordinator.process_piece(capture_package)
     """
     return ProcessingCoordinator(
         api_handler,
         category_lookup,
         bin_assignment,
-        config_manager
+        config_manager,
+        element_id_lookup,
     )

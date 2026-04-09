@@ -38,8 +38,8 @@ class IdentificationAPIHandler:
     All configuration comes from enhanced_config_manager.
     """
 
-    # API endpoint is constant - Brickognize's public API URL
-    API_URL = "https://api.brickognize.com/predict/"
+    # API endpoint — ?predict_color=true enables the colors[] array in responses
+    API_URL = "https://api.brickognize.com/predict/?predict_color=true"
 
     # Supported image formats
     VALID_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif']
@@ -56,10 +56,12 @@ class IdentificationAPIHandler:
 
         self.timeout = module_config["timeout"]
         self.retry_count = module_config["retry_count"]
+        self.color_confidence_threshold = module_config["color_confidence_threshold"]
 
         logger.info(
             f"API handler initialized "
-            f"(timeout={self.timeout}s, retries={self.retry_count})"
+            f"(timeout={self.timeout}s, retries={self.retry_count}, "
+            f"color_threshold={self.color_confidence_threshold})"
         )
 
     def identify_piece(self, image_path: str) -> IdentificationResult:
@@ -73,7 +75,8 @@ class IdentificationAPIHandler:
             image_path: Path to the image file to identify
 
         Returns:
-            IdentificationResult with design_id, name, and confidence
+            IdentificationResult with design_id, name, confidence, and color
+            fields when color confidence exceeds color_confidence_threshold
 
         Raises:
             FileNotFoundError: If image file doesn't exist
@@ -133,19 +136,40 @@ class IdentificationAPIHandler:
 
             # Extract identification results
             if "items" in data and data["items"]:
-                # Get top match (highest confidence)
+                # Get top shape match (highest confidence)
                 item = data["items"][0]
 
-                # Create result dataclass
+                # Extract color — take highest-confidence entry above threshold
+                color_id = None
+                color_name = None
+                color_confidence = None
+
+                colors = data.get("colors", [])
+                if colors:
+                    top_color = colors[0]  # Already ranked by score descending
+                    score = top_color.get("score", 0.0)
+                    if score >= self.color_confidence_threshold:
+                        color_id = str(top_color.get("id", ""))
+                        color_name = top_color.get("name", None)
+                        color_confidence = score
+
                 result = IdentificationResult(
                     design_id=item.get("id", "unknown"),
                     name=item.get("name", "Unknown Piece"),
-                    confidence=item.get("score", 0.0)
+                    confidence=item.get("score", 0.0),
+                    color_id=color_id,
+                    color_name=color_name,
+                    color_confidence=color_confidence,
                 )
 
+                color_log = (
+                    f", color={result.color_name} ({result.color_id}) "
+                    f"@ {result.color_confidence:.2f}"
+                    if result.color_id else ", color=below threshold"
+                )
                 logger.info(
                     f"Piece identified: {result.design_id} ({result.name}) "
-                    f"with confidence {result.confidence:.2f}"
+                    f"@ {result.confidence:.2f}{color_log}"
                 )
 
                 return result

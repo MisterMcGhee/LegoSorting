@@ -10,6 +10,37 @@ These models define the data contracts between processing modules:
 
 This file contains only the essential data needed for processing,
 with no extra fields for metrics or debugging that aren't actively used.
+
+--- ID TERMINOLOGY GLOSSARY ---
+
+LEGO uses three distinct ID concepts that must not be conflated:
+
+  design_id   — Identifies the mold/shape only, independent of color.
+                The same design_id applies to a piece in any color.
+                Example: "3001" = 2×4 Brick (red, blue, white, etc.)
+                Source: Brickognize API, BrickLink, Rebrickable (as "part_num").
+
+  color_id    — Identifies a specific LEGO color using BrickLink's color numbering.
+                Brickognize returns BrickLink color IDs when color prediction is
+                enabled; this system uses BrickLink IDs throughout for consistency.
+                Example: "5" = Red, "11" = Black, "1" = White.
+                Source: Brickognize API (?predict_color=true), BrickLink catalog.
+
+  element_id  — A unique integer identifying one specific piece in one specific
+                color (i.e., a design + color combination). Historically this
+                looked like a concatenation of design_id + color_id, but since
+                roughly 2015 LEGO assigns non-composite unique integers that
+                bear no guaranteed arithmetic relationship to design_id or
+                color_id. Always treat element_id as an opaque integer.
+                Example: 300121 ≠ design_id "3001" + color_id "21".
+                Source: Offline lookup table derived from Rebrickable element data,
+                translated to BrickLink color IDs (see tools/database_update_tool).
+                Resolved at runtime via element_id_lookup.csv
+                (see processing/element_id_lookup_module.py).
+
+Current pipeline: image → Brickognize API (?predict_color=true)
+                       → design_id + color_id (BrickLink) + color_name
+                       → element_id_lookup.csv → element_id
 """
 
 import numpy as np
@@ -29,11 +60,38 @@ class IdentificationResult:
     Result from identification API (Brickognize).
 
     This is what the API handler returns after sending an image
-    to the identification service.
+    to the identification service, using ?predict_color=true.
+
+    design_id and confidence always populated on success.
+    color_id, color_name, and color_confidence are populated only when
+    a color result exceeds the configured color_confidence_threshold;
+    otherwise they remain None.
     """
-    design_id: str  # Official Lego design ID (shape only)
-    name: str  # Human-readable name (e.g., "Brick 2x4")
-    confidence: float  # API confidence score (0.0 to 1.0)
+    design_id: str           # Shape/mold ID — color-independent (see glossary)
+    name: str                # Human-readable piece name (e.g., "Brick 2x4")
+    confidence: float        # Shape identification confidence (0.0 to 1.0)
+    color_id: Optional[str] = None          # BrickLink color ID (see glossary)
+    color_name: Optional[str] = None        # LEGO color name — display only (e.g., "Bright Red")
+    color_confidence: Optional[float] = None  # Color identification confidence (0.0 to 1.0)
+
+
+@dataclass
+class ElementLookupResult:
+    """
+    Result from element ID lookup (element_id_lookup_module).
+
+    element_id is the primary result — the first element ID found for the
+    given (design_id, bricklink_color_id) pair, including any mold-variant
+    expansions.  all_element_ids contains every element ID associated with
+    that pair across all mold variants and alternates; this full list is used
+    by the bag-sorting module for doppelgänger matching.
+
+    found_in_lookup is False when no entry exists (null color, untranslatable
+    color, or part simply absent from the Rebrickable dataset).
+    """
+    element_id: Optional[str]         # Primary element ID; None if not found
+    all_element_ids: list              # All element IDs for this design+color pair
+    found_in_lookup: bool = False      # False when no entry exists in table
 
 
 @dataclass
@@ -91,9 +149,20 @@ class IdentifiedPiece:
     # ========================================================================
     # API IDENTIFICATION FIELDS (Set by identification_api_handler)
     # ========================================================================
-    design_id: Optional[str] = None
+    design_id: Optional[str] = None          # Shape/mold ID — color-independent (see glossary)
     name: Optional[str] = None
     identification_confidence: Optional[float] = None
+
+    # ========================================================================
+    # COLOR IDENTIFICATION FIELDS (Set by identification_api_handler)
+    # ========================================================================
+    # Populated when Brickognize returns a color result above threshold.
+    # color_id and element_id are None when color confidence is below threshold.
+    # See the module docstring glossary for ID definitions.
+    color_id: Optional[str] = None           # BrickLink color ID (e.g., "11" = Black)
+    color_name: Optional[str] = None         # LEGO color name — display only (e.g., "Black")
+    color_confidence: Optional[float] = None # Color identification confidence (0.0 to 1.0)
+    element_id: Optional[str] = None         # LEGO element ID — unique integer for design+color
 
     # ========================================================================
     # CATEGORY FIELDS (Set by category_lookup_module)
@@ -127,6 +196,18 @@ class IdentifiedPiece:
         self.design_id = result.design_id
         self.name = result.name
         self.identification_confidence = result.confidence
+        self.color_id = result.color_id
+        self.color_name = result.color_name
+        self.color_confidence = result.color_confidence
+
+    def update_from_element_lookup(self, result: ElementLookupResult):
+        """
+        Update element_id from lookup result.
+
+        Args:
+            result: ElementLookupResult from element_id_lookup_module
+        """
+        self.element_id = result.element_id
 
     def update_from_categories(self, result: CategoryInfo):
         """
@@ -226,7 +307,11 @@ class IdentifiedPiece:
         return {
             "piece_id": self.piece_id,
             "design_id": self.design_id,
-            "b": self.name,
+            "color_id": self.color_id,
+            "color_name": self.color_name,
+            "color_confidence": self.color_confidence,
+            "element_id": self.element_id,
+            "name": self.name,
             "category_path": self.get_full_category_path(),
             "primary_category": self.primary_category,
             "secondary_category": self.secondary_category,

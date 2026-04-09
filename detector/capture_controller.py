@@ -476,6 +476,10 @@ class CaptureController:
             Path to saved image, or None if save failed
         """
         try:
+            # TODO: After identification completes, rename image to include
+            # design_id and color_name for a self-describing LegoPictures folder
+            # (e.g. piece_42_3001_Red.jpg). Requires hooking into the
+            # identification callback so the final name is known at that point.
             timestamp_str = str(int(capture_package.capture_timestamp))
             filename = f"piece_{capture_package.piece_id}_{timestamp_str}.jpg"
             file_path = Path(self.capture_directory) / filename

@@ -651,6 +651,9 @@ class CameraViewTracking(BaseCameraViewWidget):
         # Draw piece ID if available
         if hasattr(piece, 'id'):
             label = f"ID: {piece.id}"
+            # TODO: Once identified (blue box state), append color name or design_id
+            # to the label so the live view shows e.g. "ID: 42  Red 3001".
+            # Requires accessing the identified_pieces_dict from the orchestrator.
             cv2.putText(frame, label, (x, y - 5),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 

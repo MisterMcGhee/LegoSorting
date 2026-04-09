@@ -12,6 +12,64 @@ Tools in this directory are:
 
 ## Available Tools
 
+### Database Update Tool
+**Location**: `tools/database_update_tool/`
+
+Generates `element_id_lookup.csv` — the offline table used by the processing
+pipeline to resolve a `(design_id, BrickLink color_id)` pair to a LEGO element ID.
+
+Downloads three free CSV files from Rebrickable (no API key required), translates
+Rebrickable color IDs to BrickLink color IDs, and pre-expands mold-variant and
+alternate part relationships so the lookup module needs no runtime knowledge of
+variant groupings.  Printed parts (`pb`/`pr` suffix) are kept separate.
+
+**When to run:**
+- On first setup (before `element_id_lookup.csv` exists)
+- After a new LEGO wave ships and you encounter unknown element IDs
+
+**First-time setup (one-time):**
+
+Rebrickable's bulk-download CSVs do not include BrickLink color IDs — those
+are only available via their API.  A free API key is required once to fetch
+the color mapping.  After that the key is not needed again.
+
+1. Get a free API key at https://rebrickable.com/api/
+2. Fetch the color mapping:
+```bash
+python tools/database_update_tool/database_update_launcher.py --build-color-map --api-key YOUR_KEY
+```
+3. Generate the lookup table (downloads Rebrickable data automatically):
+```bash
+python tools/database_update_tool/database_update_launcher.py
+```
+
+**Subsequent runs (no API key needed):**
+```bash
+# Re-run with fresh Rebrickable data
+python tools/database_update_tool/database_update_launcher.py --download
+
+# Re-translate using already-cached files (fast, no download)
+python tools/database_update_tool/database_update_launcher.py --translate-only
+
+# Check file status without writing anything
+python tools/database_update_tool/database_update_launcher.py --report
+```
+
+**Structure:**
+```
+database_update_tool/
+├── __init__.py
+├── database_update_logic.py    # Download, translate, write output
+└── database_update_launcher.py # Entry point (run this)
+```
+
+**Output:** `element_id_lookup.csv` in the project root (alongside `Lego_Categories.csv`).
+The main application loads this file at startup via `element_id_lookup_module.py`.
+If the file is absent the application still runs — `element_id` will be `None`
+for all pieces until the table is generated.
+
+---
+
 ### Categorization Tool
 **Location**: `tools/categorization_tool/`
 

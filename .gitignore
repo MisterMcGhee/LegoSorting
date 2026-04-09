@@ -64,3 +64,9 @@ Thumbs.db
 # Project specific
 *.log
 *.tmp
+
+# Generated data files (tools/database_update_tool output)
+data/element_id_lookup.csv
+data/rebrickable_raw/
+data/unknown_pieces.csv
+element_id_lookup.csv
