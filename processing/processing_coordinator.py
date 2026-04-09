@@ -571,7 +571,10 @@ class ProcessingCoordinator:
             # This searches the CSV file for this design_id
             category_info = self.category_lookup.get_categories(
                 identified_piece.design_id,
-                piece_name=identified_piece.name
+                piece_name=identified_piece.name,
+                color_id=identified_piece.color_id,
+                color_name=identified_piece.color_name,
+                element_id=identified_piece.element_id
             )
 
             # Update the identified piece with category results

@@ -115,6 +115,9 @@ class CategoryLookup:
                     writer.writerow([
                         'design_id',
                         'name',
+                        'color_id',
+                        'color_name',
+                        'element_id',
                         'first_seen',
                         'last_seen',
                         'encounter_count'
@@ -124,7 +127,10 @@ class CategoryLookup:
                 logger.error(f"Failed to create unknown pieces log: {e}")
 
     def get_categories(self, design_id: str,
-                       piece_name: Optional[str] = None) -> CategoryInfo:
+                       piece_name: Optional[str] = None,
+                       color_id: Optional[str] = None,
+                       color_name: Optional[str] = None,
+                       element_id: Optional[str] = None) -> CategoryInfo:
         """
         Look up categories for a design_id.
 
@@ -173,7 +179,7 @@ class CategoryLookup:
             logger.warning(f"Design ID not found in database: {design_id}")
 
             if self.save_unknown:
-                self._log_unknown_piece(design_id, piece_name)
+                self._log_unknown_piece(design_id, piece_name, color_id, color_name, element_id)
 
             return CategoryInfo(
                 design_id=design_id,
@@ -195,7 +201,10 @@ class CategoryLookup:
         """
         return design_id in self.categories_data
 
-    def _log_unknown_piece(self, design_id: str, piece_name: Optional[str] = None):
+    def _log_unknown_piece(self, design_id: str, piece_name: Optional[str] = None,
+                           color_id: Optional[str] = None,
+                           color_name: Optional[str] = None,
+                           element_id: Optional[str] = None):
         """
         Log an unknown piece to unknown_pieces.csv.
 
@@ -205,6 +214,9 @@ class CategoryLookup:
         Args:
             design_id: Unknown design ID
             piece_name: Optional name from API (helps identify the piece)
+            color_id: Optional BrickLink color ID from API
+            color_name: Optional color display name from API
+            element_id: Optional element ID if resolved from lookup table
         """
         with self.unknown_log_lock:
             try:
@@ -236,6 +248,9 @@ class CategoryLookup:
                     existing_entries[design_id] = {
                         'design_id': design_id,
                         'name': piece_name or "Unknown",
+                        'color_id': color_id or "",
+                        'color_name': color_name or "",
+                        'element_id': element_id or "",
                         'first_seen': now,
                         'last_seen': now,
                         'encounter_count': '1'
@@ -247,10 +262,13 @@ class CategoryLookup:
                     writer = csv.DictWriter(file, fieldnames=[
                         'design_id',
                         'name',
+                        'color_id',
+                        'color_name',
+                        'element_id',
                         'first_seen',
                         'last_seen',
                         'encounter_count'
-                    ])
+                    ], extrasaction='ignore')
                     writer.writeheader()
                     for entry in existing_entries.values():
                         writer.writerow(entry)
