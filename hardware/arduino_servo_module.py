@@ -1,28 +1,22 @@
 # hardware/arduino_servo_module.py
 """
-arduino_servo_module.py - Servo control for bin selection (SIMPLIFIED WRITE-ONLY)
+arduino_servo_module.py - Servo control for bin selection
 
 This module controls the servo motor that directs pieces into different bins.
-It manages the Arduino serial connection and servo movement operations.
+It uses an ArduinoConnection (shared serial transport) to send commands.
 
 COMMUNICATION MODEL:
-- Write-only: Commands are sent to Arduino, no responses expected
-- If serial port opens successfully, assume Arduino is connected
-- User verifies functionality via configuration GUI testing
-
-COMMAND PROTOCOL:
-- Sends: "A,{angle}\n" (e.g., "A,90\n" for 90 degrees)
-- Arduino moves servo and optionally responds "OK\n" (we don't read it)
+- Write-only: Commands are sent to Arduino via the shared ArduinoConnection.
+- Command: "A,{angle}\\n"  (e.g. "A,90\\n" for 90 degrees)
 
 RESPONSIBILITIES:
-- Serial connection to Arduino
 - Bin-to-angle position mapping and validation
 - Servo movement commands (move to bin, move to angle, home)
 - Auto-calculation of evenly-spaced bin positions
 - Position testing and calibration support
-- Simulation mode for development without hardware
 
 DOES NOT:
+- Own the serial connection (that's arduino_connection.py)
 - Track bin capacity (that's bin_capacity_module)
 - Make sorting decisions (that's processing modules)
 - Coordinate with other hardware (that's hardware_coordinator)
@@ -33,43 +27,36 @@ All settings stored in 'arduino_servo' section of config.json
 
 import time
 import logging
-import serial
 import threading
 from typing import Dict, Optional
 from enhanced_config_manager import EnhancedConfigManager, ModuleConfig
+from hardware.arduino_connection import ArduinoConnection
 
 logger = logging.getLogger(__name__)
 
 
 class ArduinoServoController:
     """
-    Controls servo motor for directing Lego pieces to bins via Arduino.
+    Controls the chute servo motor for directing Lego pieces to bins.
 
-    Simplified write-only implementation for Mac/USB-dongle setups.
+    Uses a shared ArduinoConnection for serial communication so the port
+    is not opened twice when the motor controller is also active.
     """
 
-    def __init__(self, config_manager: EnhancedConfigManager):
+    def __init__(self, config_manager: EnhancedConfigManager, connection: ArduinoConnection):
         """
         Initialize servo controller with configuration.
 
         Args:
             config_manager: Enhanced configuration manager instance
+            connection:     Shared ArduinoConnection (serial transport)
         """
         self.config_manager = config_manager
+        self.connection = connection
 
         # Load configuration
         arduino_config = config_manager.get_module_config(ModuleConfig.ARDUINO_SERVO.value)
         sorting_config = config_manager.get_module_config(ModuleConfig.SORTING.value)
-
-        # =====================================================================
-        # CONNECTION SETTINGS
-        # =====================================================================
-        self.port = arduino_config['port']
-        self.baud_rate = arduino_config['baud_rate']
-        self.timeout = arduino_config['timeout']
-        self.connection_retries = arduino_config['connection_retries']
-        self.retry_delay = arduino_config['retry_delay']
-        self.simulation_mode = arduino_config['simulation_mode']
 
         # =====================================================================
         # SERVO HARDWARE PARAMETERS
@@ -112,204 +99,26 @@ class ArduinoServoController:
         # =====================================================================
         self.current_angle = self.default_position
         self.current_bin = None
-        self.arduino = None
-        self.initialized = False
         self.lock = threading.RLock()  # Thread-safe operations
-
-        # =====================================================================
-        # INITIALIZATION
-        # =====================================================================
-        if self.simulation_mode:
-            logger.info("=== SIMULATION MODE ENABLED ===")
-            logger.info("No Arduino connection required")
-            self.initialized = True
-        else:
-            logger.info("=== HARDWARE MODE (WRITE-ONLY) ===")
-            self._connect_to_arduino()
 
         # Log initialization status
         self._log_initialization_status()
 
     # ========================================================================
-    # SECTION 1: ARDUINO CONNECTION (SIMPLIFIED)
+    # SECTION 1: COMMAND SENDING (delegates to shared ArduinoConnection)
     # ========================================================================
-
-    def _connect_to_arduino(self) -> bool:
-        """
-        Establish serial connection to Arduino.
-
-        Write-only mode: If port opens successfully, assume Arduino is there.
-        No response verification - user confirms via GUI testing.
-
-        Returns:
-            True if connection successful, False otherwise
-        """
-        with self.lock:
-            logger.info("=" * 70)
-            logger.info("STARTING CONNECTION ATTEMPT")
-            logger.info("=" * 70)
-            logger.info(f"Port: {self.port}")
-            logger.info(f"Baud: {self.baud_rate}")
-            logger.info(f"Timeout: {self.timeout}")
-            logger.info(f"Retries: {self.connection_retries}")
-
-            for attempt in range(self.connection_retries):
-                try:
-                    logger.info("─" * 70)
-                    logger.info(
-                        f"ATTEMPT {attempt + 1}/{self.connection_retries}"
-                    )
-                    logger.info("─" * 70)
-
-                    # Open serial connection
-                    logger.info(f"[1/5] Opening serial port: {self.port}")
-                    self.arduino = serial.Serial(
-                        port=self.port,
-                        baudrate=self.baud_rate,
-                        timeout=self.timeout,
-                        write_timeout=self.timeout
-                    )
-                    logger.info("    ✓ serial.Serial() succeeded")
-                    logger.info(f"    Port is open: {self.arduino.is_open}")
-
-                    # Wait for Arduino to reset after connection
-                    logger.info("[2/5] Waiting for Arduino reset (2.5s)...")
-                    time.sleep(2.5)
-                    logger.info("    ✓ Reset wait complete")
-
-                    # Clear any buffered data
-                    logger.info("[3/5] Clearing buffers...")
-                    self.arduino.reset_input_buffer()
-                    self.arduino.reset_output_buffer()
-                    logger.info("    ✓ Buffers cleared")
-
-                    # Mark as initialized
-                    logger.info("[4/5] Setting initialized flag...")
-                    self.initialized = True
-                    logger.info(f"    ✓ self.initialized = {self.initialized}")
-
-                    logger.info("[5/5] Connection complete!")
-                    logger.info("=" * 70)
-                    logger.info("CONNECTION SUCCESS")
-                    logger.info("=" * 70)
-                    logger.info("✓ Serial port opened successfully")
-                    logger.info("✓ Write-only mode - connection ready")
-                    logger.info("✓ Use GUI buttons to test servo movement")
-                    logger.info("=" * 70)
-
-                    return True
-
-                except serial.SerialException as e:
-                    logger.error("=" * 70)
-                    logger.error(f"CONNECTION ATTEMPT {attempt + 1} FAILED")
-                    logger.error("=" * 70)
-                    logger.error(f"Error type: {type(e).__name__}")
-                    logger.error(f"Error message: {e}")
-                    logger.error("=" * 70)
-
-                    if self.arduino:
-                        try:
-                            self.arduino.close()
-                        except:
-                            pass
-                        self.arduino = None
-
-                except Exception as e:
-                    logger.error("=" * 70)
-                    logger.error(f"UNEXPECTED ERROR IN ATTEMPT {attempt + 1}")
-                    logger.error("=" * 70)
-                    logger.error(f"Error type: {type(e).__name__}")
-                    logger.error(f"Error message: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-                    logger.error("=" * 70)
-
-                    if self.arduino:
-                        try:
-                            self.arduino.close()
-                        except:
-                            pass
-                        self.arduino = None
-
-                # Wait before retry
-                if attempt < self.connection_retries - 1:
-                    logger.info(f"Retrying in {self.retry_delay} seconds...")
-                    time.sleep(self.retry_delay)
-
-            # All connection attempts failed
-            logger.error("=" * 70)
-            logger.error("ALL CONNECTION ATTEMPTS FAILED")
-            logger.error("=" * 70)
-            logger.error("✗ Failed to open serial port after all attempts")
-            logger.error(f"Port: {self.port}")
-            logger.error(f"Attempts: {self.connection_retries}")
-            logger.error("")
-            logger.error("TROUBLESHOOTING:")
-            logger.error("  1. Check Arduino is plugged in")
-            logger.error("  2. Verify correct port is selected")
-            logger.error("  3. Close Arduino IDE or other serial programs")
-            logger.error("  4. Check port permissions")
-            logger.error("  5. Try unplugging/replugging Arduino")
-            logger.error("  6. Run: ls -l /dev/cu.* to see available ports")
-            logger.error("=" * 70)
-
-            self.initialized = False
-            return False
-
-    def disconnect(self):
-        """Safely disconnect from Arduino."""
-        with self.lock:
-            if self.arduino:
-                try:
-                    logger.info("Disconnecting from Arduino...")
-
-                    # Move to safe position first
-                    self.home()
-                    time.sleep(0.5)
-
-                    # Close connection
-                    self.arduino.close()
-                    self.arduino = None
-                    self.initialized = False
-
-                    logger.info("Arduino disconnected")
-
-                except Exception as e:
-                    logger.error(f"Error during disconnect: {e}")
 
     def _send_command(self, angle: int) -> bool:
         """
-        Send movement command to Arduino (write-only).
-
-        Command format: "A,{angle}\n"
+        Send servo movement command to Arduino via the shared connection.
 
         Args:
             angle: Target angle (already validated by caller)
 
         Returns:
-            True if command sent successfully, False if send failed
+            True if command sent successfully
         """
-        with self.lock:
-            if self.simulation_mode:
-                logger.debug(f"[SIMULATION] Command: A,{angle}")
-                return True
-
-            if not self.arduino:
-                logger.error("No Arduino connection")
-                return False
-
-            try:
-                # Format and send command
-                command = f"A,{angle}\n"
-                self.arduino.write(command.encode())
-                self.arduino.flush()  # Ensure data is sent immediately
-
-                logger.debug(f"Sent: {command.strip()}")
-                return True
-
-            except Exception as e:
-                logger.error(f"Failed to send command A,{angle}: {e}")
-                return False
+        return self.connection.send_command('A', angle)
 
     # ========================================================================
     # SECTION 2: SERVO MOVEMENT CONTROL
@@ -332,15 +141,9 @@ class ArduinoServoController:
                 logger.error(f"Angle {angle} out of range [{self.min_angle}-{self.max_angle}]")
                 return False
 
-            # Simulation mode
-            if self.simulation_mode:
-                logger.info(f"[SIMULATION] Moving servo to {angle}°")
-                self.current_angle = angle
-                return True
-
-            # Hardware mode - check initialization
-            if not self.initialized:
-                logger.error("Arduino not initialized - cannot move servo")
+            # Check connection
+            if not self.connection.is_connected():
+                logger.error("Arduino not connected - cannot move servo")
                 return False
 
             try:
@@ -667,33 +470,25 @@ class ArduinoServoController:
     def get_current_position(self) -> Dict:
         """Get current servo state information."""
         with self.lock:
+            conn = self.connection.get_status()
             return {
                 'angle': self.current_angle,
                 'bin': self.current_bin,
-                'initialized': self.initialized,
-                'simulation': self.simulation_mode
+                'initialized': self.connection.is_connected(),
+                'simulation': self.connection.is_simulation()
             }
 
     def is_ready(self) -> bool:
-        """
-        Check if servo is ready for operations.
-
-        Returns True if:
-        - Simulation mode is enabled, OR
-        - Serial port opened successfully
-        """
-        return self.initialized
+        """True if the shared Arduino connection is up (or in simulation)."""
+        return self.connection.is_connected()
 
     def get_statistics(self) -> Dict:
         """Get comprehensive servo statistics and configuration."""
+        conn = self.connection.get_status()
         return {
-            'initialized': self.initialized,
-            'simulation_mode': self.simulation_mode,
-            'connection': {
-                'port': self.port,
-                'baud_rate': self.baud_rate,
-                'connected': self.arduino is not None
-            },
+            'initialized': self.connection.is_connected(),
+            'simulation_mode': self.connection.is_simulation(),
+            'connection': conn,
             'servo': {
                 'current_angle': self.current_angle,
                 'current_bin': self.current_bin,
@@ -743,15 +538,16 @@ class ArduinoServoController:
 
     def _log_initialization_status(self):
         """Log detailed initialization status."""
+        conn = self.connection.get_status()
         logger.info("=" * 60)
         logger.info("ARDUINO SERVO CONTROLLER INITIALIZED")
         logger.info("=" * 60)
-        logger.info(f"Mode: {'SIMULATION' if self.simulation_mode else 'HARDWARE (WRITE-ONLY)'}")
-        logger.info(f"Ready: {self.initialized}")
+        logger.info(f"Mode: {'SIMULATION' if conn['simulation_mode'] else 'HARDWARE (WRITE-ONLY)'}")
+        logger.info(f"Ready: {self.connection.is_connected()}")
 
-        if not self.simulation_mode:
-            logger.info(f"Port: {self.port}")
-            logger.info(f"Baud Rate: {self.baud_rate}")
+        if not conn['simulation_mode']:
+            logger.info(f"Port: {conn['port']}")
+            logger.info(f"Baud Rate: {conn['baud_rate']}")
 
         logger.info(f"Servo Range: {self.min_angle}° - {self.max_angle}°")
         logger.info(f"Default Position: {self.default_position}°")
@@ -767,16 +563,11 @@ class ArduinoServoController:
         """
         Clean shutdown of servo controller.
 
-        Returns servo to home position and closes serial connection.
+        Returns servo to home position.  The shared ArduinoConnection is
+        closed by whoever owns it (typically hardware_coordinator).
         """
         logger.info("Releasing Arduino servo controller")
-
-        # Return to safe position
         self.home()
-
-        # Disconnect from Arduino
-        self.disconnect()
-
         logger.info("Arduino servo controller released")
 
 
@@ -784,14 +575,18 @@ class ArduinoServoController:
 # FACTORY FUNCTION
 # ============================================================================
 
-def create_arduino_servo_controller(config_manager: EnhancedConfigManager) -> ArduinoServoController:
+def create_arduino_servo_controller(
+    config_manager: EnhancedConfigManager,
+    connection: 'ArduinoConnection'
+) -> ArduinoServoController:
     """
     Factory function to create ArduinoServoController instance.
 
     Args:
         config_manager: Enhanced configuration manager
+        connection:     Shared ArduinoConnection instance
 
     Returns:
         Initialized ArduinoServoController instance
     """
-    return ArduinoServoController(config_manager)
+    return ArduinoServoController(config_manager, connection)

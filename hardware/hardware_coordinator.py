@@ -73,7 +73,8 @@ class HardwareCoordinator:
     capacity displays in real-time.
     """
 
-    def __init__(self, bin_capacity_manager, servo_controller, config_manager: EnhancedConfigManager):
+    def __init__(self, bin_capacity_manager, servo_controller,
+                 config_manager: EnhancedConfigManager, motor_controller=None):
         """
         Initialize hardware coordinator with hardware module references.
 
@@ -81,14 +82,14 @@ class HardwareCoordinator:
             bin_capacity_manager: BinCapacityManager instance for tracking bin fill levels
             servo_controller: ArduinoServoController instance for moving servo
             config_manager: EnhancedConfigManager instance for configuration
+            motor_controller: ArduinoMotorController instance (optional)
         """
         # ============================================================
         # STORE REFERENCES TO HARDWARE MODULES
         # ============================================================
-        # These modules do the actual hardware operations
-        # We coordinate them but don't replace their functionality
         self.bin_capacity = bin_capacity_manager
         self.servo = servo_controller
+        self.motor = motor_controller
         self.config_manager = config_manager
 
         # Create chute state manager
@@ -126,8 +127,19 @@ class HardwareCoordinator:
         # Each callback should be a function that accepts a bin_number
         self.sort_callbacks: List[Callable[[int], None]] = []
 
+        # ============================================================
+        # START MOTORS (if motor controller provided and auto_start set)
+        # ============================================================
+        if self.motor:
+            from enhanced_config_manager import ModuleConfig as _MC
+            motor_config = config_manager.get_module_config(_MC.ARDUINO_MOTOR.value)
+            if motor_config.get('auto_start', True):
+                logger.info("Auto-starting motors...")
+                self.motor.start_all()
+
         logger.info("Hardware coordinator initialized with chute state manager")
         logger.info(f"  Overflow bin: {self.overflow_bin}")
+        logger.info(f"  Motor controller: {'present' if self.motor else 'not configured'}")
 
     # ========================================================================
     # CALLBACK REGISTRATION AND NOTIFICATION
@@ -433,6 +445,33 @@ class HardwareCoordinator:
         logger.info("=" * 60)
 
     # ========================================================================
+    # MOTOR CONTROL (pass-through to ArduinoMotorController)
+    # ========================================================================
+
+    def set_motor_speed(self, motor_letter: str, speed_pct: int) -> bool:
+        """
+        Adjust a single motor speed at runtime (e.g. from the setup GUI).
+
+        Args:
+            motor_letter: 'B' (conveyor), 'C', 'D', or 'E' (feeders)
+            speed_pct:    Speed percentage — 0 = stop, 30–100 = running
+
+        Returns:
+            True if command sent successfully, False if no motor controller
+            is configured or the command fails.
+        """
+        if self.motor:
+            return self.motor.set_motor_speed(motor_letter, speed_pct)
+        logger.warning("set_motor_speed called but no motor controller is configured")
+        return False
+
+    def reload_motor_speeds(self) -> bool:
+        """Re-read motor speeds from config and apply them (for GUI updates)."""
+        if self.motor:
+            return self.motor.reload_speeds_from_config()
+        return False
+
+    # ========================================================================
     # CLEANUP
     # ========================================================================
 
@@ -442,6 +481,10 @@ class HardwareCoordinator:
 
         # Reset chute state
         self.chute_state_manager.reset()
+
+        # Stop all motors before homing the servo
+        if self.motor:
+            self.motor.release()
 
         # Return servo to home position
         if self.servo:
@@ -456,7 +499,8 @@ class HardwareCoordinator:
 # It's called during application startup.
 
 def create_hardware_coordinator(bin_capacity_manager, servo_controller,
-                                config_manager: EnhancedConfigManager) -> HardwareCoordinator:
+                                config_manager: EnhancedConfigManager,
+                                motor_controller=None) -> HardwareCoordinator:
     """
     Factory function to create HardwareCoordinator instance.
 
@@ -476,8 +520,8 @@ def create_hardware_coordinator(bin_capacity_manager, servo_controller,
 
     Example:
         # During application startup in LegoSorting008:
-        bin_capacity = create_bin_capacity_manager(config_manager)
-        servo = create_arduino_servo_controller(config_manager)
+        connection = create_arduino_connection(config_manager)
+        servo = create_arduino_servo_controller(config_manager, connection)
 
         # Create the hardware coordinator
         hardware_coordinator = create_hardware_coordinator(
@@ -498,4 +542,5 @@ def create_hardware_coordinator(bin_capacity_manager, servo_controller,
         # When piece exits ROI:
         hardware_coordinator.notify_piece_exited(piece_id=123)
     """
-    return HardwareCoordinator(bin_capacity_manager, servo_controller, config_manager)
+    return HardwareCoordinator(bin_capacity_manager, servo_controller,
+                               config_manager, motor_controller)

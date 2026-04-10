@@ -40,6 +40,7 @@ class ModuleConfig(Enum):
     SORTING = "sorting"
     SERVO = "servo"
     ARDUINO_SERVO = "arduino_servo"
+    ARDUINO_MOTOR = "arduino_motor"
     API = "api"
     SYSTEM = "system"
     UI = "ui"
@@ -203,6 +204,25 @@ class ConfigSchema:
             },
 
             # =================================================================
+            # ARDUINO MOTOR MODULE
+            # Used by: hardware/arduino_motor_module.py
+            # Controls: DC motor speeds for feeders and conveyor belt via L298N
+            #
+            # Speed values are percentages (0–100):
+            #   0        → motor stopped
+            #   1–29     → clamped to min_duty_pct at runtime to prevent stall
+            #   30–100   → running (maps linearly to PWM 77–255)
+            # =================================================================
+            ModuleConfig.ARDUINO_MOTOR.value: {
+                "conveyor_speed_pct":  60,   # Motor B — conveyor belt
+                "feeder_c_speed_pct":  60,   # Motor C — rotary feeder C
+                "feeder_d_speed_pct":  60,   # Motor D — rotary feeder D
+                "feeder_e_speed_pct":  60,   # Motor E — future feeder (unused)
+                "min_duty_pct":        30,   # Stall-prevention floor (%)
+                "auto_start":          True, # Start motors when coordinator starts
+            },
+
+            # =================================================================
             # API MODULE
             # Used by: identification_api_handler.py
             # Controls: Brickognize API communication
@@ -318,6 +338,7 @@ class ConfigSchema:
             ModuleConfig.SORTING.value: ["strategy", "max_bins"],
             ModuleConfig.API.value: ["api_type"],
             ModuleConfig.ARDUINO_SERVO.value: ["port", "baud_rate"],
+            ModuleConfig.ARDUINO_MOTOR.value: [],  # all fields have safe defaults
             ModuleConfig.PIECE_IDENTIFIER.value: ["csv_path"]
         }
         return required.get(module_name, [])
