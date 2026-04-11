@@ -217,11 +217,22 @@ class ConfigSchema:
                 "retry_delay": 1.0,      # Seconds between retries
                 "simulation_mode": False, # Run without real hardware (testing)
 
-                # Motor speed parameters (0-255 PWM duty cycle)
-                "default_speed": 128,    # Default running speed (0-255)
-                "min_speed": 0,          # Minimum speed (0 = stop)
+                # Multi-motor configuration
+                # Command format: "M,{motor_id},{speed}\n"  (speed 0-255)
+                "num_motors": 2,         # Total number of independently controlled motors
+                "motor_names": {         # Display label per motor index (string keys)
+                    "0": "Conveyor Belt",
+                    "1": "Feeder",
+                },
+                "default_speeds": {      # Per-motor default running speed (0-255)
+                    "0": 128,
+                    "1": 100,
+                },
+
+                # Shared speed limits applied to all motors
+                "min_speed": 0,          # Minimum speed cap (0 = allow full stop)
                 "max_speed": 255,        # Maximum speed cap
-                "ramp_rate": 32,         # Speed step size for ramp tests
+                "ramp_rate": 32,         # Step size used by the ramp test
             },
 
             # =================================================================
