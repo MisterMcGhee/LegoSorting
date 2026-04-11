@@ -39,6 +39,7 @@ from GUI.config_tabs.api_tab import APIConfigTab
 from GUI.config_tabs.detector_tab import DetectorConfigTab
 from GUI.config_tabs.processing_tab import ProcessingConfigTab
 from GUI.config_tabs.hardware_tab import HardwareConfigTab
+from GUI.config_tabs.motor_tab import MotorConfigTab
 
 # Import modules
 from enhanced_config_manager import EnhancedConfigManager
@@ -71,7 +72,7 @@ class ConfigurationGUI(QMainWindow):
 
     def __init__(self, config_manager: EnhancedConfigManager,
                  camera=None, arduino=None, category_service=None,
-                 parent=None):
+                 motor=None, parent=None):
         """
         Initialize the configuration GUI.
 
@@ -89,6 +90,7 @@ class ConfigurationGUI(QMainWindow):
         self.camera = camera
         self.arduino = arduino
         self.category_service = category_service
+        self.motor = motor
 
         # Log what we received
         logger.info("=" * 60)
@@ -97,6 +99,7 @@ class ConfigurationGUI(QMainWindow):
         logger.info(f"  camera: {camera is not None}")
         logger.info(f"  arduino: {arduino is not None}")
         logger.info(f"  category_service: {category_service is not None}")
+        logger.info(f"  motor: {motor is not None}")
         if category_service is not None:
             logger.info(f"  category_service type: {type(category_service)}")
         logger.info("=" * 60)
@@ -403,6 +406,9 @@ class ConfigurationGUI(QMainWindow):
 
         self.add_tab("Hardware", HardwareConfigTab, self.config_manager,
                      arduino_module=self.arduino)
+
+        self.add_tab("Motor", MotorConfigTab, self.config_manager,
+                     motor_module=self.motor)
 
         logger.info(f"✓ Created {len(self.tabs)} configuration tabs")
 

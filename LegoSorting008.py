@@ -88,6 +88,7 @@ from processing.processing_data_models import IdentifiedPiece
 # Hardware pipeline modules
 from hardware.hardware_coordinator import HardwareCoordinator, create_hardware_coordinator
 from hardware.arduino_servo_module import create_arduino_servo_controller
+from hardware.conveyor_motor_module import create_conveyor_motor_controller
 from hardware.bin_capacity_module import create_bin_capacity_manager
 from hardware.chute_state_manager import create_chute_state_manager
 
@@ -195,6 +196,7 @@ class LegoSorting008(QObject):
         self.hardware_coordinator: Optional[HardwareCoordinator] = None
         self.hardware_controller = None  # Alias for GUI compatibility
         self.servo_controller = None
+        self.motor_controller = None
         self.bin_capacity_manager = None
         self.bin_assignment_module = None
 
@@ -242,13 +244,21 @@ class LegoSorting008(QObject):
         except Exception as e:
             logger.warning(f"  ⚠ Could not create temporary category service: {e}")
 
+        temp_motor = None
+        try:
+            temp_motor = create_conveyor_motor_controller(self.config_manager)
+            logger.info("  ✓ Temporary motor controller created")
+        except Exception as e:
+            logger.warning(f"  ⚠ Could not create temporary motor controller: {e}")
+
         # Create configuration GUI with temporary modules
         logger.info("Creating configuration GUI with temporary modules...")
         self.config_gui = ConfigurationGUI(
             self.config_manager,
             camera=temp_camera,
             arduino=temp_arduino,
-            category_service=temp_category_service
+            category_service=temp_category_service,
+            motor=temp_motor
         )
 
         # Connect signals
@@ -427,6 +437,10 @@ class LegoSorting008(QObject):
             # Create servo controller
             self.servo_controller = create_arduino_servo_controller(self.config_manager)
             logger.info("  ✓ Servo controller created")
+
+            # Create conveyor motor controller
+            self.motor_controller = create_conveyor_motor_controller(self.config_manager)
+            logger.info("  ✓ Conveyor motor controller created")
 
             # Create hardware coordinator
             self.hardware_coordinator = create_hardware_coordinator(

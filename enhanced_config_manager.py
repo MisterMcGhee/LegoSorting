@@ -40,6 +40,7 @@ class ModuleConfig(Enum):
     SORTING = "sorting"
     SERVO = "servo"
     ARDUINO_SERVO = "arduino_servo"
+    MOTOR = "motor"
     API = "api"
     SYSTEM = "system"
     UI = "ui"
@@ -200,6 +201,27 @@ class ConfigSchema:
 
                 # Bin position mapping
                 "bin_positions": {}  # Calibrated positions: {bin_number: angle}
+            },
+
+            # =================================================================
+            # MOTOR MODULE
+            # Used by: conveyor_motor_module.py
+            # Controls: Conveyor belt DC motor speed via serial Arduino
+            # =================================================================
+            ModuleConfig.MOTOR.value: {
+                # Connection settings (separate serial port from servo Arduino)
+                "port": "",              # Serial port (e.g., "COM4" or "/dev/cu.usbmodem...")
+                "baud_rate": 57600,      # Serial communication speed
+                "timeout": 1.0,          # Serial timeout in seconds
+                "connection_retries": 3, # Connection retry attempts
+                "retry_delay": 1.0,      # Seconds between retries
+                "simulation_mode": False, # Run without real hardware (testing)
+
+                # Motor speed parameters (0-255 PWM duty cycle)
+                "default_speed": 128,    # Default running speed (0-255)
+                "min_speed": 0,          # Minimum speed (0 = stop)
+                "max_speed": 255,        # Maximum speed cap
+                "ramp_rate": 32,         # Speed step size for ramp tests
             },
 
             # =================================================================
