@@ -66,6 +66,76 @@ class CombinedMeta(type(QWidget), ABCMeta):
 
 
 # ============================================================================
+# LEGO COLOR LOOKUP
+# ============================================================================
+
+# Approximate CSS hex colors for common LEGO color names (lowercase keys).
+# Used to render color swatches in camera overlays and side panels.
+LEGO_COLOR_HEX: Dict[str, str] = {
+    "white":              "#FFFFFF",
+    "black":              "#2A2A34",
+    "red":                "#C4281C",
+    "bright red":         "#C4281C",
+    "dark red":           "#7B3B3A",
+    "yellow":             "#F5CD2F",
+    "bright yellow":      "#F5CD2F",
+    "blue":               "#0057A6",
+    "bright blue":        "#0057A6",
+    "dark blue":          "#00296B",
+    "green":              "#009246",
+    "bright green":       "#009246",
+    "dark green":         "#00451A",
+    "orange":             "#D67923",
+    "bright orange":      "#D67923",
+    "light gray":         "#9C9291",
+    "light bluish gray":  "#9C9291",
+    "dark gray":          "#5F5B52",
+    "dark bluish gray":   "#5F5B52",
+    "tan":                "#DEC69C",
+    "brown":              "#583927",
+    "reddish brown":      "#583927",
+    "dark brown":         "#352100",
+    "lime":               "#A2CA2E",
+    "lime green":         "#A2CA2E",
+    "pink":               "#FC97AC",
+    "bright pink":        "#FC97AC",
+    "purple":             "#813782",
+    "dark purple":        "#431770",
+    "medium lavender":    "#A06EB9",
+    "magenta":            "#C8579F",
+    "cyan":               "#00AAE4",
+    "medium azure":       "#42C0FB",
+    "sand green":         "#789F8A",
+    "sand blue":          "#6A7994",
+    "medium blue":        "#73A9DD",
+    "maersk blue":        "#3DAEE9",
+    "dark azure":         "#078BC9",
+    "medium dark flesh":  "#CC8E69",
+}
+
+_DEFAULT_LEGO_COLOR_HEX = "#808080"  # Gray fallback for unknown colors
+
+
+def _hex_to_bgr(hex_color: str) -> Tuple[int, int, int]:
+    """Convert a CSS hex color string to an OpenCV BGR tuple."""
+    hex_color = hex_color.lstrip("#")
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return (b, g, r)
+
+
+def get_lego_color_hex(color_name: str) -> str:
+    """Return the approximate CSS hex color for a LEGO color name."""
+    return LEGO_COLOR_HEX.get(color_name.lower(), _DEFAULT_LEGO_COLOR_HEX)
+
+
+def get_lego_color_bgr(color_name: str) -> Tuple[int, int, int]:
+    """Return the approximate OpenCV BGR tuple for a LEGO color name."""
+    return _hex_to_bgr(get_lego_color_hex(color_name))
+
+
+# ============================================================================
 # DEFAULT STYLING CONSTANTS
 # ============================================================================
 
@@ -651,9 +721,6 @@ class CameraViewTracking(BaseCameraViewWidget):
         # Draw piece ID if available
         if hasattr(piece, 'id'):
             label = f"ID: {piece.id}"
-            # TODO: Once identified (blue box state), append color name or design_id
-            # to the label so the live view shows e.g. "ID: 42  Red 3001".
-            # Requires accessing the identified_pieces_dict from the orchestrator.
             cv2.putText(frame, label, (x, y - 5),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
@@ -1119,7 +1186,7 @@ class CameraViewSorting(CameraViewUnited):
         complete sorting view with:
         1. ROI rectangle and zones (from parent)
         2. Color-coded piece bounding boxes (custom logic)
-        3. Piece ID labels
+        3. Rich info labels: piece name, design ID, color (with swatch), bin
 
         The color of each piece's bounding box reflects its current state
         in the processing pipeline, providing real-time visual feedback.
@@ -1133,7 +1200,7 @@ class CameraViewSorting(CameraViewUnited):
         # Start with parent's ROI and zone overlays
         display_frame = super().process_frame(frame)
 
-        # Draw tracked pieces with custom color-coding
+        # Draw tracked pieces with custom color-coding and rich labels
         if self.tracked_pieces:
             for piece in self.tracked_pieces:
                 piece_id = piece.get('id')
@@ -1148,12 +1215,136 @@ class CameraViewSorting(CameraViewUnited):
                     # Draw bounding box
                     cv2.rectangle(display_frame, (x, y), (x + w, y + h), color, 2)
 
-                    # Draw piece ID label with colored background
-                    label = f"ID:{piece_id}"
-                    label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
-                    cv2.rectangle(display_frame, (x, y - label_size[1] - 5),
-                                  (x + label_size[0], y), color, -1)
-                    cv2.putText(display_frame, label, (x, y - 3),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    # Draw rich label (piece name + color + bin for identified pieces,
+                    # or just the ID for pieces still being detected/processed)
+                    self._draw_piece_label(display_frame, piece_id, x, y, w, h, color)
 
         return display_frame
+
+    # ========================================================================
+    # PIECE LABEL DRAWING
+    # ========================================================================
+
+    def _draw_piece_label(self, frame: np.ndarray, piece_id,
+                          x: int, y: int, w: int, h: int,
+                          box_color: Tuple[int, int, int]) -> None:
+        """
+        Draw a label above (or below) the piece bounding box.
+
+        Identified pieces get a rich multi-line label showing name, design ID,
+        LEGO color with a color swatch, and bin assignment.  All other pieces
+        get a compact "ID:N" label so the display stays uncluttered.
+
+        Args:
+            frame: Frame to annotate in-place
+            piece_id: Piece identifier used to look up identification data
+            x, y, w, h: Bounding box in frame coordinates
+            box_color: BGR color matching the bounding box stroke
+        """
+        identified_piece = self.identified_pieces_dict.get(piece_id)
+        if identified_piece is not None:
+            self._draw_identified_piece_label(frame, identified_piece, x, y, w, h, box_color)
+        else:
+            # Compact ID-only label for pieces not yet identified
+            label = f"ID:{piece_id}"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.45
+            lw, lh = cv2.getTextSize(label, font, font_scale, 1)[0]
+            pad = 3
+            lx = x
+            ly = y - lh - pad * 2 - 2
+            if ly < 2:
+                ly = y + h + 2
+            cv2.rectangle(frame, (lx, ly), (lx + lw + pad * 2, ly + lh + pad * 2),
+                          box_color, -1)
+            cv2.putText(frame, label, (lx + pad, ly + lh + pad - 1),
+                        font, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
+
+    def _draw_identified_piece_label(self, frame: np.ndarray, identified_piece,
+                                     x: int, y: int, w: int, h: int,
+                                     box_color: Tuple[int, int, int]) -> None:
+        """
+        Draw a multi-line info badge for a fully identified piece.
+
+        The badge shows:
+          Line 1 — Part name (truncated to 22 chars)
+          Line 2 — Design ID prefixed with '#'
+          Line 3 — LEGO color name
+          Line 4 — Bin assignment (e.g. '→ Bin 3' or '→ Overflow')
+
+        A color swatch strip is drawn on the right edge of the badge using
+        the approximate LEGO color for immediate visual reference.
+
+        Args:
+            frame: Frame to annotate in-place
+            identified_piece: IdentifiedPiece with name/color/bin data
+            x, y, w, h: Bounding box in frame coordinates
+            box_color: BGR color for the badge background
+        """
+        # --- Extract piece data ---
+        name = getattr(identified_piece, 'name', None) or "Unknown"
+        design_id = getattr(identified_piece, 'design_id', None) or ""
+        color_name = getattr(identified_piece, 'color_name', None) or ""
+        bin_num = getattr(identified_piece, 'bin_number', None)
+
+        # Truncate long names so the badge stays compact
+        display_name = (name[:22] + "..") if len(name) > 22 else name
+
+        # Build label lines (only include populated fields)
+        lines: List[str] = [display_name]
+        if design_id:
+            lines.append(f"#{design_id}")
+        if color_name:
+            lines.append(color_name)
+        if bin_num is not None:
+            bin_text = "Overflow" if bin_num == 0 else f"Bin {bin_num}"
+            lines.append(f"\u2192 {bin_text}")
+
+        if not lines:
+            return
+
+        # --- Typography ---
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.38
+        thickness = 1
+        line_h = 13
+        pad = 4
+
+        # Measure text to size the badge
+        text_widths = [
+            cv2.getTextSize(line, font, font_scale, thickness)[0][0]
+            for line in lines
+        ]
+        max_text_w = max(text_widths) if text_widths else 60
+
+        # Reserve a narrow strip on the right for the LEGO color swatch
+        swatch_w = 12 if color_name else 0
+        total_w = max_text_w + pad * 2 + swatch_w
+        total_h = len(lines) * line_h + pad * 2
+
+        # --- Position badge above the bounding box; fall back to below ---
+        frame_h, frame_w = frame.shape[:2]
+        lx = max(0, min(x, frame_w - total_w - 2))
+        ly = y - total_h - 4
+        if ly < 2:
+            ly = y + h + 4
+
+        # --- Draw badge background and border ---
+        cv2.rectangle(frame, (lx, ly), (lx + total_w, ly + total_h), box_color, -1)
+        cv2.rectangle(frame, (lx, ly), (lx + total_w, ly + total_h), (0, 0, 0), 1)
+
+        # --- Draw LEGO color swatch on the right edge ---
+        if color_name:
+            swatch_bgr = get_lego_color_bgr(color_name)
+            swatch_x = lx + total_w - swatch_w
+            cv2.rectangle(frame,
+                          (swatch_x, ly + 1),
+                          (lx + total_w - 1, ly + total_h - 1),
+                          swatch_bgr, -1)
+            cv2.line(frame, (swatch_x, ly), (swatch_x, ly + total_h), (0, 0, 0), 1)
+
+        # --- Draw each text line ---
+        for i, line in enumerate(lines):
+            text_y = ly + pad + (i + 1) * line_h - 2
+            cv2.putText(frame, line, (lx + pad, text_y),
+                        font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)

@@ -62,7 +62,7 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QSize
 from PyQt5.QtGui import QFont, QPixmap, QImage, QPainter, QPen, QColor
 
 # Import widgets - using self-configuring CameraViewSorting and BinStatusWidget
-from GUI.widgets.camera_view import CameraViewSorting, ViewStyles
+from GUI.widgets.camera_view import CameraViewSorting, ViewStyles, get_lego_color_hex
 from GUI.widgets.bin_status import BinStatusWidget
 from GUI.widgets.gui_styles import SortingGUIStyles
 
@@ -334,6 +334,37 @@ class RecentlyProcessedPanel(QGroupBox):
         ))
         info_layout.addWidget(self.design_id_label)
 
+        # Color row: small swatch square + color name
+        color_row = QHBoxLayout()
+        color_row.setSpacing(6)
+        color_row.setContentsMargins(0, 0, 0, 0)
+
+        self.color_swatch = QLabel()
+        self.color_swatch.setFixedSize(16, 16)
+        self.color_swatch.setStyleSheet("""
+            QLabel {
+                background-color: #555555;
+                border: 1px solid #888888;
+                border-radius: 2px;
+            }
+        """)
+        color_row.addWidget(self.color_swatch)
+
+        self.color_label = QLabel("Color: -")
+        self.color_label.setStyleSheet(SortingGUIStyles.get_label_style(
+            size=11, color=SortingGUIStyles.TEXT_SECONDARY
+        ))
+        color_row.addWidget(self.color_label)
+        color_row.addStretch()
+        info_layout.addLayout(color_row)
+
+        # Confidence display
+        self.confidence_label = QLabel("Confidence: -")
+        self.confidence_label.setStyleSheet(SortingGUIStyles.get_label_style(
+            size=9, color=SortingGUIStyles.TEXT_MUTED
+        ))
+        info_layout.addWidget(self.confidence_label)
+
         self.bin_label = QLabel("→ Bin: -")
         self.bin_label.setStyleSheet(SortingGUIStyles.get_label_style(
             size=12, bold=True, color=SortingGUIStyles.COLOR_PRIMARY
@@ -390,6 +421,35 @@ class RecentlyProcessedPanel(QGroupBox):
 
             design_id = identified_piece.design_id if identified_piece.design_id else "?"
             self.design_id_label.setText(f"Design ID: {design_id}")
+
+            # Color name + swatch
+            color_name = identified_piece.color_name if identified_piece.color_name else None
+            if color_name:
+                self.color_label.setText(f"Color: {color_name}")
+                hex_color = get_lego_color_hex(color_name)
+                self.color_swatch.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {hex_color};
+                        border: 1px solid #888888;
+                        border-radius: 2px;
+                    }}
+                """)
+            else:
+                self.color_label.setText("Color: Unknown")
+                self.color_swatch.setStyleSheet("""
+                    QLabel {
+                        background-color: #555555;
+                        border: 1px solid #888888;
+                        border-radius: 2px;
+                    }
+                """)
+
+            # Identification confidence
+            confidence = identified_piece.identification_confidence
+            if confidence is not None:
+                self.confidence_label.setText(f"Confidence: {confidence:.0%}")
+            else:
+                self.confidence_label.setText("Confidence: -")
 
             bin_num = identified_piece.bin_number
             if bin_num == 0:
