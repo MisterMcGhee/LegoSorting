@@ -1,0 +1,141 @@
+{
+    "validation": {
+        "strict_mode": false,
+        "auto_fix": true
+    },
+    "camera": {
+        "device_id": 0,
+        "buffer_size": 1,
+        "width": 1920,
+        "height": 1080,
+        "fps": 30,
+        "auto_exposure": true
+    },
+    "detector": {
+        "detector_type": "conveyor",
+        "min_area": 1000,
+        "max_area": 50000,
+        "min_aspect_ratio": 0.3,
+        "max_aspect_ratio": 3.0,
+        "edge_margin": 10,
+        "debug_mode": false,
+        "bg_history": 500,
+        "bg_threshold": 800.0,
+        "learn_rate": 0.005,
+        "gaussian_blur_size": 7,
+        "morph_kernel_size": 5,
+        "min_contour_points": 5,
+        "match_distance_threshold": 100.0,
+        "match_x_weight": 2.0,
+        "match_y_weight": 1.0,
+        "min_updates_for_stability": 3,
+        "piece_timeout_seconds": 2.0,
+        "fully_in_frame_margin": 20,
+        "min_velocity_samples": 2,
+        "max_velocity_change": 50.0,
+        "entry_zone_percent": 0.15,
+        "exit_zone_percent": 0.15,
+        "zone_transition_debounce": 0.1,
+        "min_stability_updates": 5,
+        "capture_cooldown_seconds": 0.5,
+        "max_concurrent_processing": 3,
+        "crop_padding": 20,
+        "id_label_height": 40,
+        "id_font_scale": 1.5,
+        "id_font_thickness": 2,
+        "save_captured_images": true,
+        "capture_directory": "LegoPictures"
+    },
+    "detector_roi": {
+        "x": 125,
+        "y": 200,
+        "w": 1550,
+        "h": 500,
+        "entry_zone_width": 150,
+        "exit_zone_width": 150
+    },
+    "sorting": {
+        "strategy": "primary",
+        "target_primary_category": "",
+        "target_secondary_category": "",
+        "max_bins": 7,
+        "overflow_bin": 0,
+        "confidence_threshold": 0.7,
+        "pre_assignments": {},
+        "max_pieces_per_bin": 50,
+        "bin_warning_threshold": 0.8
+    },
+    "servo": {},
+    "arduino_servo": {
+        "port": "",
+        "baud_rate": 57600,
+        "timeout": 1.0,
+        "connection_retries": 3,
+        "retry_delay": 1.0,
+        "simulation_mode": false,
+        "min_pulse": 500,
+        "max_pulse": 2500,
+        "default_position": 90,
+        "min_bin_separation": 20,
+        "bin_positions": {}
+    },
+    "motor": {
+        "port": "",
+        "baud_rate": 57600,
+        "timeout": 1.0,
+        "connection_retries": 3,
+        "retry_delay": 1.0,
+        "simulation_mode": false,
+        "default_speed": 128,
+        "min_speed": 0,
+        "max_speed": 255,
+        "ramp_rate": 32
+    },
+    "api": {
+        "api_type": "rebrickable",
+        "api_key": "",
+        "cache_enabled": true,
+        "cache_dir": "api_cache",
+        "timeout": 10.0,
+        "retry_count": 3,
+        "rate_limit": 5.0,
+        "color_confidence_threshold": 0.5
+    },
+    "system": {
+        "threading_enabled": true,
+        "log_level": "INFO"
+    },
+    "ui": {
+        "display_enabled": true,
+        "window_width": 1280,
+        "window_height": 720,
+        "show_debug_info": false,
+        "show_fps": true,
+        "overlay_alpha": 0.7
+    },
+    "gui_settings": {
+        "theme": "dark",
+        "auto_save": true,
+        "save_interval": 60,
+        "show_tooltips": true,
+        "confirm_exit": true
+    },
+    "piece_identifier": {
+        "csv_path": "./data/Lego_Categories.csv",
+        "confidence_threshold": 0.7,
+        "save_unknown": true,
+        "unknown_dir": "unknown_pieces",
+        "element_id_lookup_path": "./data/element_id_lookup.csv"
+    },
+    "processing_queue": {
+        "queue_size": 100,
+        "priority_strategy": "exit_zone_first",
+        "enable_batching": false,
+        "batch_size": 5,
+        "batch_timeout": 2.0
+    },
+    "processing_workers": {
+        "num_workers": 3,
+        "worker_timeout": 1.0
+    }
+}
