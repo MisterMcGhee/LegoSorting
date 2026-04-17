@@ -24,9 +24,7 @@ Sorting Strategies:
 Configuration Mapping:
     {
         "sorting": {
-            "strategy": "primary",
-            "target_primary_category": "",
-            "target_secondary_category": "",
+            "mode": "design_id",
             "max_bins": 9,
             "overflow_bin": 0,
             "confidence_threshold": 0.7,
@@ -35,7 +33,12 @@ Configuration Mapping:
                 "Technic": 2
             },
             "max_pieces_per_bin": 50,
-            "bin_warning_threshold": 0.8
+            "bin_warning_threshold": 0.8,
+            "design_id": {
+                "tier": "primary",
+                "target_primary_category": "",
+                "target_secondary_category": ""
+            }
         },
         "processing_queue": {
             "queue_size": 100
@@ -888,8 +891,12 @@ class ProcessingConfigTab(BaseConfigTab):
             self.confidence_spin.blockSignals(True)
             self.queue_size_spin.blockSignals(True)
 
-            # Load strategy
-            strategy = config.get("strategy", "primary")
+            # Load the design-ID tier. The sorting config is nested under
+            # `design_id` in the current schema; fall back to the legacy flat
+            # keys so older config.json files still work while this tab only
+            # exposes design-ID mode.
+            design_id_cfg = config.get("design_id", {})
+            strategy = design_id_cfg.get("tier") or config.get("strategy", "primary")
             if strategy == "primary":
                 self.primary_radio.setChecked(True)
             elif strategy == "secondary":
@@ -898,8 +905,14 @@ class ProcessingConfigTab(BaseConfigTab):
                 self.tertiary_radio.setChecked(True)
 
             # Load target categories
-            target_primary = config.get("target_primary_category", "")
-            target_secondary = config.get("target_secondary_category", "")
+            target_primary = (
+                design_id_cfg.get("target_primary_category")
+                or config.get("target_primary_category", "")
+            )
+            target_secondary = (
+                design_id_cfg.get("target_secondary_category")
+                or config.get("target_secondary_category", "")
+            )
 
             # Load bin configuration
             self.max_bins_spin.setValue(config.get("max_bins", 9))
@@ -989,17 +1002,27 @@ class ProcessingConfigTab(BaseConfigTab):
         """Return current configuration as a dictionary."""
         strategy = self.get_current_strategy()
 
+        # Emit the mode-based schema. This tab only configures the design-ID
+        # mode — a bag-mode UI will be added as a follow-up.
         config = {
-            "strategy": strategy,
-            "target_primary_category": self.target_primary_combo.currentText() if strategy in ["secondary",
-                                                                                               "tertiary"] else "",
-            "target_secondary_category": self.target_secondary_combo.currentText() if strategy == "tertiary" else "",
+            "mode": "design_id",
             "max_bins": self.max_bins_spin.value(),
             "overflow_bin": 0,  # Always 0
             "confidence_threshold": self.confidence_spin.value(),
             "pre_assignments": self.pre_assignments.copy(),
             "max_pieces_per_bin": self.max_pieces_spin.value(),
-            "bin_warning_threshold": self.warning_threshold_spin.value()
+            "bin_warning_threshold": self.warning_threshold_spin.value(),
+            "design_id": {
+                "tier": strategy,
+                "target_primary_category": (
+                    self.target_primary_combo.currentText()
+                    if strategy in ("secondary", "tertiary") else ""
+                ),
+                "target_secondary_category": (
+                    self.target_secondary_combo.currentText()
+                    if strategy == "tertiary" else ""
+                ),
+            },
         }
 
         return config

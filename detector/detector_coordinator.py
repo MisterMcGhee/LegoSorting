@@ -58,6 +58,9 @@ class DetectorCoordinator:
             config_manager: Enhanced config manager instance (required)
             zone_manager: ZoneManager instance (optional, will be created if None)
         """
+        if config_manager is None:
+            raise ValueError("config_manager cannot be None")
+
         logger.info("Initializing DetectorCoordinator")
 
         # Store configuration manager

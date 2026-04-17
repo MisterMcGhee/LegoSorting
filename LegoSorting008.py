@@ -95,17 +95,25 @@ from hardware.chute_state_manager import create_chute_state_manager
 # LOGGING CONFIGURATION
 # ============================================================================
 
-# Configure logging before anything else
+# Console logging is configured at module load so early-bootstrap errors surface.
+# The file handler is attached later, after the config manager has loaded the
+# system.log_file setting (see LegoSorting008.__init__).
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('legosorting008.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _attach_log_file_handler(log_path: str) -> None:
+    """Attach a FileHandler to the root logger using the configured path."""
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setFormatter(
+        logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    )
+    logging.getLogger().addHandler(file_handler)
 
 
 # ============================================================================
@@ -166,6 +174,11 @@ class LegoSorting008(QObject):
         logger.info("Creating configuration manager...")
         self.config_manager: EnhancedConfigManager = create_config_manager()
         logger.info("✓ Configuration manager initialized")
+
+        # Attach file handler now that we can read the configured log path.
+        system_config = self.config_manager.get_module_config("system")
+        _attach_log_file_handler(system_config["log_file"])
+        logger.info(f"Logging to file: {system_config['log_file']}")
 
         # State management
         self.current_state = ApplicationState.STARTING

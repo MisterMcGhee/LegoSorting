@@ -40,7 +40,6 @@ from detector.detector_data_models import CapturePackage
 from processing.processing_data_models import (
     IdentifiedPiece,
     IdentificationResult,
-    CategoryInfo,
     BinAssignment
 )
 from processing.identification_api_handler import IdentificationAPIHandler
@@ -48,7 +47,6 @@ from processing.category_lookup_module import CategoryLookup
 from processing.element_id_lookup_module import ElementIDLookup
 from processing.bin_assignment_module import BinAssignmentModule
 from enhanced_config_manager import EnhancedConfigManager
-
 logger = logging.getLogger(__name__)
 
 
@@ -357,11 +355,10 @@ class ProcessingCoordinator:
             # ============================================================
             # STEP 4: BIN ASSIGNMENT
             # ============================================================
-            # Only run if we have categories (category lookup succeeded)
-            # Use the categories and sorting strategy to determine which
-            # physical bin this piece should go into
-            if identified_piece.primary_category:
-                self._run_bin_assignment(identified_piece)
+            # Delegate to the active SortingMode. Each mode handles its own
+            # "piece can't be sorted" case (returns "Unknown" → overflow), so
+            # there is no mode-agnostic gate to short-circuit here.
+            self._run_bin_assignment(identified_piece)
 
             # ============================================================
             # STEP 5: FINALIZE
@@ -595,31 +592,12 @@ class ProcessingCoordinator:
 
     def _run_bin_assignment(self, identified_piece: IdentifiedPiece) -> None:
         """
-        Run bin assignment step of pipeline.
+        Run bin assignment step of the pipeline.
 
-        Assigns a bin based on the piece's categories and configured
-        sorting strategy.
-
-        WHAT IT DOES:
-        - Takes the categories from category lookup
-        - Applies the sorting strategy (primary/secondary/tertiary)
-        - Determines which physical bin this piece should go to
-        - Updates the identified_piece with the bin number
-
-        SORTING STRATEGIES:
-        - Primary: Sort by primary category (Basic, Technic, etc.)
-        - Secondary: Sort by secondary category within target primary
-        - Tertiary: Sort by tertiary category within target primary+secondary
-
-        EXAMPLE:
-        - Strategy: Primary
-        - Primary category: "Basic"
-        - Bin number: 1 (if "Basic" is assigned to bin 1)
-
-        ERROR HANDLING:
-        If assignment fails, sets bin_number to 0 (overflow bin)
-
-        Called by: process_piece() as step 3 (only if categories found)
+        Passes the fully-populated IdentifiedPiece to the bin assignment
+        module, which delegates the "which sort key?" decision to the active
+        SortingMode (design-ID by tier, bag by element_id, etc.) and then
+        maps that key to a bin number.
 
         Args:
             identified_piece: Piece being processed (updated in place)
@@ -628,32 +606,18 @@ class ProcessingCoordinator:
             Updates identified_piece.bin_number
         """
         try:
-            logger.debug(f"Step 3: Bin assignment for piece {identified_piece.piece_id}")
+            logger.debug(f"Step 4: Bin assignment for piece {identified_piece.piece_id}")
 
-            # Create a CategoryInfo object from the identified piece data
-            # This packages up all the category information for the bin assignment module
-            category_info = CategoryInfo(
-                design_id=identified_piece.design_id,
-                primary_category=identified_piece.primary_category,
-                secondary_category=identified_piece.secondary_category,
-                tertiary_category=identified_piece.tertiary_category,
-                found_in_database=identified_piece.found_in_database
-            )
-
-            # Ask the bin assignment module which bin this should go to
-            # It will apply the strategy and return a bin number
-            bin_assignment = self.bin_assignment.assign_bin(category_info)
-
-            # Update the identified piece with the bin assignment result
-            # This copies the bin_number into our piece
+            bin_assignment = self.bin_assignment.assign_bin(identified_piece)
             identified_piece.update_from_bin_assignment(bin_assignment)
 
             logger.debug(f"Assigned to bin {bin_assignment.bin_number}")
 
         except Exception as e:
-            # Bin assignment should not fail, but catch just in case
-            # If it does fail, send to overflow bin (bin 0)
-            logger.error(f"Bin assignment error: {e}")
+            logger.error(
+                f"Bin assignment error for piece {identified_piece.piece_id}: {e}",
+                exc_info=True
+            )
             identified_piece.bin_number = 0  # Overflow bin
 
     # ========================================================================
