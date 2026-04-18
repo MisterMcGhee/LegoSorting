@@ -87,7 +87,9 @@ from processing.processing_data_models import IdentifiedPiece
 
 # Hardware pipeline modules
 from hardware.hardware_coordinator import HardwareCoordinator, create_hardware_coordinator
+from hardware.arduino_connection import create_arduino_connection
 from hardware.arduino_servo_module import create_arduino_servo_controller
+from hardware.arduino_motor_module import create_arduino_motor_controller
 from hardware.bin_capacity_module import create_bin_capacity_manager
 from hardware.chute_state_manager import create_chute_state_manager
 
@@ -207,7 +209,9 @@ class LegoSorting008(QObject):
         # Hardware pipeline
         self.hardware_coordinator: Optional[HardwareCoordinator] = None
         self.hardware_controller = None  # Alias for GUI compatibility
+        self.arduino_connection = None
         self.servo_controller = None
+        self.motor_controller = None
         self.bin_capacity_manager = None
         self.bin_assignment_module = None
 
@@ -243,7 +247,8 @@ class LegoSorting008(QObject):
 
         temp_arduino = None
         try:
-            temp_arduino = create_arduino_servo_controller(self.config_manager)
+            temp_connection = create_arduino_connection(self.config_manager)
+            temp_arduino = create_arduino_servo_controller(self.config_manager, temp_connection)
             logger.info("  ✓ Temporary arduino created")
         except Exception as e:
             logger.warning(f"  ⚠ Could not create temporary arduino: {e}")
@@ -437,15 +442,28 @@ class LegoSorting008(QObject):
             self.bin_capacity_manager = create_bin_capacity_manager(self.config_manager)
             logger.info("  ✓ Bin capacity manager created")
 
+            # Create shared Arduino connection (single serial port for servo + motors)
+            self.arduino_connection = create_arduino_connection(self.config_manager)
+            logger.info("  ✓ Arduino connection established")
+
             # Create servo controller
-            self.servo_controller = create_arduino_servo_controller(self.config_manager)
+            self.servo_controller = create_arduino_servo_controller(
+                self.config_manager, self.arduino_connection
+            )
             logger.info("  ✓ Servo controller created")
 
-            # Create hardware coordinator
+            # Create motor controller
+            self.motor_controller = create_arduino_motor_controller(
+                self.config_manager, self.arduino_connection
+            )
+            logger.info("  ✓ Motor controller created")
+
+            # Create hardware coordinator (motors auto-start inside if auto_start=True)
             self.hardware_coordinator = create_hardware_coordinator(
                 self.bin_capacity_manager,
                 self.servo_controller,
-                self.config_manager
+                self.config_manager,
+                self.motor_controller
             )
             self.hardware_controller = self.hardware_coordinator
             logger.info("  ✓ Hardware coordinator created")
@@ -843,6 +861,15 @@ class LegoSorting008(QObject):
                 logger.info("✓ Hardware released")
             except Exception as e:
                 logger.error(f"Error releasing hardware: {e}")
+
+        # Close shared Arduino serial connection (after coordinator has stopped motors/homed servo)
+        if self.arduino_connection:
+            try:
+                logger.info("Closing Arduino connection...")
+                self.arduino_connection.disconnect()
+                logger.info("✓ Arduino connection closed")
+            except Exception as e:
+                logger.error(f"Error closing Arduino connection: {e}")
 
         # Close GUIs
         if self.sorting_gui:

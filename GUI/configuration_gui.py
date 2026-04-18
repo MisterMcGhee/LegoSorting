@@ -1181,9 +1181,11 @@ def main():
         create_camera = None
 
     try:
+        from hardware.arduino_connection import create_arduino_connection
         from hardware.arduino_servo_module import create_arduino_servo_controller
     except ImportError:
         logger.warning("Arduino module not available")
+        create_arduino_connection = None
         create_arduino_servo_controller = None
 
     try:
@@ -1222,10 +1224,11 @@ def main():
             camera = None
 
     arduino = None
-    if create_arduino_servo_controller:
+    if create_arduino_connection and create_arduino_servo_controller:
         try:
             logger.info("Creating Arduino module...")
-            arduino = create_arduino_servo_controller(config_manager)
+            _connection = create_arduino_connection(config_manager)
+            arduino = create_arduino_servo_controller(config_manager, _connection)
             logger.info("✓ Arduino module created")
         except Exception as e:
             logger.warning(f"Could not create Arduino: {e}")
