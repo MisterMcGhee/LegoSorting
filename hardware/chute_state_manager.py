@@ -26,6 +26,8 @@ from enum import Enum
 from typing import Optional
 from dataclasses import dataclass
 
+from enhanced_config_manager import ModuleConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -263,7 +265,7 @@ def create_chute_state_manager(config_manager) -> ChuteStateManager:
     Returns:
         Initialized ChuteStateManager instance
     """
-    arduino_config = config_manager.get_module_config("arduino_servo")
-    fall_time_seconds = arduino_config.get("fall_time_seconds", 0.5)
+    chute_config = config_manager.get_module_config(ModuleConfig.CHUTE.value)
+    fall_time_seconds = chute_config["fall_time_seconds"]
 
     return ChuteStateManager(fall_time_seconds=fall_time_seconds)

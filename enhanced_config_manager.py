@@ -41,6 +41,7 @@ class ModuleConfig(Enum):
     SERVO = "servo"
     ARDUINO_SERVO = "arduino_servo"
     ARDUINO_MOTOR = "arduino_motor"
+    CHUTE = "chute"
     API = "api"
     SYSTEM = "system"
     UI = "ui"
@@ -143,7 +144,8 @@ class ConfigSchema:
                 "id_font_scale": 1.5,  # Font size for ID labels
                 "id_font_thickness": 2,  # Font thickness for ID labels
                 "save_captured_images": True,  # Save images to disk
-                "capture_directory": "LegoPictures"  # Directory for saved images
+                "capture_directory": "LegoPictures",  # Directory for saved images
+                "capture_valid_zone_only": True  # Only capture pieces in the valid zone
             },
 
             # =================================================================
@@ -162,19 +164,40 @@ class ConfigSchema:
 
             # =================================================================
             # SORTING MODULE
-            # Used by: bin_assignment_module.py
-            # Controls: How pieces are sorted into bins
+            # Used by: bin_assignment_module.py, processing/sorting_modes.py
+            # Controls: Which sorting mode is active and its parameters
+            #
+            # A sorting "mode" is the top-level choice of how pieces are routed
+            # to bins. Available modes:
+            #   - "design_id": route by shape category (Brickognize → category DB).
+            #                  Takes a "tier" sub-parameter: primary, secondary,
+            #                  or tertiary — each tier being a successive
+            #                  subdivision of the bulk feed.
+            #   - "bag":       route by the piece's original bag in a specific
+            #                  LEGO set, via element_id → bag_number inventory.
             # =================================================================
             ModuleConfig.SORTING.value: {
-                "strategy": "primary",  # Sorting level: "primary", "secondary", or "tertiary"
-                "target_primary_category": "",  # For secondary/tertiary: which primary to sort
-                "target_secondary_category": "",  # For tertiary: which secondary to sort
+                "mode": "design_id",  # "design_id" | "bag"
                 "max_bins": 7,  # Total bins available (bin 0 is overflow)
                 "overflow_bin": 0,  # Bin number for unknown/overflow pieces
                 "confidence_threshold": 0.7,  # Minimum API confidence to accept (0.0-1.0)
-                "pre_assignments": {},  # Pre-assign categories to bins: {"Basic": 1, "Technic": 4}
-                "max_pieces_per_bin": 50,  # ADD THIS
-                "bin_warning_threshold": 0.8
+                "pre_assignments": {},  # Pre-assign sort keys to bins: {"Basic": 1} or {"bag_1": 1}
+                "max_pieces_per_bin": 50,
+                "bin_warning_threshold": 0.8,
+
+                # Parameters for mode="design_id"
+                "design_id": {
+                    "tier": "primary",  # "primary" | "secondary" | "tertiary"
+                    "target_primary_category": "",  # required for tier="secondary" or "tertiary"
+                    "target_secondary_category": ""  # required for tier="tertiary"
+                },
+
+                # Parameters for mode="bag"
+                "bag": {
+                    "inventory_path": "",  # Path to inventory file (element_id,bag_number)
+                    "inventory_format": "csv",  # "csv" | "json"
+                    "set_id": ""  # Optional metadata, e.g. "75192"
+                }
             },
 
             # =================================================================
@@ -223,6 +246,16 @@ class ConfigSchema:
             },
 
             # =================================================================
+            # CHUTE MODULE
+            # Used by: hardware/chute_state_manager.py
+            # Controls: Chute timing parameters (how long a piece takes to fall
+            # after the servo positions). Independent of servo hardware.
+            # =================================================================
+            ModuleConfig.CHUTE.value: {
+                "fall_time_seconds": 0.5  # Time a piece takes to clear the chute
+            },
+
+            # =================================================================
             # API MODULE
             # Used by: identification_api_handler.py
             # Controls: Brickognize API communication
@@ -230,8 +263,6 @@ class ConfigSchema:
             ModuleConfig.API.value: {
                 "api_type": "rebrickable",  # API service type (for future expansion)
                 "api_key": "",  # API key (if required)
-                "cache_enabled": True,  # Cache API responses
-                "cache_dir": "api_cache",  # Directory for cached responses
                 "timeout": 10.0,  # API request timeout (seconds)
                 "retry_count": 3,  # Number of retry attempts
                 "rate_limit": 5.0,  # Requests per second limit
@@ -245,7 +276,8 @@ class ConfigSchema:
             # =================================================================
             ModuleConfig.SYSTEM.value: {
                 "threading_enabled": True,
-                "log_level": "INFO"
+                "log_level": "INFO",
+                "log_file": "legosorting008.log"
             },
             # =================================================================
             # UI MODULE
@@ -285,6 +317,7 @@ class ConfigSchema:
                 "confidence_threshold": 0.7,  # Minimum confidence for identification
                 "save_unknown": True,  # Log unknown pieces to CSV
                 "unknown_dir": "unknown_pieces",  # Directory for unknown piece logs
+                "unknown_pieces_csv": "data/unknown_pieces.csv",  # CSV file for unknown-piece log entries
                 "element_id_lookup_path": "./data/element_id_lookup.csv"  # Generated by tools/database_update_tool
             },
 
@@ -335,7 +368,7 @@ class ConfigSchema:
         required = {
             ModuleConfig.CAMERA.value: ["device_id"],
             ModuleConfig.DETECTOR.value: ["detector_type"],
-            ModuleConfig.SORTING.value: ["strategy", "max_bins"],
+            ModuleConfig.SORTING.value: ["mode", "max_bins"],
             ModuleConfig.API.value: ["api_type"],
             ModuleConfig.ARDUINO_SERVO.value: ["port", "baud_rate"],
             ModuleConfig.ARDUINO_MOTOR.value: [],  # all fields have safe defaults
@@ -396,12 +429,14 @@ class ConfigValidator:
         """
         Validate sorting configuration business rules.
 
+        Validates top-level sorting fields (mode, bin count, pre-assignments),
+        then delegates mode-specific validation to the active sorting mode.
+
         Checks:
-        - Strategy is valid ("primary", "secondary", or "tertiary")
-        - Secondary strategy has target_primary_category set
-        - Tertiary strategy has both target categories set
+        - Mode is a known value ("design_id" or "bag")
         - Bin count is reasonable (1-20)
         - Pre-assignments reference valid bin numbers
+        - Mode-specific fields are present and valid (delegated)
 
         Args:
             config: Sorting module configuration
@@ -411,33 +446,34 @@ class ConfigValidator:
         """
         errors = []
 
-        strategy = config.get("strategy")
-        if strategy not in ["primary", "secondary", "tertiary"]:
-            errors.append(f"Invalid sorting strategy: {strategy}")
+        # Validate mode name and delegate mode-specific checks.
+        # Imported locally because sorting_modes lives in the processing
+        # package, while this module sits at the project root.
+        from processing.sorting_modes import MODE_REGISTRY
 
-        # Secondary sorting requires specifying which primary to sort
-        if strategy == "secondary" and not config.get("target_primary_category"):
-            errors.append("Secondary sorting requires target_primary_category")
-
-        # Tertiary sorting requires both primary and secondary targets
-        if strategy == "tertiary":
-            if not config.get("target_primary_category"):
-                errors.append("Tertiary sorting requires target_primary_category")
-            if not config.get("target_secondary_category"):
-                errors.append("Tertiary sorting requires target_secondary_category")
+        mode = config.get("mode")
+        if mode not in MODE_REGISTRY:
+            errors.append(
+                f"Invalid sorting mode: {mode!r} "
+                f"(must be one of {sorted(MODE_REGISTRY.keys())})"
+            )
+        else:
+            errors.extend(MODE_REGISTRY[mode].validate_config(config))
 
         # Validate bin count is reasonable
         max_bins = config.get("max_bins", 0)
         if not (1 <= max_bins <= 20):
             errors.append(f"Invalid max_bins: {max_bins} (must be 1-20)")
 
-        # Check pre-assignments reference valid bins
+        # Check pre-assignments reference valid bins.
+        # Keys are mode-specific (category names, bag_N, etc.); we only
+        # verify that the target bin numbers are in range.
         pre_assignments = config.get("pre_assignments", {})
-        for category, bin_num in pre_assignments.items():
+        for key, bin_num in pre_assignments.items():
             if not isinstance(bin_num, int):
-                errors.append(f"Invalid bin number for {category}: {bin_num}")
+                errors.append(f"Invalid bin number for {key}: {bin_num}")
             elif not (1 <= bin_num <= max_bins):
-                errors.append(f"Bin {bin_num} for {category} out of range (1-{max_bins})")
+                errors.append(f"Bin {bin_num} for {key} out of range (1-{max_bins})")
 
         return errors
 

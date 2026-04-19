@@ -51,6 +51,9 @@ class ArduinoServoController:
             config_manager: Enhanced configuration manager instance
             connection:     Shared ArduinoConnection (serial transport)
         """
+        if config_manager is None:
+            raise ValueError("config_manager cannot be None")
+
         self.config_manager = config_manager
         self.connection = connection
 
