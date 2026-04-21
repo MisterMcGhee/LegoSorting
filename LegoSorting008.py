@@ -246,10 +246,12 @@ class LegoSorting008(QObject):
             logger.warning(f"  ⚠ Could not create temporary camera: {e}")
 
         temp_arduino = None
+        temp_motor_controller = None
         try:
             temp_connection = create_arduino_connection(self.config_manager)
             temp_arduino = create_arduino_servo_controller(self.config_manager, temp_connection)
-            logger.info("  ✓ Temporary arduino created")
+            temp_motor_controller = create_arduino_motor_controller(self.config_manager, temp_connection)
+            logger.info("  ✓ Temporary arduino + motor controller created")
         except Exception as e:
             logger.warning(f"  ⚠ Could not create temporary arduino: {e}")
 
@@ -266,7 +268,8 @@ class LegoSorting008(QObject):
             self.config_manager,
             camera=temp_camera,
             arduino=temp_arduino,
-            category_service=temp_category_service
+            category_service=temp_category_service,
+            motor_controller=temp_motor_controller
         )
 
         # Connect signals
