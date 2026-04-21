@@ -71,7 +71,7 @@ class ConfigurationGUI(QMainWindow):
 
     def __init__(self, config_manager: EnhancedConfigManager,
                  camera=None, arduino=None, category_service=None,
-                 parent=None):
+                 motor_controller=None, parent=None):
         """
         Initialize the configuration GUI.
 
@@ -80,6 +80,7 @@ class ConfigurationGUI(QMainWindow):
             camera: Optional camera module reference
             arduino: Optional arduino servo module reference
             category_service: Optional category hierarchy service reference
+            motor_controller: Optional ArduinoMotorController reference
             parent: Parent widget
         """
         super().__init__(parent)
@@ -89,6 +90,7 @@ class ConfigurationGUI(QMainWindow):
         self.camera = camera
         self.arduino = arduino
         self.category_service = category_service
+        self.motor_controller = motor_controller
 
         # Log what we received
         logger.info("=" * 60)
@@ -97,6 +99,7 @@ class ConfigurationGUI(QMainWindow):
         logger.info(f"  camera: {camera is not None}")
         logger.info(f"  arduino: {arduino is not None}")
         logger.info(f"  category_service: {category_service is not None}")
+        logger.info(f"  motor_controller: {motor_controller is not None}")
         if category_service is not None:
             logger.info(f"  category_service type: {type(category_service)}")
         logger.info("=" * 60)
@@ -402,7 +405,8 @@ class ConfigurationGUI(QMainWindow):
                      category_service=self.category_service)
 
         self.add_tab("Hardware", HardwareConfigTab, self.config_manager,
-                     arduino_module=self.arduino)
+                     arduino_module=self.arduino,
+                     motor_controller=self.motor_controller)
 
         logger.info(f"✓ Created {len(self.tabs)} configuration tabs")
 
@@ -657,6 +661,17 @@ class ConfigurationGUI(QMainWindow):
             except Exception as e:
                 logger.error(f"✗ Failed to reinitialize Arduino: {e}", exc_info=True)
                 hardware_reinit_status.append(("Arduino", False, str(e)))
+
+        # Reinitialize motor controller
+        if self.motor_controller:
+            try:
+                logger.info("Reloading motor speeds from config...")
+                self.motor_controller.reload_speeds_from_config()
+                hardware_reinit_status.append(("Motors", True, "Speeds reloaded from config"))
+                logger.info("✓ Motor speeds reloaded")
+            except Exception as e:
+                logger.error(f"✗ Failed to reload motor speeds: {e}", exc_info=True)
+                hardware_reinit_status.append(("Motors", False, str(e)))
 
         # Reinitialize Camera
         if self.camera:
@@ -1183,10 +1198,12 @@ def main():
     try:
         from hardware.arduino_connection import create_arduino_connection
         from hardware.arduino_servo_module import create_arduino_servo_controller
+        from hardware.arduino_motor_module import create_arduino_motor_controller
     except ImportError:
         logger.warning("Arduino module not available")
         create_arduino_connection = None
         create_arduino_servo_controller = None
+        create_arduino_motor_controller = None
 
     try:
         from processing.category_hierarchy_service import create_category_hierarchy_service
@@ -1224,12 +1241,16 @@ def main():
             camera = None
 
     arduino = None
+    motor_controller = None
     if create_arduino_connection and create_arduino_servo_controller:
         try:
             logger.info("Creating Arduino module...")
             _connection = create_arduino_connection(config_manager)
             arduino = create_arduino_servo_controller(config_manager, _connection)
-            logger.info("✓ Arduino module created")
+            logger.info("✓ Arduino servo module created")
+            if create_arduino_motor_controller:
+                motor_controller = create_arduino_motor_controller(config_manager, _connection)
+                logger.info("✓ Arduino motor controller created")
         except Exception as e:
             logger.warning(f"Could not create Arduino: {e}")
 
@@ -1259,12 +1280,14 @@ def main():
     logger.info(f"  camera: {camera is not None}")
     logger.info(f"  arduino: {arduino is not None}")
     logger.info(f"  category_service: {category_service is not None}")
+    logger.info(f"  motor_controller: {motor_controller is not None}")
 
     gui = ConfigurationGUI(
         config_manager,
         camera=camera,
         arduino=arduino,
-        category_service=category_service
+        category_service=category_service,
+        motor_controller=motor_controller
     )
 
     # Connect signals

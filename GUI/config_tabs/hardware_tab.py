@@ -87,17 +87,19 @@ class HardwareConfigTab(BaseConfigTab):
     positions_changed = pyqtSignal(dict)  # bin_positions
     simulation_mode_changed = pyqtSignal(bool)  # simulation_mode
 
-    def __init__(self, config_manager, arduino_module=None, parent=None):
+    def __init__(self, config_manager, arduino_module=None, motor_controller=None, parent=None):
         """
         Initialize hardware configuration tab.
 
         Args:
             config_manager: Configuration manager instance
             arduino_module: Optional arduino servo module reference
+            motor_controller: Optional ArduinoMotorController reference
             parent: Parent widget
         """
         # Store arduino module reference
         self.arduino_module = arduino_module
+        self.motor_controller = motor_controller
 
         # Current bin count (will be updated from processing tab)
         self.current_bin_count = 9  # Default
@@ -150,6 +152,9 @@ class HardwareConfigTab(BaseConfigTab):
 
         servo_group = self.create_servo_group()
         left_layout.addWidget(servo_group)
+
+        motor_group = self.create_motor_group()
+        left_layout.addWidget(motor_group)
 
         left_layout.addStretch()
         content_layout.addWidget(left_panel, stretch=1)
@@ -308,6 +313,219 @@ class HardwareConfigTab(BaseConfigTab):
 
         group.setLayout(layout)
         return group
+
+    def create_motor_group(self) -> QGroupBox:
+        """Create DC motor speed configuration group."""
+        group = QGroupBox("DC Motor Control (L298N)")
+        outer = QVBoxLayout()
+
+        # Status row
+        self.motor_status_label = QLabel("Status: Not Available")
+        self.motor_status_label.setStyleSheet("color: gray; font-weight: bold;")
+        outer.addWidget(self.motor_status_label)
+
+        # Per-motor rows: letter → (config_key, display_name)
+        self._motor_meta = {
+            'B': ('conveyor_speed_pct',  'Motor B — Conveyor'),
+            'C': ('feeder_c_speed_pct',  'Motor C — Feeder C'),
+            'D': ('feeder_d_speed_pct',  'Motor D — Feeder D'),
+            'E': ('feeder_e_speed_pct',  'Motor E — (future)'),
+        }
+        self.motor_speed_spins = {}
+        self.motor_pwm_labels  = {}
+
+        for letter, (_, display) in self._motor_meta.items():
+            row = QHBoxLayout()
+
+            lbl = QLabel(f"{display}:")
+            lbl.setFixedWidth(170)
+            row.addWidget(lbl)
+
+            spin = QSpinBox()
+            spin.setRange(0, 100)
+            spin.setSuffix(" %")
+            spin.setFixedWidth(75)
+            spin.valueChanged.connect(self.mark_modified)
+            spin.valueChanged.connect(
+                lambda val, lt=letter: self._update_pwm_label(lt, val)
+            )
+            self.motor_speed_spins[letter] = spin
+            row.addWidget(spin)
+
+            pwm_lbl = QLabel("PWM: 153")
+            pwm_lbl.setFixedWidth(70)
+            pwm_lbl.setStyleSheet("color: #7F8C8D;")
+            self.motor_pwm_labels[letter] = pwm_lbl
+            row.addWidget(pwm_lbl)
+
+            send_btn = QPushButton("▶ Send")
+            send_btn.setToolTip(f"Send current speed to {display} immediately (no save)")
+            send_btn.setFixedWidth(70)
+            send_btn.clicked.connect(
+                lambda checked, lt=letter: self._send_motor_speed(lt)
+            )
+            send_btn.setStyleSheet("""
+                QPushButton { background-color: #3498DB; color: white;
+                              padding: 4px 8px; border-radius: 3px; }
+                QPushButton:hover { background-color: #2980B9; }
+            """)
+            row.addWidget(send_btn)
+            row.addStretch()
+            outer.addLayout(row)
+
+        # Floor and auto-start row
+        floor_row = QHBoxLayout()
+        floor_lbl = QLabel("Min Duty Floor:")
+        floor_lbl.setFixedWidth(110)
+        floor_row.addWidget(floor_lbl)
+
+        self.min_duty_spin = QSpinBox()
+        self.min_duty_spin.setRange(0, 100)
+        self.min_duty_spin.setSuffix(" %")
+        self.min_duty_spin.setFixedWidth(75)
+        self.min_duty_spin.setToolTip(
+            "Minimum duty cycle applied to any non-zero speed request (prevents stall)"
+        )
+        self.min_duty_spin.valueChanged.connect(self.mark_modified)
+        floor_row.addWidget(self.min_duty_spin)
+
+        floor_row.addSpacing(20)
+        self.auto_start_check = QCheckBox("Auto-Start on init")
+        self.auto_start_check.setToolTip(
+            "Automatically start all motors when the hardware coordinator initialises"
+        )
+        self.auto_start_check.stateChanged.connect(self.mark_modified)
+        floor_row.addWidget(self.auto_start_check)
+        floor_row.addStretch()
+        outer.addLayout(floor_row)
+
+        # Action buttons
+        btn_row = QHBoxLayout()
+
+        start_btn = QPushButton("▶ Start All")
+        start_btn.setToolTip("Send configured speeds to all motors now")
+        start_btn.clicked.connect(self._start_all_motors)
+        start_btn.setStyleSheet("""
+            QPushButton { background-color: #27AE60; color: white;
+                          padding: 6px 12px; font-weight: bold; border-radius: 4px; }
+            QPushButton:hover { background-color: #229954; }
+        """)
+        btn_row.addWidget(start_btn)
+
+        stop_btn = QPushButton("⏹ Stop All")
+        stop_btn.setToolTip("Send stop command (PWM 0) to all motors")
+        stop_btn.clicked.connect(self._stop_all_motors)
+        stop_btn.setStyleSheet("""
+            QPushButton { background-color: #E74C3C; color: white;
+                          padding: 6px 12px; font-weight: bold; border-radius: 4px; }
+            QPushButton:hover { background-color: #C0392B; }
+        """)
+        btn_row.addWidget(stop_btn)
+
+        apply_btn = QPushButton("🔄 Apply All Speeds")
+        apply_btn.setToolTip("Send all spinbox values to hardware now (no save)")
+        apply_btn.clicked.connect(self._apply_all_speeds)
+        apply_btn.setStyleSheet("""
+            QPushButton { background-color: #F39C12; color: white;
+                          padding: 6px 12px; font-weight: bold; border-radius: 4px; }
+            QPushButton:hover { background-color: #E67E22; }
+        """)
+        btn_row.addWidget(apply_btn)
+        btn_row.addStretch()
+        outer.addLayout(btn_row)
+
+        group.setLayout(outer)
+        self._refresh_motor_status()
+        return group
+
+    # ========================================================================
+    # MOTOR HELPERS
+    # ========================================================================
+
+    def _update_pwm_label(self, letter: str, pct: int):
+        """Recompute and display the PWM value next to a motor spinbox."""
+        pwm = int(pct / 100.0 * 255)
+        if letter in self.motor_pwm_labels:
+            self.motor_pwm_labels[letter].setText(f"PWM: {pwm}")
+
+    def _refresh_motor_status(self):
+        """Update the motor status label to reflect controller availability."""
+        if self.motor_controller is None:
+            self.motor_status_label.setText("Status: Not Available (no controller passed)")
+            self.motor_status_label.setStyleSheet("color: gray; font-weight: bold;")
+        elif self.motor_controller.is_ready():
+            sim = self.motor_controller.connection.is_simulation()
+            if sim:
+                self.motor_status_label.setText("Status: Simulation Mode")
+                self.motor_status_label.setStyleSheet("color: #F39C12; font-weight: bold;")
+            else:
+                self.motor_status_label.setText("Status: Connected")
+                self.motor_status_label.setStyleSheet("color: #27AE60; font-weight: bold;")
+        else:
+            self.motor_status_label.setText("Status: Not Connected")
+            self.motor_status_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
+
+    def _send_motor_speed(self, letter: str):
+        """Send one motor's current spinbox value to hardware (no save)."""
+        if not self.motor_controller:
+            QMessageBox.warning(self, "No Motor Controller",
+                                "Motor controller not available.")
+            return
+        pct = self.motor_speed_spins[letter].value()
+        ok = self.motor_controller.set_motor_speed(letter, pct)
+        name = self._motor_meta[letter][1]
+        if ok:
+            self.motor_status_label.setText(f"Sent: {name} → {pct}%")
+            self.motor_status_label.setStyleSheet("color: #27AE60; font-weight: bold;")
+        else:
+            self.motor_status_label.setText(f"Failed to send {name}")
+            self.motor_status_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
+
+    def _start_all_motors(self):
+        """Start all motors at their currently-configured speeds."""
+        if not self.motor_controller:
+            QMessageBox.warning(self, "No Motor Controller",
+                                "Motor controller not available.")
+            return
+        ok = self.motor_controller.start_all()
+        if ok:
+            self.motor_status_label.setText("All motors started")
+            self.motor_status_label.setStyleSheet("color: #27AE60; font-weight: bold;")
+        else:
+            self.motor_status_label.setText("Start failed — check logs")
+            self.motor_status_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
+
+    def _stop_all_motors(self):
+        """Stop all motors (PWM 0)."""
+        if not self.motor_controller:
+            QMessageBox.warning(self, "No Motor Controller",
+                                "Motor controller not available.")
+            return
+        ok = self.motor_controller.stop_all()
+        if ok:
+            self.motor_status_label.setText("All motors stopped")
+            self.motor_status_label.setStyleSheet("color: #7F8C8D; font-weight: bold;")
+        else:
+            self.motor_status_label.setText("Stop failed — check logs")
+            self.motor_status_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
+
+    def _apply_all_speeds(self):
+        """Send every spinbox value to hardware in sequence (no save)."""
+        if not self.motor_controller:
+            QMessageBox.warning(self, "No Motor Controller",
+                                "Motor controller not available.")
+            return
+        all_ok = True
+        for letter in self._motor_meta:
+            pct = self.motor_speed_spins[letter].value()
+            if not self.motor_controller.set_motor_speed(letter, pct):
+                all_ok = False
+        if all_ok:
+            self.motor_status_label.setText("All speeds applied")
+            self.motor_status_label.setStyleSheet("color: #27AE60; font-weight: bold;")
+        else:
+            self.motor_status_label.setText("Some speeds failed — check logs")
+            self.motor_status_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
 
     def create_positions_group(self) -> QGroupBox:
         """Create bin positions configuration group."""
@@ -1047,6 +1265,33 @@ class HardwareConfigTab(BaseConfigTab):
                 # No positions - will auto-calculate when module is available
                 self.positions_status.setText("No positions configured - will auto-calculate")
 
+            # Load motor configuration
+            motor_config = self.get_module_config(ModuleConfig.ARDUINO_MOTOR.value)
+            if motor_config:
+                motor_key_map = {
+                    'B': 'conveyor_speed_pct',
+                    'C': 'feeder_c_speed_pct',
+                    'D': 'feeder_d_speed_pct',
+                    'E': 'feeder_e_speed_pct',
+                }
+                for letter, config_key in motor_key_map.items():
+                    spin = self.motor_speed_spins.get(letter)
+                    if spin:
+                        spin.blockSignals(True)
+                        spin.setValue(int(motor_config.get(config_key, 60)))
+                        spin.blockSignals(False)
+                        self._update_pwm_label(letter, spin.value())
+
+                self.min_duty_spin.blockSignals(True)
+                self.min_duty_spin.setValue(int(motor_config.get('min_duty_pct', 30)))
+                self.min_duty_spin.blockSignals(False)
+
+                self.auto_start_check.blockSignals(True)
+                self.auto_start_check.setChecked(motor_config.get('auto_start', True))
+                self.auto_start_check.blockSignals(False)
+
+            self._refresh_motor_status()
+
             # Clear modified flag
             self.clear_modified()
 
@@ -1074,10 +1319,21 @@ class HardwareConfigTab(BaseConfigTab):
             if self.arduino_module:
                 self.arduino_module.reload_positions_from_config()
 
+            # Save motor configuration
+            motor_config = self.get_motor_config()
+            self.config_manager.update_module_config(
+                ModuleConfig.ARDUINO_MOTOR.value,
+                motor_config
+            )
+
+            # Reload motor speeds from the now-saved config
+            if self.motor_controller:
+                self.motor_controller.reload_speeds_from_config()
+
             self.clear_modified()
             self.logger.info("Configuration saved successfully")
 
-            # Emit signal
+            # Emit signal for servo config (motor config change is internal)
             self.config_changed.emit(self.get_module_name(), config)
 
             return True
@@ -1122,6 +1378,17 @@ class HardwareConfigTab(BaseConfigTab):
         }
 
         return config
+
+    def get_motor_config(self) -> Dict[str, Any]:
+        """Return the current arduino_motor configuration from UI widgets."""
+        return {
+            'conveyor_speed_pct': self.motor_speed_spins['B'].value(),
+            'feeder_c_speed_pct': self.motor_speed_spins['C'].value(),
+            'feeder_d_speed_pct': self.motor_speed_spins['D'].value(),
+            'feeder_e_speed_pct': self.motor_speed_spins['E'].value(),
+            'min_duty_pct':       self.min_duty_spin.value(),
+            'auto_start':         self.auto_start_check.isChecked(),
+        }
 
     def validate(self) -> bool:
         """Validate current configuration."""
@@ -1200,6 +1467,13 @@ class HardwareConfigTab(BaseConfigTab):
             # Clear positions
             self.positions_table.setRowCount(0)
             self.positions_status.setText("No positions configured")
+
+            # Reset motor settings
+            for letter in self.motor_speed_spins:
+                self.motor_speed_spins[letter].setValue(60)
+                self._update_pwm_label(letter, 60)
+            self.min_duty_spin.setValue(30)
+            self.auto_start_check.setChecked(True)
 
             self.mark_modified()
             self.logger.info("Settings reset to defaults")
