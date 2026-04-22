@@ -237,12 +237,16 @@ class ConfigSchema:
             #   30–100   → running (maps linearly to PWM 77–255)
             # =================================================================
             ModuleConfig.ARDUINO_MOTOR.value: {
-                "conveyor_speed_pct":  60,   # Motor B — conveyor belt
-                "feeder_c_speed_pct":  60,   # Motor C — rotary feeder C
-                "feeder_d_speed_pct":  60,   # Motor D — rotary feeder D
-                "feeder_e_speed_pct":  60,   # Motor E — future feeder (unused)
-                "min_duty_pct":        30,   # Stall-prevention floor (%)
-                "auto_start":          True, # Start motors when coordinator starts
+                "conveyor_speed_pct":  60,    # Motor B — conveyor belt
+                "feeder_c_speed_pct":  60,    # Motor C — rotary feeder C
+                "feeder_d_speed_pct":  60,    # Motor D — rotary feeder D
+                "feeder_e_speed_pct":  60,    # Motor E — future feeder (unused)
+                "conveyor_reversed":   False, # Motor B direction (True = reverse)
+                "feeder_c_reversed":   False, # Motor C direction (True = reverse)
+                "feeder_d_reversed":   False, # Motor D direction (True = reverse)
+                "feeder_e_reversed":   False, # Motor E direction (True = reverse)
+                "min_duty_pct":        30,    # Stall-prevention floor (%)
+                "auto_start":          True,  # Start motors when coordinator starts
             },
 
             # =================================================================

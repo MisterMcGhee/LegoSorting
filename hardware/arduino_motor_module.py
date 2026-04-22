@@ -15,8 +15,9 @@ MOTOR LAYOUT (from LegoSorter_MotorControl.ino):
     E       Future feeder   #2      EN5
 
 COMMAND PROTOCOL:
-    Sends "LETTER,VALUE\\n" where VALUE is a PWM duty cycle in [-255, 255].
-    All sorter motors run forward-only, so values are always 0..255.
+    Sends "LETTER,VALUE\\n" where VALUE is a signed PWM duty cycle in [-255, 255].
+    Positive values run forward; negative values run in reverse.
+    Magnitude is PWM 0..255.
 
 SPEED MODEL:
     Speeds are stored and configured as percentages (0–100).
@@ -41,18 +42,18 @@ DOES NOT:
 
 import logging
 import threading
-from typing import Dict
+from typing import Dict, Optional
 from enhanced_config_manager import EnhancedConfigManager, ModuleConfig
 from hardware.arduino_connection import ArduinoConnection
 
 logger = logging.getLogger(__name__)
 
-# Map of Arduino motor letters to their config key and display name
+# Map of Arduino motor letters to (speed_config_key, reversed_config_key, display_name)
 MOTORS: Dict[str, tuple] = {
-    'B': ('conveyor_speed_pct',  'Conveyor'),
-    'C': ('feeder_c_speed_pct',  'Feeder C'),
-    'D': ('feeder_d_speed_pct',  'Feeder D'),
-    'E': ('feeder_e_speed_pct',  'Feeder E (future)'),
+    'B': ('conveyor_speed_pct', 'conveyor_reversed',  'Conveyor'),
+    'C': ('feeder_c_speed_pct', 'feeder_c_reversed',  'Feeder C'),
+    'D': ('feeder_d_speed_pct', 'feeder_d_reversed',  'Feeder D'),
+    'E': ('feeder_e_speed_pct', 'feeder_e_reversed',  'Feeder E (future)'),
 }
 
 
@@ -85,8 +86,13 @@ class ArduinoMotorController:
 
         # In-memory speed table {letter: pct}
         self._speeds: Dict[str, int] = {}
-        for letter, (config_key, _) in MOTORS.items():
+        for letter, (config_key, rev_key, _) in MOTORS.items():
             self._speeds[letter] = int(motor_config.get(config_key, 60))
+
+        # In-memory direction table {letter: reversed}
+        self._reversed: Dict[str, bool] = {}
+        for letter, (_, rev_key, _) in MOTORS.items():
+            self._reversed[letter] = bool(motor_config.get(rev_key, False))
 
         # =====================================================================
         # STATE
@@ -119,6 +125,11 @@ class ArduinoMotorController:
         """Convert a (clamped) percentage to a PWM duty value 0–255."""
         return int(self._clamp(pct) / 100.0 * 255)
 
+    def _pct_to_signed_pwm(self, pct: int, reversed_: bool) -> int:
+        """Return signed PWM: negative means reverse, positive means forward."""
+        pwm = self._pct_to_pwm(pct)
+        return -pwm if reversed_ else pwm
+
     # -------------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------------
@@ -140,20 +151,22 @@ class ArduinoMotorController:
             logger.info("=" * 60)
 
             all_ok = True
-            for letter, (config_key, name) in MOTORS.items():
+            for letter, (_, __, name) in MOTORS.items():
                 pct = self._speeds[letter]
                 clamped = self._clamp(pct)
-                pwm = self._pct_to_pwm(pct)
+                rev = self._reversed[letter]
+                signed_pwm = self._pct_to_signed_pwm(pct, rev)
 
                 if 0 < pct < self.min_duty_pct:
                     logger.warning(
                         f"  {name} ({letter}): requested {pct}% is below floor "
-                        f"{self.min_duty_pct}% — clamped to {clamped}% (PWM {pwm})"
+                        f"{self.min_duty_pct}% — clamped to {clamped}% (PWM {abs(signed_pwm)})"
                     )
 
-                ok = self.connection.send_command(letter, pwm)
+                ok = self.connection.send_command(letter, signed_pwm)
                 if ok:
-                    logger.info(f"  ✓ {name} ({letter}): {clamped}% → PWM {pwm}")
+                    dir_str = "REV" if rev else "FWD"
+                    logger.info(f"  ✓ {name} ({letter}): {clamped}% {dir_str} → PWM {signed_pwm}")
                 else:
                     logger.error(f"  ✗ {name} ({letter}): failed to send command")
                     all_ok = False
@@ -172,7 +185,7 @@ class ArduinoMotorController:
         with self.lock:
             logger.info("Stopping all motors")
             all_ok = True
-            for letter, (_, name) in MOTORS.items():
+            for letter, (_, __, name) in MOTORS.items():
                 ok = self.connection.send_command(letter, 0)
                 if ok:
                     logger.info(f"  ✓ {name} ({letter}): stopped")
@@ -183,15 +196,16 @@ class ArduinoMotorController:
             self._running = False
             return all_ok
 
-    def set_motor_speed(self, letter: str, pct: int) -> bool:
+    def set_motor_speed(self, letter: str, pct: int, reversed_: Optional[bool] = None) -> bool:
         """
         Adjust a single motor speed at runtime.
 
         Does NOT save to config — use the config GUI for persistent changes.
 
         Args:
-            letter: Motor identifier ('B', 'C', 'D', or 'E')
-            pct:    Speed percentage (0 = stop, 30–100 = running)
+            letter:    Motor identifier ('B', 'C', 'D', or 'E')
+            pct:       Speed percentage (0 = stop, 30–100 = running)
+            reversed_: If provided, updates the in-memory direction for this motor
 
         Returns:
             True if command sent successfully
@@ -206,9 +220,13 @@ class ArduinoMotorController:
                 logger.error("Motor controller not initialized")
                 return False
 
-            _, name = MOTORS[letter]
+            if reversed_ is not None:
+                self._reversed[letter] = reversed_
+
+            _, __, name = MOTORS[letter]
             clamped = self._clamp(pct)
-            pwm = self._pct_to_pwm(pct)
+            rev = self._reversed[letter]
+            signed_pwm = self._pct_to_signed_pwm(pct, rev)
 
             if 0 < pct < self.min_duty_pct:
                 logger.warning(
@@ -216,10 +234,11 @@ class ArduinoMotorController:
                     f"{self.min_duty_pct}% — clamped to {clamped}%"
                 )
 
-            ok = self.connection.send_command(letter, pwm)
+            ok = self.connection.send_command(letter, signed_pwm)
             if ok:
                 self._speeds[letter] = pct  # record the user-intent value
-                logger.info(f"{name} ({letter}): set to {clamped}% (PWM {pwm})")
+                dir_str = "REV" if rev else "FWD"
+                logger.info(f"{name} ({letter}): set to {clamped}% {dir_str} (PWM {signed_pwm})")
             else:
                 logger.error(f"{name} ({letter}): failed to send speed command")
 
@@ -227,7 +246,7 @@ class ArduinoMotorController:
 
     def reload_speeds_from_config(self) -> bool:
         """
-        Re-read motor speeds from config and re-apply to running motors.
+        Re-read motor speeds and direction flags from config and re-apply to running motors.
 
         Intended to be called after the user edits speeds in the setup GUI.
 
@@ -239,11 +258,14 @@ class ArduinoMotorController:
                 motor_config = self.config_manager.get_module_config(
                     ModuleConfig.ARDUINO_MOTOR.value
                 )
-                old = self._speeds.copy()
-                for letter, (config_key, _) in MOTORS.items():
+                old_speeds = self._speeds.copy()
+                old_reversed = self._reversed.copy()
+                for letter, (config_key, rev_key, _) in MOTORS.items():
                     self._speeds[letter] = int(motor_config.get(config_key, 60))
+                    self._reversed[letter] = bool(motor_config.get(rev_key, False))
                 self.min_duty_pct = int(motor_config.get('min_duty_pct', 30))
-                logger.info(f"Motor speeds reloaded from config: {old} → {self._speeds}")
+                logger.info(f"Motor speeds reloaded from config: {old_speeds} → {self._speeds}")
+                logger.info(f"Motor directions reloaded: {old_reversed} → {self._reversed}")
 
                 if self._running:
                     return self.start_all()
@@ -270,13 +292,16 @@ class ArduinoMotorController:
         """Return status summary for logging or GUI display."""
         with self.lock:
             speeds_display = {}
-            for letter, (_, name) in MOTORS.items():
+            for letter, (_, __, name) in MOTORS.items():
                 pct = self._speeds[letter]
+                rev = self._reversed[letter]
                 speeds_display[letter] = {
                     'name': name,
                     'requested_pct': pct,
                     'effective_pct': self._clamp(pct),
                     'pwm': self._pct_to_pwm(pct),
+                    'reversed': rev,
+                    'signed_pwm': self._pct_to_signed_pwm(pct, rev),
                 }
             return {
                 'initialized': self._initialized,
@@ -295,9 +320,13 @@ class ArduinoMotorController:
         logger.info(f"Mode: {'SIMULATION' if conn['simulation_mode'] else 'HARDWARE'}")
         logger.info(f"Ready: {self._initialized}")
         logger.info(f"Min duty floor: {self.min_duty_pct}%")
-        for letter, (_, name) in MOTORS.items():
+        for letter, (_, __, name) in MOTORS.items():
             pct = self._speeds[letter]
-            logger.info(f"  {name} ({letter}): {pct}% configured → PWM {self._pct_to_pwm(pct)}")
+            rev = self._reversed[letter]
+            dir_str = "REV" if rev else "FWD"
+            logger.info(
+                f"  {name} ({letter}): {pct}% {dir_str} → PWM {self._pct_to_signed_pwm(pct, rev)}"
+            )
         logger.info("=" * 60)
 
     # -------------------------------------------------------------------------

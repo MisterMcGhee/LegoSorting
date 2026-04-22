@@ -448,20 +448,22 @@ class HardwareCoordinator:
     # MOTOR CONTROL (pass-through to ArduinoMotorController)
     # ========================================================================
 
-    def set_motor_speed(self, motor_letter: str, speed_pct: int) -> bool:
+    def set_motor_speed(self, motor_letter: str, speed_pct: int,
+                        reversed_: bool = None) -> bool:
         """
         Adjust a single motor speed at runtime (e.g. from the setup GUI).
 
         Args:
             motor_letter: 'B' (conveyor), 'C', 'D', or 'E' (feeders)
             speed_pct:    Speed percentage — 0 = stop, 30–100 = running
+            reversed_:    If provided, updates the in-memory direction for this motor
 
         Returns:
             True if command sent successfully, False if no motor controller
             is configured or the command fails.
         """
         if self.motor:
-            return self.motor.set_motor_speed(motor_letter, speed_pct)
+            return self.motor.set_motor_speed(motor_letter, speed_pct, reversed_)
         logger.warning("set_motor_speed called but no motor controller is configured")
         return False
 

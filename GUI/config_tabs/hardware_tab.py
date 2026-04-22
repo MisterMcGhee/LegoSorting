@@ -333,6 +333,7 @@ class HardwareConfigTab(BaseConfigTab):
         }
         self.motor_speed_spins = {}
         self.motor_pwm_labels  = {}
+        self.motor_reversed_checks = {}
 
         for letter, (_, display) in self._motor_meta.items():
             row = QHBoxLayout()
@@ -357,6 +358,18 @@ class HardwareConfigTab(BaseConfigTab):
             pwm_lbl.setStyleSheet("color: #7F8C8D;")
             self.motor_pwm_labels[letter] = pwm_lbl
             row.addWidget(pwm_lbl)
+
+            rev_check = QCheckBox("Rev")
+            rev_check.setToolTip(f"Run {display} in reverse direction")
+            rev_check.setFixedWidth(50)
+            rev_check.stateChanged.connect(self.mark_modified)
+            rev_check.stateChanged.connect(
+                lambda state, lt=letter: self._update_pwm_label(
+                    lt, self.motor_speed_spins[lt].value()
+                )
+            )
+            self.motor_reversed_checks[letter] = rev_check
+            row.addWidget(rev_check)
 
             send_btn = QPushButton("▶ Send")
             send_btn.setToolTip(f"Send current speed to {display} immediately (no save)")
@@ -443,10 +456,13 @@ class HardwareConfigTab(BaseConfigTab):
     # ========================================================================
 
     def _update_pwm_label(self, letter: str, pct: int):
-        """Recompute and display the PWM value next to a motor spinbox."""
+        """Recompute and display the signed PWM value next to a motor spinbox."""
         pwm = int(pct / 100.0 * 255)
+        rev_check = self.motor_reversed_checks.get(letter)
+        is_rev = rev_check.isChecked() if rev_check else False
+        signed = -pwm if is_rev else pwm
         if letter in self.motor_pwm_labels:
-            self.motor_pwm_labels[letter].setText(f"PWM: {pwm}")
+            self.motor_pwm_labels[letter].setText(f"PWM: {signed}")
 
     def _refresh_motor_status(self):
         """Update the motor status label to reflect controller availability."""
@@ -472,7 +488,8 @@ class HardwareConfigTab(BaseConfigTab):
                                 "Motor controller not available.")
             return
         pct = self.motor_speed_spins[letter].value()
-        ok = self.motor_controller.set_motor_speed(letter, pct)
+        rev = self.motor_reversed_checks[letter].isChecked()
+        ok = self.motor_controller.set_motor_speed(letter, pct, reversed_=rev)
         name = self._motor_meta[letter][1]
         if ok:
             self.motor_status_label.setText(f"Sent: {name} → {pct}%")
@@ -518,7 +535,8 @@ class HardwareConfigTab(BaseConfigTab):
         all_ok = True
         for letter in self._motor_meta:
             pct = self.motor_speed_spins[letter].value()
-            if not self.motor_controller.set_motor_speed(letter, pct):
+            rev = self.motor_reversed_checks[letter].isChecked()
+            if not self.motor_controller.set_motor_speed(letter, pct, reversed_=rev):
                 all_ok = False
         if all_ok:
             self.motor_status_label.setText("All speeds applied")
@@ -1282,6 +1300,20 @@ class HardwareConfigTab(BaseConfigTab):
                         spin.blockSignals(False)
                         self._update_pwm_label(letter, spin.value())
 
+                motor_rev_map = {
+                    'B': 'conveyor_reversed',
+                    'C': 'feeder_c_reversed',
+                    'D': 'feeder_d_reversed',
+                    'E': 'feeder_e_reversed',
+                }
+                for letter, rev_key in motor_rev_map.items():
+                    chk = self.motor_reversed_checks.get(letter)
+                    if chk:
+                        chk.blockSignals(True)
+                        chk.setChecked(bool(motor_config.get(rev_key, False)))
+                        chk.blockSignals(False)
+                        self._update_pwm_label(letter, self.motor_speed_spins[letter].value())
+
                 self.min_duty_spin.blockSignals(True)
                 self.min_duty_spin.setValue(int(motor_config.get('min_duty_pct', 30)))
                 self.min_duty_spin.blockSignals(False)
@@ -1386,6 +1418,10 @@ class HardwareConfigTab(BaseConfigTab):
             'feeder_c_speed_pct': self.motor_speed_spins['C'].value(),
             'feeder_d_speed_pct': self.motor_speed_spins['D'].value(),
             'feeder_e_speed_pct': self.motor_speed_spins['E'].value(),
+            'conveyor_reversed':  self.motor_reversed_checks['B'].isChecked(),
+            'feeder_c_reversed':  self.motor_reversed_checks['C'].isChecked(),
+            'feeder_d_reversed':  self.motor_reversed_checks['D'].isChecked(),
+            'feeder_e_reversed':  self.motor_reversed_checks['E'].isChecked(),
             'min_duty_pct':       self.min_duty_spin.value(),
             'auto_start':         self.auto_start_check.isChecked(),
         }
@@ -1471,6 +1507,8 @@ class HardwareConfigTab(BaseConfigTab):
             # Reset motor settings
             for letter in self.motor_speed_spins:
                 self.motor_speed_spins[letter].setValue(60)
+                if letter in self.motor_reversed_checks:
+                    self.motor_reversed_checks[letter].setChecked(False)
                 self._update_pwm_label(letter, 60)
             self.min_duty_spin.setValue(30)
             self.auto_start_check.setChecked(True)

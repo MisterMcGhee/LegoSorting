@@ -1,15 +1,24 @@
 /*
  * LegoSorter_Servo.ino
- * 
+ *
  * Arduino sketch for Lego Sorting Machine servo control
- * 
+ *
  * PROTOCOL:
- * - Receives: "A,{angle}\n" (e.g., "A,90\n")
- * 
+ * - Receives: "LETTER,VALUE\n"
+ * - Servo (letter A): VALUE is angle 0–180 degrees  (e.g., "A,90\n")
+ * - Motors (letters B/C/D/E): VALUE is signed PWM [-255, 255]
+ *     Positive → forward  (IN1 HIGH / IN2 LOW on L298N)
+ *     Negative → reverse  (IN1 LOW  / IN2 HIGH on L298N)
+ *     Zero     → stop     (both LOW)
+ *
+ * NOTE: The motor sketch (LegoSorter_MotorControl.ino) is a separate file
+ * flashed to the same Arduino. It must handle negative PWM values by
+ * extracting sign for direction and abs(value) for the EN pin analogWrite.
+ *
  * HARDWARE:
  * - Servo connected to pin 9
  * - Supports standard servo (0-180 degrees)
- * 
+ *
  * DESIGN PHILOSOPHY:
  * - Minimal sketch - Python does validation
  * - Fast execution - no redundant checks
